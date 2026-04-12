@@ -31,3 +31,4 @@ docs/.astro/
 # Test coverage
 coverage/
 *.lcov
+/plans/
