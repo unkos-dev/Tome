@@ -59,21 +59,26 @@ impl FromRequestParts<AppState> for CurrentUser {
                 .await
                 .map_err(|e| AppError::Internal(e.into()))?;
 
+            // Iterate all tokens to avoid timing side-channel that leaks token position.
+            let mut matched_token_id = None;
             for token in &tokens {
                 if crate::auth::token::verify_device_token(password, &token.token_hash) {
-                    // Update last_used_at (fire-and-forget)
-                    let pool = state.pool.clone();
-                    let token_id = token.id;
-                    tokio::spawn(async move {
-                        let _ = device_token::update_last_used(&pool, token_id).await;
-                    });
-
-                    return Ok(CurrentUser {
-                        user_id: u.id,
-                        role: u.role,
-                        is_child: u.is_child,
-                    });
+                    matched_token_id = Some(token.id);
                 }
+            }
+
+            if let Some(token_id) = matched_token_id {
+                // Update last_used_at (fire-and-forget)
+                let pool = state.pool.clone();
+                tokio::spawn(async move {
+                    let _ = device_token::update_last_used(&pool, token_id).await;
+                });
+
+                return Ok(CurrentUser {
+                    user_id: u.id,
+                    role: u.role,
+                    is_child: u.is_child,
+                });
             }
 
             return Err(AppError::Unauthorized);

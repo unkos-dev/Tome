@@ -39,19 +39,15 @@ async fn create_token(
         return Err(AppError::Validation("name must be 1-255 characters".into()));
     }
 
-    let count = device_token::count_active_for_user(&state.pool, current_user.user_id)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
-    if count >= 10 {
-        return Err(AppError::Validation(
-            "maximum of 10 active device tokens per user".into(),
-        ));
-    }
-
     let (plaintext, hash) = generate_device_token();
-    let dt = device_token::create(&state.pool, current_user.user_id, &body.name, &hash)
+    let dt = device_token::create_with_limit(&state.pool, current_user.user_id, &body.name, &hash)
         .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+        .map_err(|e| match e {
+            device_token::CreateError::LimitExceeded => {
+                AppError::Validation("maximum of 10 active device tokens per user".into())
+            }
+            device_token::CreateError::Db(e) => AppError::Internal(e.into()),
+        })?;
 
     Ok((
         StatusCode::CREATED,
@@ -172,7 +168,6 @@ mod tests {
         // Empty name
         let response = server
             .post("/api/tokens")
-            .authorization_bearer(&basic)
             .add_header(axum::http::header::AUTHORIZATION, format!("Basic {basic}"))
             .json(&serde_json::json!({"name": ""}))
             .await;

@@ -15,6 +15,7 @@ pub struct DeviceToken {
     pub revoked_at: Option<OffsetDateTime>,
 }
 
+#[cfg(test)]
 pub async fn create(
     pool: &PgPool,
     user_id: Uuid,
@@ -59,14 +60,53 @@ pub async fn revoke(pool: &PgPool, id: Uuid, user_id: Uuid) -> Result<bool, sqlx
     Ok(result.rows_affected() > 0)
 }
 
-pub async fn count_active_for_user(pool: &PgPool, user_id: Uuid) -> Result<i64, sqlx::Error> {
+#[derive(Debug)]
+pub enum CreateError {
+    LimitExceeded,
+    Db(sqlx::Error),
+}
+
+/// Atomically check the active token count and insert if under the limit.
+/// Uses a transaction with SELECT FOR UPDATE to prevent TOCTOU races.
+const MAX_TOKENS_PER_USER: i64 = 10;
+
+pub async fn create_with_limit(
+    pool: &PgPool,
+    user_id: Uuid,
+    name: &str,
+    token_hash: &str,
+) -> Result<DeviceToken, CreateError> {
+    let mut tx = pool.begin().await.map_err(CreateError::Db)?;
+
+    // Lock the user's token rows to serialize concurrent creates
     let row: (i64,) = sqlx::query_as(
-        "SELECT count(*) FROM device_tokens WHERE user_id = $1 AND revoked_at IS NULL",
+        "SELECT count(*) FROM device_tokens \
+         WHERE user_id = $1 AND revoked_at IS NULL \
+         FOR UPDATE",
     )
     .bind(user_id)
-    .fetch_one(pool)
-    .await?;
-    Ok(row.0)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(CreateError::Db)?;
+
+    if row.0 >= MAX_TOKENS_PER_USER {
+        return Err(CreateError::LimitExceeded);
+    }
+
+    let dt = sqlx::query_as::<_, DeviceToken>(
+        "INSERT INTO device_tokens (user_id, name, token_hash) \
+         VALUES ($1, $2, $3) \
+         RETURNING id, user_id, name, token_hash, last_used_at, created_at, revoked_at",
+    )
+    .bind(user_id)
+    .bind(name)
+    .bind(token_hash)
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(CreateError::Db)?;
+
+    tx.commit().await.map_err(CreateError::Db)?;
+    Ok(dt)
 }
 
 pub async fn update_last_used(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
