@@ -2,3 +2,4 @@
 
 pub mod epub;
 pub mod ingestion;
+pub mod metadata;

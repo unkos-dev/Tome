@@ -3,3 +3,4 @@
 pub mod device_token;
 pub mod ingestion_job;
 pub mod user;
+pub mod work;

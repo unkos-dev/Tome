@@ -7,9 +7,10 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 use crate::config::{CleanupMode, Config, SUPPORTED_FORMATS};
-use crate::models::ingestion_job;
+use crate::models::{ingestion_job, work};
 use crate::services::epub::{self, ValidationOutcome};
 use crate::services::ingestion::{cleanup, copier, format_filter, path_template, quarantine};
+use crate::services::metadata;
 
 #[derive(Debug)]
 pub struct ScanResult {
@@ -340,89 +341,149 @@ async fn process_file(
 
     // Step 4.5: EPUB structural validation and auto-repair.
     // Only applies to EPUB files; other formats pass through as 'valid'.
-    let (validation_status_str, accessibility_metadata): (&'static str, Option<serde_json::Value>) =
-        if ext == "epub" {
-            let lib_file = library_path.join(&final_relative);
-            let validation = {
-                let lib_file = lib_file.clone();
-                tokio::task::spawn_blocking(move || epub::validate_and_repair(&lib_file)).await
-            };
-
-            match validation {
-                Ok(Ok(report)) => {
-                    tracing::info!(
-                        path = %lib_file.display(),
-                        outcome = ?report.outcome,
-                        issues = report.issues.len(),
-                        "epub validation complete"
-                    );
-                    let a11y = report.accessibility_metadata;
-                    let issues = report.issues;
-                    match report.outcome {
-                        ValidationOutcome::Quarantined => {
-                            let lib_file_str = lib_file.display().to_string();
-                            let _ = tokio::task::spawn_blocking(move || {
-                                if let Err(e) = std::fs::remove_file(&lib_file_str) {
-                                    tracing::warn!(
-                                        path = %lib_file_str,
-                                        error = %e,
-                                        "failed to remove library file for quarantined EPUB"
-                                    );
-                                }
-                            })
-                            .await;
-                            let reason = issues
-                                .iter()
-                                .map(|i| format!("{:?}", i.kind))
-                                .collect::<Vec<_>>()
-                                .join("; ");
-                            quarantine_async(&source, &quarantine_path, &reason).await;
-                            return ProcessResult::Failed(format!("EPUB quarantined: {reason}"));
-                        }
-                        ValidationOutcome::Clean => ("valid", a11y),
-                        ValidationOutcome::Repaired => ("repaired", a11y),
-                        ValidationOutcome::Degraded => ("degraded", a11y),
-                    }
-                }
-                Ok(Err(e)) => {
-                    tracing::warn!(error = %e, "epub validation error; proceeding as degraded");
-                    ("degraded", None)
-                }
-                Err(e) => return ProcessResult::Failed(format!("spawn_blocking panicked: {e}")),
-            }
-        } else {
-            ("valid", None)
+    let (validation_status_str, accessibility_metadata, opf_data): (
+        &'static str,
+        Option<serde_json::Value>,
+        Option<epub::opf_layer::OpfData>,
+    ) = if ext == "epub" {
+        let lib_file = library_path.join(&final_relative);
+        let validation = {
+            let lib_file = lib_file.clone();
+            tokio::task::spawn_blocking(move || epub::validate_and_repair(&lib_file)).await
         };
 
-    // Step 5: Create work + manifestation in a single CTE
-    let title = vars.get("Title").cloned().unwrap_or("Unknown".into());
-    let result = sqlx::query(
-        "WITH new_work AS ( \
-            INSERT INTO works (title, sort_title) VALUES ($1, $2) RETURNING id \
-         ) \
-         INSERT INTO manifestations \
-             (work_id, format, file_path, file_hash, file_size_bytes, ingestion_status, \
-              validation_status, accessibility_metadata) \
-         SELECT id, $3::manifestation_format, $4, $5, $6, \
-                'complete'::ingestion_status, $7::validation_status, $8 FROM new_work",
-    )
-    .bind(&title)
-    .bind(&title) // sort_title = title for now
-    .bind(format_str)
-    .bind(&dest_path_str)
-    .bind(&copy_result.sha256)
-    .bind(copy_result.file_size as i64)
-    .bind(validation_status_str)
-    .bind(accessibility_metadata)
-    .execute(pool)
-    .await;
+        match validation {
+            Ok(Ok(report)) => {
+                tracing::info!(
+                    path = %lib_file.display(),
+                    outcome = ?report.outcome,
+                    issues = report.issues.len(),
+                    "epub validation complete"
+                );
+                let a11y = report.accessibility_metadata;
+                let opf = report.opf_data;
+                let issues = report.issues;
+                match report.outcome {
+                    ValidationOutcome::Quarantined => {
+                        let lib_file_str = lib_file.display().to_string();
+                        let _ = tokio::task::spawn_blocking(move || {
+                            if let Err(e) = std::fs::remove_file(&lib_file_str) {
+                                tracing::warn!(
+                                    path = %lib_file_str,
+                                    error = %e,
+                                    "failed to remove library file for quarantined EPUB"
+                                );
+                            }
+                        })
+                        .await;
+                        let reason = issues
+                            .iter()
+                            .map(|i| format!("{:?}", i.kind))
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        quarantine_async(&source, &quarantine_path, &reason).await;
+                        return ProcessResult::Failed(format!("EPUB quarantined: {reason}"));
+                    }
+                    ValidationOutcome::Clean => ("valid", a11y, opf),
+                    ValidationOutcome::Repaired => ("repaired", a11y, opf),
+                    ValidationOutcome::Degraded => ("degraded", a11y, opf),
+                }
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(error = %e, "epub validation error; proceeding as degraded");
+                ("degraded", None, None)
+            }
+            Err(e) => return ProcessResult::Failed(format!("spawn_blocking panicked: {e}")),
+        }
+    } else {
+        ("valid", None, None)
+    };
 
-    match result {
-        Ok(_) => ProcessResult::Complete,
+    // Step 5: Extract metadata and create work + manifestation
+    let extracted = opf_data.as_ref().map(metadata::extractor::extract);
+
+    // Compute metadata-based path if extraction succeeded
+    let final_path_str = if let Some(ref meta) = extracted {
+        if meta.title.is_some() || !meta.creators.is_empty() {
+            let mut meta_vars = vars.clone();
+            if let Some(ref t) = meta.title {
+                meta_vars.insert("Title".into(), t.clone());
+            }
+            if let Some(first) = meta.creators.first() {
+                meta_vars.insert("Author".into(), first.sort_name.clone());
+            }
+            let new_relative = path_template::render(path_template::DEFAULT_TEMPLATE, &meta_vars);
+            let new_full = library_path.join(&new_relative);
+
+            // Attempt rename if path changed
+            if new_full.display().to_string() != dest_path_str {
+                let old_path = dest_path_str.clone();
+                let new_full_clone = new_full.clone();
+                let rename_result = tokio::task::spawn_blocking(move || {
+                    // Resolve collision on new path
+                    let resolved = path_template::resolve_collision(&new_full_clone)?;
+                    if let Some(parent) = resolved.parent() {
+                        std::fs::create_dir_all(parent)?;
+                    }
+                    std::fs::rename(&old_path, &resolved)?;
+                    // Try to clean up empty parent dirs of old path
+                    if let Some(old_parent) = Path::new(&old_path).parent() {
+                        let _ = std::fs::remove_dir(old_parent); // only removes if empty
+                    }
+                    Ok::<String, std::io::Error>(resolved.display().to_string())
+                })
+                .await;
+
+                match rename_result {
+                    Ok(Ok(new_path)) => {
+                        tracing::info!(
+                            old_path = %dest_path_str,
+                            new_path = %new_path,
+                            "renamed file to metadata-based path"
+                        );
+                        new_path
+                    }
+                    Ok(Err(e)) => {
+                        tracing::warn!(
+                            error = %e,
+                            old_path = %dest_path_str,
+                            "metadata rename failed; keeping heuristic path"
+                        );
+                        dest_path_str.clone()
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "rename spawn_blocking panicked");
+                        dest_path_str.clone()
+                    }
+                }
+            } else {
+                dest_path_str.clone()
+            }
+        } else {
+            dest_path_str.clone()
+        }
+    } else {
+        dest_path_str.clone()
+    };
+
+    // Create work (via metadata matching or fallback)
+    let work_result = if let Some(ref meta) = extracted {
+        work::find_or_create(pool, meta).await
+    } else {
+        // Fallback: create work from filename heuristics
+        let title = vars.get("Title").cloned().unwrap_or("Unknown".into());
+        sqlx::query_scalar("INSERT INTO works (title, sort_title) VALUES ($1, $2) RETURNING id")
+            .bind(&title)
+            .bind(&title)
+            .fetch_one(pool)
+            .await
+    };
+
+    let work_id = match work_result {
+        Ok(id) => id,
         Err(e) => {
-            tracing::error!(error = %e, "failed to create work/manifestation");
-            // Clean up the orphaned library file to avoid stranded copies
-            let dest = dest_path_str.clone();
+            tracing::error!(error = %e, "failed to create/find work");
+            let dest = final_path_str.clone();
             let _ = tokio::task::spawn_blocking(move || {
                 if let Err(rm_err) = std::fs::remove_file(&dest) {
                     tracing::warn!(
@@ -433,9 +494,84 @@ async fn process_file(
                 }
             })
             .await;
-            ProcessResult::Failed(format!("DB insert failed: {e}"))
+            return ProcessResult::Failed(format!("DB insert failed: {e}"));
         }
+    };
+
+    // Insert manifestation with full metadata
+    let (isbn_10, isbn_13) = extracted
+        .as_ref()
+        .and_then(|m| m.isbn.as_ref())
+        .map(|i| (i.isbn_10.clone(), i.isbn_13.clone()))
+        .unwrap_or((None, None));
+    let publisher = extracted.as_ref().and_then(|m| m.publisher.clone());
+    let pub_date = extracted.as_ref().and_then(|m| m.pub_date);
+
+    let manifestation_result = sqlx::query_scalar(
+        "INSERT INTO manifestations \
+             (work_id, isbn_10, isbn_13, publisher, pub_date, format, \
+              file_path, file_hash, file_size_bytes, ingestion_status, \
+              validation_status, accessibility_metadata) \
+         VALUES ($1, $2, $3, $4, $5, $6::manifestation_format, $7, $8, $9, \
+                 'complete'::ingestion_status, $10::validation_status, $11) \
+         RETURNING id",
+    )
+    .bind(work_id)
+    .bind(&isbn_10)
+    .bind(&isbn_13)
+    .bind(&publisher)
+    .bind(pub_date)
+    .bind(format_str)
+    .bind(&final_path_str)
+    .bind(&copy_result.sha256)
+    .bind(copy_result.file_size as i64)
+    .bind(validation_status_str)
+    .bind(&accessibility_metadata)
+    .fetch_one(pool)
+    .await;
+
+    let manifestation_id: Uuid = match manifestation_result {
+        Ok(id) => id,
+        Err(e) => {
+            tracing::error!(error = %e, "failed to create manifestation");
+            let dest = final_path_str.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                if let Err(rm_err) = std::fs::remove_file(&dest) {
+                    tracing::warn!(
+                        path = %dest,
+                        error = %rm_err,
+                        "failed to remove orphaned library file after DB error"
+                    );
+                }
+            })
+            .await;
+            return ProcessResult::Failed(format!("DB insert failed: {e}"));
+        }
+    };
+
+    // Write draft metadata_version rows
+    if let Some(ref meta) = extracted
+        && let Err(e) = metadata::draft::write_drafts(pool, manifestation_id, meta).await
+    {
+        // Non-fatal: log but don't fail the ingestion
+        tracing::warn!(
+            error = %e,
+            manifestation_id = %manifestation_id,
+            "failed to write metadata drafts"
+        );
     }
+
+    if let Some(ref meta) = extracted {
+        tracing::info!(
+            title = meta.title.as_deref().unwrap_or("unknown"),
+            authors = meta.creators.len(),
+            confidence = meta.confidence,
+            has_isbn = meta.isbn.is_some(),
+            "metadata extraction complete"
+        );
+    }
+
+    ProcessResult::Complete
 }
 
 async fn quarantine_async(source: &Path, quarantine_path: &Path, reason: &str) {
@@ -483,19 +619,76 @@ mod tests {
 
     /// Clean up DB records created during a test run.
     async fn cleanup_test_data(pool: &PgPool, library_file_path: &str, source_path: &str) {
-        let work_id: Option<uuid::Uuid> =
-            sqlx::query_scalar("DELETE FROM manifestations WHERE file_path = $1 RETURNING work_id")
+        // Fetch IDs before deleting so we can clean orphaned authors/series
+        let manifestation_id: Option<uuid::Uuid> =
+            sqlx::query_scalar("SELECT id FROM manifestations WHERE file_path = $1")
                 .bind(library_file_path)
                 .fetch_optional(pool)
                 .await
                 .ok()
                 .flatten();
+        let work_id: Option<uuid::Uuid> =
+            sqlx::query_scalar("SELECT work_id FROM manifestations WHERE file_path = $1")
+                .bind(library_file_path)
+                .fetch_optional(pool)
+                .await
+                .ok()
+                .flatten();
+
+        // Clean metadata_versions
+        if let Some(mid) = manifestation_id {
+            let _ = sqlx::query("DELETE FROM metadata_versions WHERE manifestation_id = $1")
+                .bind(mid)
+                .execute(pool)
+                .await;
+        }
+
+        // Collect author/series IDs before cascading delete
+        let author_ids: Vec<uuid::Uuid> = if let Some(wid) = work_id {
+            sqlx::query_scalar("SELECT author_id FROM work_authors WHERE work_id = $1")
+                .bind(wid)
+                .fetch_all(pool)
+                .await
+                .unwrap_or_default()
+        } else {
+            vec![]
+        };
+        let series_ids: Vec<uuid::Uuid> = if let Some(wid) = work_id {
+            sqlx::query_scalar("SELECT series_id FROM series_works WHERE work_id = $1")
+                .bind(wid)
+                .fetch_all(pool)
+                .await
+                .unwrap_or_default()
+        } else {
+            vec![]
+        };
+
+        // Delete manifestation → work (cascades work_authors, series_works)
+        let _ = sqlx::query("DELETE FROM manifestations WHERE file_path = $1")
+            .bind(library_file_path)
+            .execute(pool)
+            .await;
         if let Some(wid) = work_id {
             let _ = sqlx::query("DELETE FROM works WHERE id = $1")
                 .bind(wid)
                 .execute(pool)
                 .await;
         }
+
+        // Clean orphaned authors and series
+        for aid in author_ids {
+            let _ = sqlx::query("DELETE FROM authors WHERE id = $1")
+                .bind(aid)
+                .execute(pool)
+                .await;
+        }
+        for sid in series_ids {
+            let _ = sqlx::query("DELETE FROM series WHERE id = $1")
+                .bind(sid)
+                .execute(pool)
+                .await;
+        }
+
         let _ = sqlx::query("DELETE FROM ingestion_jobs WHERE source_path = $1")
             .bind(source_path)
             .execute(pool)
@@ -605,6 +798,151 @@ mod tests {
         .unwrap();
 
         w.finish().unwrap().into_inner()
+    }
+
+    /// Build an EPUB with Dublin Core metadata for integration testing.
+    fn make_metadata_epub() -> Vec<u8> {
+        use std::io::Write as _;
+        use zip::write::{ExtendedFileOptions, FileOptions};
+
+        let buf = std::io::Cursor::new(Vec::new());
+        let mut w = zip::ZipWriter::new(buf);
+
+        let stored: FileOptions<ExtendedFileOptions> =
+            FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        w.start_file("mimetype", stored).unwrap();
+        w.write_all(b"application/epub+zip").unwrap();
+
+        let default: FileOptions<ExtendedFileOptions> = FileOptions::default();
+
+        w.start_file("META-INF/container.xml", default.clone())
+            .unwrap();
+        w.write_all(
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#,
+        )
+        .unwrap();
+
+        w.start_file("OEBPS/content.opf", default).unwrap();
+        w.write_all(
+            br#"<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" xmlns:dc="http://purl.org/dc/elements/1.1/" version="3.0">
+  <metadata>
+    <dc:title>The Integration Test</dc:title>
+    <dc:creator opf:role="aut">Test McAuthor</dc:creator>
+    <dc:language>en</dc:language>
+    <dc:identifier>urn:isbn:9780306406157</dc:identifier>
+    <dc:publisher>Test Press</dc:publisher>
+    <dc:description>A book for testing metadata extraction</dc:description>
+    <meta name="calibre:series" content="Test Series"/>
+    <meta name="calibre:series_index" content="1"/>
+  </metadata>
+  <manifest/>
+  <spine/>
+</package>"#,
+        )
+        .unwrap();
+
+        w.finish().unwrap().into_inner()
+    }
+
+    #[tokio::test]
+    #[ignore] // Requires running postgres with applied migrations
+    async fn scan_once_extracts_metadata_from_epub() {
+        let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
+        let ingestion = tempfile::tempdir().unwrap();
+        let library = tempfile::tempdir().unwrap();
+        let quarantine = tempfile::tempdir().unwrap();
+
+        // Use a filename that differs from the OPF metadata to test rename
+        let source = ingestion.path().join("Unknown - somefile.epub");
+        std::fs::write(&source, make_metadata_epub()).unwrap();
+
+        let config = test_config_for(
+            ingestion.path().to_str().unwrap(),
+            library.path().to_str().unwrap(),
+            quarantine.path().to_str().unwrap(),
+        );
+        let result = scan_once(&config, &pool).await.unwrap();
+        assert_eq!(result.processed, 1);
+        assert_eq!(result.failed, 0);
+
+        // File should be renamed to metadata-based path: "McAuthor, Test/The Integration Test.epub"
+        let dest = library
+            .path()
+            .join("McAuthor, Test/The Integration Test.epub");
+        assert!(
+            dest.exists(),
+            "expected metadata-renamed file at {}",
+            dest.display()
+        );
+
+        // Verify work title
+        let title: String = sqlx::query_scalar(
+            "SELECT w.title FROM works w \
+             JOIN manifestations m ON m.work_id = w.id \
+             WHERE m.file_path = $1",
+        )
+        .bind(dest.to_str().unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(title, "The Integration Test");
+
+        // Verify author was created and linked
+        let author_name: String = sqlx::query_scalar(
+            "SELECT a.name FROM authors a \
+             JOIN work_authors wa ON wa.author_id = a.id \
+             JOIN manifestations m ON m.work_id = wa.work_id \
+             WHERE m.file_path = $1",
+        )
+        .bind(dest.to_str().unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(author_name, "Test McAuthor");
+
+        // Verify ISBN was populated on the manifestation
+        let isbn: Option<String> =
+            sqlx::query_scalar("SELECT isbn_13 FROM manifestations WHERE file_path = $1")
+                .bind(dest.to_str().unwrap())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(isbn.as_deref(), Some("9780306406157"));
+
+        // Verify metadata_versions drafts were created
+        let draft_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM metadata_versions mv \
+             JOIN manifestations m ON m.id = mv.manifestation_id \
+             WHERE m.file_path = $1 AND mv.source::text = 'opf' AND mv.status::text = 'draft'",
+        )
+        .bind(dest.to_str().unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            draft_count >= 5,
+            "expected at least 5 draft rows, got {draft_count}"
+        );
+
+        // Verify series was created
+        let series_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM series_works sw \
+             JOIN manifestations m ON m.work_id = sw.work_id \
+             WHERE m.file_path = $1",
+        )
+        .bind(dest.to_str().unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(series_count, 1, "expected series link");
+
+        cleanup_test_data(&pool, dest.to_str().unwrap(), source.to_str().unwrap()).await;
     }
 
     #[tokio::test]
