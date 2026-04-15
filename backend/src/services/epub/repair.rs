@@ -59,6 +59,13 @@ pub fn repackage(path: &Path, issues: &[Issue], opf_path: Option<&str>) -> Resul
             let mut ar = ZipArchive::new(cursor)?;
             let mut opf_bytes = Vec::new();
             ar.by_name(opf)?.take(super::MAX_ENTRY_UNCOMPRESSED_BYTES + 1).read_to_end(&mut opf_bytes)?;
+            // Apply encoding fix to OPF bytes before spine rewrite so both
+            // repairs are chained correctly when they occur simultaneously.
+            let opf_bytes = if let Some((_, enc)) = encoding_fixes.iter().find(|(n, _)| n == opf) {
+                transcode_to_utf8(&opf_bytes, enc).unwrap_or(opf_bytes)
+            } else {
+                opf_bytes
+            };
             let rewritten = rewrite_opf_remove_broken_spine(&opf_bytes, &broken_refs);
             Some((opf.to_string(), rewritten))
         } else {
@@ -83,7 +90,7 @@ pub fn repackage(path: &Path, issues: &[Issue], opf_path: Option<&str>) -> Resul
 
         // Copy all entries except mimetype, applying fixes
         for i in 0..archive.len() {
-            let mut file = archive.by_index(i)?;
+            let file = archive.by_index(i)?;
             let name = file.name().to_string();
 
             if name == MIMETYPE_ENTRY {
@@ -94,8 +101,8 @@ pub fn repackage(path: &Path, issues: &[Issue], opf_path: Option<&str>) -> Resul
             file.take(super::MAX_ENTRY_UNCOMPRESSED_BYTES + 1).read_to_end(&mut entry_bytes)?;
 
             // Apply encoding fix first (independent of OPF rewriting).
-            // In practice OPF is always UTF-8 so these two transforms are mutually
-            // exclusive, but the logic is correct even if they overlap.
+            // If the OPF entry needs both transforms, they were already chained
+            // during pre-computation above; for all other entries this is a no-op.
             let transcoded = if let Some((_, declared_enc)) =
                 encoding_fixes.iter().find(|(n, _)| n == &name)
             {
