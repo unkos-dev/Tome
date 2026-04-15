@@ -1,31 +1,29 @@
-use argon2::password_hash::SaltString;
-use argon2::password_hash::rand_core::OsRng;
-use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
 use base64ct::{Base64UrlUnpadded, Encoding};
+use sha2::{Digest, Sha256};
+use subtle::ConstantTimeEq;
+
+fn sha256_hex(input: &[u8]) -> String {
+    Sha256::digest(input)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
 
 /// Generate a cryptographically random device token (32 bytes, base64url).
-/// Returns (plaintext_token, argon2_hash).
+/// Returns (plaintext_token, sha256_hex_hash).
 pub fn generate_device_token() -> (String, String) {
     let mut bytes = [0u8; 32];
     rand::fill(&mut bytes);
     let plaintext = Base64UrlUnpadded::encode_string(&bytes);
-    let salt = SaltString::generate(&mut OsRng);
-    let hash = Argon2::default()
-        .hash_password(plaintext.as_bytes(), &salt)
-        .expect("argon2 hash failed")
-        .to_string();
+    let hash = sha256_hex(plaintext.as_bytes());
     (plaintext, hash)
 }
 
-/// Verify a plaintext token against a stored argon2 hash.
+/// Verify a plaintext token against a stored SHA-256 hex hash.
+/// Uses constant-time comparison to prevent timing attacks.
 pub fn verify_device_token(plaintext: &str, hash: &str) -> bool {
-    let parsed = match PasswordHash::new(hash) {
-        Ok(h) => h,
-        Err(_) => return false,
-    };
-    Argon2::default()
-        .verify_password(plaintext.as_bytes(), &parsed)
-        .is_ok()
+    let computed = sha256_hex(plaintext.as_bytes());
+    computed.as_bytes().ct_eq(hash.as_bytes()).into()
 }
 
 #[cfg(test)]
@@ -37,8 +35,9 @@ mod tests {
         let (plaintext, hash) = generate_device_token();
         // 32 bytes base64url unpadded = 43 chars
         assert_eq!(plaintext.len(), 43);
-        // Hash should be a valid PHC string starting with $argon2
-        assert!(hash.starts_with("$argon2"));
+        // SHA-256 hex = 64 lowercase hex chars
+        assert_eq!(hash.len(), 64);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
     }
 
     #[test]
