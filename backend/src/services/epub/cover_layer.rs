@@ -87,6 +87,15 @@ mod tests {
             spine_idrefs: vec![],
             opf_path: "OEBPS/content.opf".to_string(),
             accessibility_metadata: None,
+            title: None,
+            creators: vec![],
+            description: None,
+            publisher: None,
+            date: None,
+            language: None,
+            identifiers: vec![],
+            subjects: vec![],
+            series_meta: None,
         }
     }
 

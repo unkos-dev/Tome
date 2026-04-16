@@ -118,6 +118,8 @@ pub struct ValidationReport {
     pub outcome: ValidationOutcome,
     /// W3C accessibility metadata from OPF `<meta>` elements (read-only).
     pub accessibility_metadata: Option<serde_json::Value>,
+    /// Parsed OPF data including Dublin Core metadata.
+    pub opf_data: Option<opf_layer::OpfData>,
 }
 
 // ── Shared utilities ──────────────────────────────────────────────────────────
@@ -171,6 +173,7 @@ pub fn validate_and_repair(path: &Path) -> Result<ValidationReport, EpubError> {
             issues,
             outcome: ValidationOutcome::Quarantined,
             accessibility_metadata: None,
+            opf_data: None,
         });
     }
 
@@ -181,6 +184,7 @@ pub fn validate_and_repair(path: &Path) -> Result<ValidationReport, EpubError> {
             issues,
             outcome: ValidationOutcome::Quarantined,
             accessibility_metadata: None,
+            opf_data: None,
         });
     }
 
@@ -203,6 +207,7 @@ pub fn validate_and_repair(path: &Path) -> Result<ValidationReport, EpubError> {
             issues,
             outcome: ValidationOutcome::Quarantined,
             accessibility_metadata: None,
+            opf_data: None,
         });
     }
 
@@ -217,6 +222,7 @@ pub fn validate_and_repair(path: &Path) -> Result<ValidationReport, EpubError> {
             issues,
             outcome: ValidationOutcome::Repaired,
             accessibility_metadata,
+            opf_data,
         });
     }
 
@@ -230,5 +236,6 @@ pub fn validate_and_repair(path: &Path) -> Result<ValidationReport, EpubError> {
         issues,
         outcome,
         accessibility_metadata,
+        opf_data,
     })
 }
