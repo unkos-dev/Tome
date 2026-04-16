@@ -58,7 +58,12 @@ pub fn decode_entities(input: &str) -> String {
 
         // Lookahead capped at 12 bytes: covers all named entities (max "&#x10FFFF;" = 10 chars)
         // and avoids scanning long runs of text for a missing semicolon.
-        if let Some(semi_pos) = remaining[..remaining.len().min(12)].find(';') {
+        // Search raw bytes to avoid panicking on multi-byte UTF-8 boundaries.
+        let lookahead = remaining.len().min(12);
+        let semi_pos = remaining.as_bytes()[..lookahead]
+            .iter()
+            .position(|&b| b == b';');
+        if let Some(semi_pos) = semi_pos {
             let entity = &remaining[1..semi_pos];
             let decoded = match entity {
                 "amp" => Some('&'),

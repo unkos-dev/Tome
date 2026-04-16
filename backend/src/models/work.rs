@@ -83,7 +83,8 @@ pub async fn find_or_create(
 
         sqlx::query(
             "INSERT INTO work_authors (work_id, author_id, role, position) \
-             VALUES ($1, $2, $3::author_role, $4)",
+             VALUES ($1, $2, $3::author_role, $4) \
+             ON CONFLICT (work_id, author_id, role) DO NOTHING",
         )
         .bind(work_id)
         .bind(author_id)

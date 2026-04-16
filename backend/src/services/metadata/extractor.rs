@@ -88,9 +88,16 @@ pub fn extract(opf: &opf_layer::OpfData) -> ExtractedMetadata {
         .filter(|s| !s.is_empty())
         .collect();
 
-    let series = opf.series_meta.as_ref().map(|s| SeriesInfo {
-        name: sanitiser::sanitise(&s.name),
-        position: s.position,
+    let series = opf.series_meta.as_ref().and_then(|s| {
+        let name = sanitiser::sanitise(&s.name);
+        if name.is_empty() {
+            None
+        } else {
+            Some(SeriesInfo {
+                name,
+                position: s.position,
+            })
+        }
     });
 
     // Inversion detection
