@@ -114,44 +114,41 @@ pub async fn find_or_create(
 }
 
 /// Find an existing author by name or create a new one.
+/// Uses ON CONFLICT to safely handle concurrent inserts (UNIQUE on authors.name).
 async fn find_or_create_author(
     conn: &mut sqlx::PgConnection,
     name: &str,
     sort_name: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    if let Some(id) =
-        sqlx::query_scalar::<_, Uuid>("SELECT id FROM authors WHERE name = $1 LIMIT 1")
-            .bind(name)
-            .fetch_optional(&mut *conn)
-            .await?
-    {
-        return Ok(id);
-    }
-    sqlx::query_scalar("INSERT INTO authors (name, sort_name) VALUES ($1, $2) RETURNING id")
-        .bind(name)
-        .bind(sort_name)
-        .fetch_one(&mut *conn)
-        .await
+    // DO UPDATE SET name = EXCLUDED.name is a no-op trick to make RETURNING work
+    // on the conflict path (DO NOTHING doesn't return the existing row).
+    sqlx::query_scalar(
+        "INSERT INTO authors (name, sort_name) VALUES ($1, $2) \
+         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name \
+         RETURNING id",
+    )
+    .bind(name)
+    .bind(sort_name)
+    .fetch_one(&mut *conn)
+    .await
 }
 
 /// Find an existing series by name or create a new one.
+/// Uses ON CONFLICT to safely handle concurrent inserts (UNIQUE on series.name).
 async fn find_or_create_series(
     conn: &mut sqlx::PgConnection,
     name: &str,
     sort_name: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    if let Some(id) = sqlx::query_scalar::<_, Uuid>("SELECT id FROM series WHERE name = $1 LIMIT 1")
-        .bind(name)
-        .fetch_optional(&mut *conn)
-        .await?
-    {
-        return Ok(id);
-    }
-    sqlx::query_scalar("INSERT INTO series (name, sort_name) VALUES ($1, $2) RETURNING id")
-        .bind(name)
-        .bind(sort_name)
-        .fetch_one(&mut *conn)
-        .await
+    sqlx::query_scalar(
+        "INSERT INTO series (name, sort_name) VALUES ($1, $2) \
+         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name \
+         RETURNING id",
+    )
+    .bind(name)
+    .bind(sort_name)
+    .fetch_one(&mut *conn)
+    .await
 }
 
 #[cfg(test)]

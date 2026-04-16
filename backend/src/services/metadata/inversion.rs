@@ -52,14 +52,8 @@ pub fn detect_inversion(title: &str, authors: &[String]) -> Option<InversionResu
     }
 
     // Even without a title-like author, "Lastname, Firstname" is suspicious enough
-    // if the pattern is very clear (single capitalised word, comma, name-like words)
-    if authors.is_empty() {
-        return Some(InversionResult {
-            probable_author: format!("{after} {before}"),
-            probable_title: String::new(),
-        });
-    }
-
+    // Without an author that looks like a title, we can't suggest a replacement —
+    // returning an empty probable_title would create a useless draft row.
     None
 }
 
@@ -77,11 +71,11 @@ mod tests {
     }
 
     #[test]
-    fn detects_inversion_no_authors() {
+    fn no_inversion_without_title_candidate() {
+        // "Smith, John" looks like an inverted name, but without an author that
+        // looks like a title there's nothing to suggest as a replacement.
         let result = detect_inversion("Smith, John", &[]);
-        assert!(result.is_some());
-        let r = result.unwrap();
-        assert_eq!(r.probable_author, "John Smith");
+        assert!(result.is_none());
     }
 
     #[test]
