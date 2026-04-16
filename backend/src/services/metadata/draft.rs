@@ -116,6 +116,8 @@ pub async fn write_drafts(
     Ok(())
 }
 
+/// Upsert a single draft row. On re-extraction the new value and confidence
+/// replace the previous draft for the same (manifestation, source, field).
 async fn insert_draft(
     pool: &PgPool,
     manifestation_id: Uuid,
@@ -125,7 +127,11 @@ async fn insert_draft(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO metadata_versions (manifestation_id, source, field_name, new_value, confidence_score) \
-         VALUES ($1, 'opf'::metadata_source, $2, $3, $4)",
+         VALUES ($1, 'opf'::metadata_source, $2, $3, $4) \
+         ON CONFLICT (manifestation_id, source, field_name) \
+         DO UPDATE SET new_value = EXCLUDED.new_value, \
+                       confidence_score = EXCLUDED.confidence_score, \
+                       created_at = now()",
     )
     .bind(manifestation_id)
     .bind(field_name)
