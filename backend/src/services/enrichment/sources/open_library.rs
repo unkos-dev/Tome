@@ -1,10 +1,15 @@
 //! Open Library adapter.
 //!
 //! Endpoints:
-//! * ISBN  — `GET {base}/isbn/{isbn}.json`
+//! * ISBN  — `GET {base}/api/books?bibkeys=ISBN:{isbn}&jscmd=data&format=json`
 //! * Search — `GET {base}/search.json?title=...&author=...&limit=5`
 //!
-//! Rate-limited to a conservative 5 requests per minute at the module level.
+//! The ISBN path uses the humanised `jscmd=data` view so authors arrive as
+//! inline names (the older `/isbn/{isbn}.json` endpoint only returned
+//! `/authors/OL...` keys and required a second hop).
+//!
+//! Rate-limited to 3 requests per second — OpenLibrary's identified-request
+//! tier, unlocked by the `User-Agent` set in [`super::super::http::api_client`].
 
 #![allow(dead_code)] // wired in Phase C Task 21 (orchestrator)
 
@@ -25,7 +30,7 @@ type Limiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 
 fn limiter() -> &'static Limiter {
     static L: OnceLock<Limiter> = OnceLock::new();
-    L.get_or_init(|| RateLimiter::direct(Quota::per_minute(NonZeroU32::new(5).expect("5 > 0"))))
+    L.get_or_init(|| RateLimiter::direct(Quota::per_second(NonZeroU32::new(3).expect("3 > 0"))))
 }
 
 pub struct OpenLibrary {
@@ -64,7 +69,10 @@ impl MetadataSource for OpenLibrary {
         let url = match key {
             LookupKey::Isbn(k) => {
                 let isbn = k.strip_prefix("isbn:").unwrap_or(k);
-                format!("{}/isbn/{isbn}.json", self.base_url.trim_end_matches('/'))
+                format!(
+                    "{}/api/books?bibkeys=ISBN:{isbn}&jscmd=data&format=json",
+                    self.base_url.trim_end_matches('/'),
+                )
             }
             LookupKey::TitleAuthor { title, author } => format!(
                 "{}/search.json?title={}&author={}&limit=5",
@@ -95,7 +103,11 @@ impl MetadataSource for OpenLibrary {
 
         let body: Value = resp.json().await.map_err(to_source_error)?;
         match key {
-            LookupKey::Isbn(_) => Ok(map_isbn_response(&body)),
+            LookupKey::Isbn(k) => {
+                let isbn = k.strip_prefix("isbn:").unwrap_or(k);
+                let bibkey = format!("ISBN:{isbn}");
+                Ok(map_api_books_response(&body, &bibkey))
+            }
             LookupKey::TitleAuthor { .. } => Ok(map_search_response(&body)),
         }
     }
@@ -122,90 +134,119 @@ fn urlencoding(s: &str) -> String {
         .replace('+', "%2B")
 }
 
-fn map_isbn_response(body: &Value) -> Vec<SourceResult> {
+/// Parse an `/api/books?bibkeys=ISBN:X&jscmd=data` response.
+///
+/// The response is a map keyed by bibkey (e.g. `"ISBN:9780441172719"`).  A
+/// missing key is treated as a clean miss (empty vec), matching
+/// OpenLibrary's behaviour for unknown ISBNs on this endpoint.
+fn map_api_books_response(body: &Value, isbn_key: &str) -> Vec<SourceResult> {
     let mut out = Vec::new();
     let mt = "isbn";
 
-    if let Some(title) = body.get("title").and_then(Value::as_str) {
+    let Some(entry) = body.get(isbn_key) else {
+        return out;
+    };
+
+    if let Some(title) = entry.get("title").and_then(Value::as_str) {
         out.push(SourceResult {
             field_name: "title".into(),
             raw_value: json!(title),
             match_type: mt.into(),
         });
     }
-    if let Some(subtitle) = body.get("subtitle").and_then(Value::as_str) {
-        out.push(SourceResult {
-            field_name: "subtitle".into(),
-            raw_value: json!(subtitle),
-            match_type: mt.into(),
-        });
+
+    if let Some(authors) = entry.get("authors").and_then(Value::as_array) {
+        let names: Vec<String> = authors
+            .iter()
+            .filter_map(|a| a.get("name").and_then(Value::as_str).map(str::to_owned))
+            .collect();
+        if !names.is_empty() {
+            out.push(SourceResult {
+                field_name: "creators".into(),
+                raw_value: json!(names),
+                match_type: mt.into(),
+            });
+        }
     }
-    if let Some(publishers) = body.get("publishers").and_then(Value::as_array)
-        && let Some(first) = publishers.first().and_then(Value::as_str)
+
+    if let Some(publishers) = entry.get("publishers").and_then(Value::as_array)
+        && let Some(name) = publishers
+            .first()
+            .and_then(|p| p.get("name"))
+            .and_then(Value::as_str)
     {
         out.push(SourceResult {
             field_name: "publisher".into(),
-            raw_value: json!(first),
+            raw_value: json!(name),
             match_type: mt.into(),
         });
     }
-    if let Some(publish_date) = body.get("publish_date").and_then(Value::as_str) {
+
+    if let Some(pub_date) = entry.get("publish_date").and_then(Value::as_str) {
         out.push(SourceResult {
             field_name: "pub_date".into(),
-            raw_value: json!(publish_date),
+            raw_value: json!(pub_date),
             match_type: mt.into(),
         });
     }
-    if let Some(subjects) = body.get("subjects").and_then(Value::as_array) {
-        let subjects: Vec<String> = subjects
+
+    if let Some(subjects) = entry.get("subjects").and_then(Value::as_array) {
+        let names: Vec<String> = subjects
             .iter()
-            .filter_map(|v| v.as_str().map(str::to_owned))
+            .filter_map(|s| s.get("name").and_then(Value::as_str).map(str::to_owned))
             .collect();
-        if !subjects.is_empty() {
+        if !names.is_empty() {
             out.push(SourceResult {
                 field_name: "subjects".into(),
-                raw_value: json!(subjects),
+                raw_value: json!(names),
                 match_type: mt.into(),
             });
         }
     }
-    // Open Library ISBN endpoint returns `authors: [{ key: "/authors/OL..." }]`.
-    // A second fetch would be needed to resolve the name; skip here — Google
-    // Books and Hardcover cover authors.
-    if let Some(isbn_13s) = body.get("isbn_13").and_then(Value::as_array)
-        && let Some(v) = isbn_13s.first().and_then(Value::as_str)
-    {
-        out.push(SourceResult {
-            field_name: "isbn_13".into(),
-            raw_value: json!(v),
-            match_type: mt.into(),
-        });
+
+    if let Some(cover) = entry.get("cover") {
+        // Prefer the largest available size.  Skip empty strings.
+        for size in ["large", "medium", "small"] {
+            if let Some(url) = cover.get(size).and_then(Value::as_str)
+                && !url.is_empty()
+            {
+                out.push(SourceResult {
+                    field_name: "cover_url".into(),
+                    raw_value: json!(url),
+                    match_type: mt.into(),
+                });
+                break;
+            }
+        }
     }
-    if let Some(isbn_10s) = body.get("isbn_10").and_then(Value::as_array)
-        && let Some(v) = isbn_10s.first().and_then(Value::as_str)
-    {
-        out.push(SourceResult {
-            field_name: "isbn_10".into(),
-            raw_value: json!(v),
-            match_type: mt.into(),
-        });
-    }
-    if let Some(description) = body.get("description") {
-        // `description` may be a plain string or `{ "value": "..." }`.
-        let text = description.as_str().map(str::to_owned).or_else(|| {
-            description
-                .get("value")
-                .and_then(Value::as_str)
-                .map(str::to_owned)
-        });
-        if let Some(text) = text {
+
+    if let Some(ids) = entry.get("identifiers") {
+        if let Some(isbn_13) = ids
+            .get("isbn_13")
+            .and_then(Value::as_array)
+            .and_then(|arr| arr.first())
+            .and_then(Value::as_str)
+        {
             out.push(SourceResult {
-                field_name: "description".into(),
-                raw_value: json!(text),
+                field_name: "isbn_13".into(),
+                raw_value: json!(isbn_13),
+                match_type: mt.into(),
+            });
+        }
+        if let Some(isbn_10) = ids
+            .get("isbn_10")
+            .and_then(Value::as_array)
+            .and_then(|arr| arr.first())
+            .and_then(Value::as_str)
+        {
+            out.push(SourceResult {
+                field_name: "isbn_10".into(),
+                raw_value: json!(isbn_10),
                 match_type: mt.into(),
             });
         }
     }
+
     out
 }
 
@@ -280,29 +321,127 @@ fn map_search_response(body: &Value) -> Vec<SourceResult> {
 mod tests {
     use super::*;
     use serde_json::json;
-    use wiremock::matchers::{method, path};
+    use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn ctx<'a>(http: &'a reqwest::Client) -> LookupCtx<'a> {
         LookupCtx { http, cached: None }
     }
 
-    #[tokio::test]
-    async fn isbn_happy_path_maps_fields() {
-        let server = MockServer::start().await;
+    // ── Unit tests for the pure parser ───────────────────────────────────
+
+    #[test]
+    fn map_api_books_response_happy_emits_full_field_set() {
         let body = json!({
-            "title": "Dune",
-            "subtitle": "A Novel",
-            "publishers": ["Ace"],
-            "publish_date": "1965",
-            "subjects": ["Science Fiction"],
-            "isbn_13": ["9780441172719"],
-            "isbn_10": ["0441172717"],
-            "description": {"value": "Desert planet epic."}
+            "ISBN:9780441172719": {
+                "title": "Dune",
+                "authors": [
+                    {"url": "https://openlibrary.org/authors/OL1A/Frank_Herbert",
+                     "name": "Frank Herbert"}
+                ],
+                "publishers": [{"name": "Ace"}],
+                "publish_date": "June 1, 1990",
+                "subjects": [{"name": "Science Fiction", "url": "x"}],
+                "cover": {
+                    "small": "https://covers.openlibrary.org/b/id/1-S.jpg",
+                    "medium": "https://covers.openlibrary.org/b/id/1-M.jpg",
+                    "large": "https://covers.openlibrary.org/b/id/1-L.jpg"
+                },
+                "identifiers": {
+                    "isbn_10": ["0441172717"],
+                    "isbn_13": ["9780441172719"]
+                }
+            }
         });
+        let out = map_api_books_response(&body, "ISBN:9780441172719");
+        let fields: Vec<&str> = out.iter().map(|r| r.field_name.as_str()).collect();
+        assert!(fields.contains(&"title"));
+        assert!(fields.contains(&"creators"));
+        assert!(fields.contains(&"publisher"));
+        assert!(fields.contains(&"pub_date"));
+        assert!(fields.contains(&"subjects"));
+        assert!(fields.contains(&"cover_url"));
+        assert!(fields.contains(&"isbn_10"));
+        assert!(fields.contains(&"isbn_13"));
+
+        // Cover prefers the largest size.
+        let cover = out.iter().find(|r| r.field_name == "cover_url").unwrap();
+        assert_eq!(
+            cover.raw_value,
+            json!("https://covers.openlibrary.org/b/id/1-L.jpg")
+        );
+    }
+
+    #[test]
+    fn map_api_books_response_missing_key_is_clean_miss() {
+        let body = json!({});
+        let out = map_api_books_response(&body, "ISBN:0000000000000");
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn map_api_books_response_partial_returns_only_present_fields() {
+        let body = json!({
+            "ISBN:9780441172719": {
+                "title": "Dune"
+            }
+        });
+        let out = map_api_books_response(&body, "ISBN:9780441172719");
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].field_name, "title");
+    }
+
+    #[test]
+    fn map_api_books_response_skips_author_without_name() {
+        let body = json!({
+            "ISBN:9780441172719": {
+                "authors": [
+                    {"url": "https://openlibrary.org/authors/OL1A"},
+                    {"name": "Frank Herbert"}
+                ]
+            }
+        });
+        let out = map_api_books_response(&body, "ISBN:9780441172719");
+        let creators = out.iter().find(|r| r.field_name == "creators").unwrap();
+        assert_eq!(creators.raw_value, json!(["Frank Herbert"]));
+    }
+
+    #[test]
+    fn map_api_books_response_skips_empty_cover_urls() {
+        let body = json!({
+            "ISBN:9780441172719": {
+                "cover": {"small": "", "medium": "", "large": ""}
+            }
+        });
+        let out = map_api_books_response(&body, "ISBN:9780441172719");
+        assert!(out.iter().all(|r| r.field_name != "cover_url"));
+    }
+
+    // ── Wiremock integration tests ───────────────────────────────────────
+
+    fn api_books_body(isbn: &str, title: &str) -> serde_json::Value {
+        json!({
+            format!("ISBN:{isbn}"): {
+                "title": title,
+                "authors": [{"name": "Frank Herbert", "url": "x"}],
+                "publishers": [{"name": "Ace"}],
+                "publish_date": "1965",
+                "subjects": [{"name": "Science Fiction", "url": "y"}],
+                "identifiers": {"isbn_10": ["0441172717"], "isbn_13": [isbn]}
+            }
+        })
+    }
+
+    #[tokio::test]
+    async fn isbn_happy_path_hits_api_books_and_maps_fields() {
+        let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/isbn/9780441172719.json"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(&body))
+            .and(path("/api/books"))
+            .and(query_param("bibkeys", "ISBN:9780441172719"))
+            .and(query_param("jscmd", "data"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(api_books_body("9780441172719", "Dune")),
+            )
             .mount(&server)
             .await;
 
@@ -315,17 +454,36 @@ mod tests {
 
         let fields: Vec<&str> = out.iter().map(|r| r.field_name.as_str()).collect();
         assert!(fields.contains(&"title"));
-        assert!(fields.contains(&"subtitle"));
+        assert!(fields.contains(&"creators"));
         assert!(fields.contains(&"publisher"));
         assert!(fields.contains(&"isbn_13"));
-        assert!(fields.contains(&"description"));
+    }
+
+    #[tokio::test]
+    async fn isbn_missing_key_is_clean_empty() {
+        let server = MockServer::start().await;
+        // OpenLibrary responds 200 with `{}` when the ISBN is unknown on
+        // the `/api/books` endpoint (no per-ISBN entry in the map).
+        Mock::given(method("GET"))
+            .and(path("/api/books"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({})))
+            .mount(&server)
+            .await;
+
+        let adapter = OpenLibrary::new(server.uri());
+        let http = reqwest::Client::new();
+        let out = adapter
+            .lookup(&ctx(&http), &LookupKey::Isbn("isbn:0000000000000".into()))
+            .await
+            .unwrap();
+        assert!(out.is_empty());
     }
 
     #[tokio::test]
     async fn isbn_404_is_clean_empty() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/isbn/0000000000000.json"))
+            .and(path("/api/books"))
             .respond_with(ResponseTemplate::new(404))
             .mount(&server)
             .await;
@@ -343,7 +501,7 @@ mod tests {
     async fn isbn_429_maps_to_rate_limited_with_retry_after() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/isbn/9780441172719.json"))
+            .and(path("/api/books"))
             .respond_with(ResponseTemplate::new(429).insert_header("Retry-After", "60"))
             .mount(&server)
             .await;
@@ -366,7 +524,7 @@ mod tests {
     async fn isbn_500_maps_to_http_error() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/isbn/9780441172719.json"))
+            .and(path("/api/books"))
             .respond_with(ResponseTemplate::new(500))
             .mount(&server)
             .await;

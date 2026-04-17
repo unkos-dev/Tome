@@ -58,6 +58,13 @@ async fn main() {
         )
         .init();
 
+    if config.operator_contact.is_none() {
+        tracing::warn!(
+            "TOME_OPERATOR_CONTACT unset — OpenLibrary requests will run at the 1 req/s anonymous tier. \
+             Set TOME_OPERATOR_CONTACT=<email-or-url> to unlock the identified 3 req/s tier."
+        );
+    }
+
     let pool = db::init_pool(&config.database_url, config.db_max_connections)
         .await
         .expect("failed to connect to database");

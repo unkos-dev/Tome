@@ -149,7 +149,8 @@ pub async fn run_once(
     };
 
     let sources = build_sources(config);
-    let http = api_client();
+    let ua = config.user_agent();
+    let http = api_client(&ua);
 
     let results = fan_out(
         &sources,
@@ -668,7 +669,8 @@ pub async fn fan_out_for_dry_run(
         return Ok((snapshot, Vec::new()));
     };
     let sources = build_sources(config);
-    let http = api_client();
+    let ua = config.user_agent();
+    let http = api_client(&ua);
     let results = fan_out(
         &sources,
         &http,
@@ -755,6 +757,7 @@ mod tests {
             googlebooks_api_key: None,
             hardcover_base_url: hc_uri.into(),
             hardcover_api_token: hc_token.map(|s| s.into()),
+            operator_contact: None,
         }
     }
 
@@ -823,12 +826,40 @@ mod tests {
         PgPool::connect(&url).await.unwrap()
     }
 
+    /// Build an `/api/books?bibkeys=ISBN:X&jscmd=data` mock response.
+    ///
+    /// Existing callers still pass the old `{title, publishers: [...]}`
+    /// shape — wrap it under the `ISBN:{isbn}` bibkey, lift string
+    /// publishers into `{name}` objects, and surface authors inline.  This
+    /// keeps the per-test bodies compact while matching the humanised
+    /// response shape the adapter now consumes.
     async fn mock_openlibrary_isbn(server: &MockServer, isbn: &str, body: serde_json::Value) {
+        let entry = normalise_api_books_entry(body);
+        let wrapped = serde_json::json!({ format!("ISBN:{isbn}"): entry });
         Mock::given(method("GET"))
-            .and(path(format!("/isbn/{isbn}.json")))
-            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .and(path("/api/books"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(wrapped))
             .mount(server)
             .await;
+    }
+
+    /// Translate the legacy `/isbn/{isbn}.json` body shape into the
+    /// `/api/books?jscmd=data` entry shape the adapter now expects.
+    fn normalise_api_books_entry(mut body: serde_json::Value) -> serde_json::Value {
+        if let Some(obj) = body.as_object_mut()
+            && let Some(pubs) = obj.get("publishers").cloned()
+            && let Some(arr) = pubs.as_array()
+        {
+            let lifted: Vec<serde_json::Value> = arr
+                .iter()
+                .map(|p| match p {
+                    serde_json::Value::String(s) => serde_json::json!({"name": s}),
+                    other => other.clone(),
+                })
+                .collect();
+            obj.insert("publishers".into(), serde_json::Value::Array(lifted));
+        }
+        body
     }
 
     async fn mock_googlebooks_isbn(server: &MockServer, body: serde_json::Value) {

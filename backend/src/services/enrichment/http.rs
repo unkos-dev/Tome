@@ -214,8 +214,12 @@ pub fn validate_hop(url: &reqwest::Url) -> Result<(), HopError> {
 /// * 10-second timeout.
 /// * Maximum 5 redirect hops.
 /// * Compiled with rustls TLS — no OpenSSL dependency.
-pub fn api_client() -> reqwest::Client {
+///
+/// `user_agent` is forwarded on every request.  Upstream providers
+/// (e.g. OpenLibrary) grant identified clients a higher rate-limit tier.
+pub fn api_client(user_agent: &str) -> reqwest::Client {
     reqwest::Client::builder()
+        .user_agent(user_agent)
         .timeout(Duration::from_secs(10))
         .redirect(redirect::Policy::limited(5))
         .build()
@@ -235,7 +239,7 @@ pub fn api_client() -> reqwest::Client {
 ///
 /// Panics if the underlying TLS stack cannot be initialised — this should
 /// never happen in a normally configured environment.
-pub fn cover_client(redirect_limit: usize, timeout_secs: u64) -> reqwest::Client {
+pub fn cover_client(redirect_limit: usize, timeout_secs: u64, user_agent: &str) -> reqwest::Client {
     let policy = redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() >= redirect_limit {
             return attempt.error("too many redirects");
@@ -247,6 +251,7 @@ pub fn cover_client(redirect_limit: usize, timeout_secs: u64) -> reqwest::Client
     });
 
     reqwest::Client::builder()
+        .user_agent(user_agent)
         .timeout(Duration::from_secs(timeout_secs))
         .redirect(policy)
         .build()

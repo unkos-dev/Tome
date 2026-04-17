@@ -705,6 +705,7 @@ mod tests {
             googlebooks_api_key: None,
             hardcover_base_url: "https://api.hardcover.app/v1/graphql".into(),
             hardcover_api_token: None,
+            operator_contact: None,
         }
     }
 

@@ -23,6 +23,7 @@ pub struct Config {
     pub googlebooks_api_key: Option<String>,
     pub hardcover_base_url: String,
     pub hardcover_api_token: Option<String>,
+    pub operator_contact: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -144,6 +145,9 @@ impl Config {
         let hardcover_api_token = env::var("TOME_HARDCOVER_API_TOKEN")
             .ok()
             .filter(|s| !s.is_empty());
+        let operator_contact = env::var("TOME_OPERATOR_CONTACT")
+            .ok()
+            .filter(|s| !s.is_empty());
 
         Ok(Self {
             port,
@@ -175,7 +179,18 @@ impl Config {
             googlebooks_api_key,
             hardcover_base_url,
             hardcover_api_token,
+            operator_contact,
         })
+    }
+
+    /// `User-Agent` string for outbound metadata API requests.  OpenLibrary
+    /// grants identified requests a 3 req/s rate-limit tier (vs. 1 req/s
+    /// anonymous) when a contact email or URL is present in the UA.
+    pub fn user_agent(&self) -> String {
+        match self.operator_contact.as_deref() {
+            Some(contact) => format!("Tome/{} ({contact})", env!("CARGO_PKG_VERSION")),
+            None => format!("Tome/{} (unidentified)", env!("CARGO_PKG_VERSION")),
+        }
     }
 }
 
@@ -333,6 +348,7 @@ mod tests {
                 "TOME_GOOGLEBOOKS_API_KEY",
                 "TOME_HARDCOVER_BASE_URL",
                 "TOME_HARDCOVER_API_TOKEN",
+                "TOME_OPERATOR_CONTACT",
             ],
             || {
                 let config = Config::from_env().unwrap();
@@ -361,6 +377,49 @@ mod tests {
                 assert_eq!(config.openlibrary_base_url, "https://openlibrary.org");
                 assert!(config.googlebooks_api_key.is_none());
                 assert!(config.hardcover_api_token.is_none());
+                assert!(config.operator_contact.is_none());
+            },
+        );
+    }
+
+    #[test]
+    fn user_agent_without_contact_reports_unidentified() {
+        with_env(
+            &[
+                ("DATABASE_URL", "postgres://test@localhost/test"),
+                ("OIDC_ISSUER_URL", "https://auth.example.com"),
+                ("OIDC_CLIENT_ID", "test"),
+                ("OIDC_CLIENT_SECRET", "secret"),
+                ("OIDC_REDIRECT_URI", "http://localhost:3000/auth/callback"),
+            ],
+            &["TOME_OPERATOR_CONTACT"],
+            || {
+                let config = Config::from_env().unwrap();
+                let ua = config.user_agent();
+                assert!(ua.starts_with("Tome/"), "missing Tome/ prefix: {ua}");
+                assert!(ua.ends_with("(unidentified)"), "unexpected suffix: {ua}");
+            },
+        );
+    }
+
+    #[test]
+    fn user_agent_with_contact_embeds_identifier() {
+        with_env(
+            &[
+                ("DATABASE_URL", "postgres://test@localhost/test"),
+                ("OIDC_ISSUER_URL", "https://auth.example.com"),
+                ("OIDC_CLIENT_ID", "test"),
+                ("OIDC_CLIENT_SECRET", "secret"),
+                ("OIDC_REDIRECT_URI", "http://localhost:3000/auth/callback"),
+                ("TOME_OPERATOR_CONTACT", "ops@example.com"),
+            ],
+            &[],
+            || {
+                let config = Config::from_env().unwrap();
+                assert_eq!(config.operator_contact.as_deref(), Some("ops@example.com"));
+                let ua = config.user_agent();
+                assert!(ua.contains("(ops@example.com)"), "missing contact: {ua}");
+                assert!(ua.starts_with("Tome/"), "missing Tome/ prefix: {ua}");
             },
         );
     }
