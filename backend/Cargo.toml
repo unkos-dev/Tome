@@ -7,6 +7,7 @@ description = "Tome ebook library manager — API server"
 
 [dependencies]
 anyhow = "1"
+async-trait = "0.1"
 axum = "0.8"
 axum-login = "0.18"
 base64ct = { version = "1", features = ["std"] }
