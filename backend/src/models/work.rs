@@ -249,8 +249,12 @@ pub async fn rematch_on_isbn_change(
         return Ok(RematchOutcome::NoOp);
     }
 
-    let matches: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT DISTINCT m.work_id FROM manifestations m \
+    // Postgres forbids DISTINCT with FOR UPDATE, so lock the manifestation
+    // rows (not-distinct) and dedupe their work_ids in Rust. The FOR UPDATE
+    // still guarantees no concurrent rematch can mutate the same matched
+    // manifestation mid-flight.
+    let raw_matches: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT m.work_id FROM manifestations m \
          WHERE m.work_id != $3 \
            AND ( \
                (m.isbn_13 = $1 AND $1 IS NOT NULL) OR \
@@ -263,6 +267,14 @@ pub async fn rematch_on_isbn_change(
     .bind(current_work_id)
     .fetch_all(&mut *conn)
     .await?;
+
+    let mut seen = std::collections::HashSet::new();
+    let mut matches: Vec<Uuid> = Vec::new();
+    for w in raw_matches {
+        if seen.insert(w) {
+            matches.push(w);
+        }
+    }
 
     if matches.is_empty() {
         return Ok(RematchOutcome::NoOp);
@@ -514,5 +526,277 @@ mod tests {
         assert_eq!(work_id1, work_id2, "ISBN match should return existing work");
 
         cleanup_work(&pool, work_id1).await;
+    }
+
+    // ── Task 34: rematch_on_isbn_change integration tests ─────────────────
+
+    /// Helper: insert a blank work directly (bypassing `find_or_create` so
+    /// test titles don't collide via pg_trgm similarity).
+    async fn insert_work(pool: &PgPool, title: &str) -> Uuid {
+        sqlx::query_scalar(
+            "INSERT INTO works (title, sort_title) VALUES ($1, lower($1)) RETURNING id",
+        )
+        .bind(title)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    /// Defuse state from a prior failed test: delete any work whose
+    /// manifestations carry `isbn`.  Without this, two sequential runs of
+    /// the same rematch test see ghost matches from the previous run's
+    /// panic-skipped cleanup.
+    async fn preclean_rematch_isbn(pool: &PgPool, isbn: &str) {
+        let work_ids: Vec<Uuid> =
+            sqlx::query_scalar("SELECT DISTINCT work_id FROM manifestations WHERE isbn_13 = $1")
+                .bind(isbn)
+                .fetch_all(pool)
+                .await
+                .unwrap_or_default();
+        for wid in work_ids {
+            let _ = sqlx::query(
+                "DELETE FROM metadata_versions WHERE manifestation_id IN \
+                 (SELECT id FROM manifestations WHERE work_id = $1)",
+            )
+            .bind(wid)
+            .execute(pool)
+            .await;
+            let _ = sqlx::query("DELETE FROM manifestations WHERE work_id = $1")
+                .bind(wid)
+                .execute(pool)
+                .await;
+            let _ = sqlx::query("DELETE FROM works WHERE id = $1")
+                .bind(wid)
+                .execute(pool)
+                .await;
+        }
+    }
+
+    /// Helper: insert a manifestation row for a given work/ISBN combo.
+    /// Returns the manifestation id.
+    async fn insert_manifestation(
+        pool: &PgPool,
+        work_id: Uuid,
+        isbn_13: Option<&str>,
+        file_marker: &str,
+    ) -> Uuid {
+        let path = format!("/tmp/rematch-{file_marker}.epub");
+        sqlx::query_scalar(
+            "INSERT INTO manifestations \
+               (work_id, isbn_13, format, file_path, file_hash, file_size_bytes, \
+                ingestion_status, validation_status) \
+             VALUES ($1, $2, 'epub'::manifestation_format, $3, $4, 1000, \
+                     'complete'::ingestion_status, 'valid'::validation_status) \
+             RETURNING id",
+        )
+        .bind(work_id)
+        .bind(isbn_13)
+        .bind(&path)
+        .bind(format!("hash-{file_marker}"))
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    /// Stub work (no other manifestations, no manual drafts) with ISBN
+    /// matching another work → auto-merge: manifestation moves, stub deleted.
+    #[tokio::test]
+    #[ignore] // Requires running postgres with applied migrations
+    async fn rematch_auto_merge() {
+        let pool = PgPool::connect(&db_url()).await.unwrap();
+        let marker = Uuid::new_v4().simple().to_string();
+        let isbn = "9780000000001";
+        preclean_rematch_isbn(&pool, isbn).await;
+
+        // Seed "real" work + manifestation with the target ISBN.
+        let real_work_id = insert_work(&pool, &format!("Real-{marker}")).await;
+        let _real_m =
+            insert_manifestation(&pool, real_work_id, Some(isbn), &format!("{marker}-a")).await;
+
+        // Seed "stub" work (different title, one manifestation) with the
+        // same ISBN that will trigger rematch.
+        let stub_work_id = insert_work(&pool, &format!("Stub-{marker}")).await;
+        let stub_manifestation_id =
+            insert_manifestation(&pool, stub_work_id, Some(isbn), &format!("{marker}-b")).await;
+
+        // Run rematch inside a transaction (matches orchestrator usage).
+        let mut tx = pool.begin().await.unwrap();
+        let outcome = rematch_on_isbn_change(&mut tx, stub_manifestation_id)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(
+            outcome,
+            RematchOutcome::AutoMerged {
+                from: stub_work_id,
+                to: real_work_id,
+            },
+            "expected auto-merge"
+        );
+
+        // Stub work must be deleted.
+        let stub_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM works WHERE id = $1")
+            .bind(stub_work_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stub_exists, 0, "stub work should be deleted");
+
+        // Manifestation should now point at the real work.
+        let new_work_id: Uuid =
+            sqlx::query_scalar("SELECT work_id FROM manifestations WHERE id = $1")
+                .bind(stub_manifestation_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(new_work_id, real_work_id);
+
+        cleanup_work(&pool, real_work_id).await;
+    }
+
+    /// Stub work has 2 manifestations → suspected, not auto-merged.
+    #[tokio::test]
+    #[ignore] // Requires running postgres with applied migrations
+    async fn rematch_suspected_when_multiple_manifestations() {
+        let pool = PgPool::connect(&db_url()).await.unwrap();
+        let marker = Uuid::new_v4().simple().to_string();
+        let isbn = "9780000000002";
+        preclean_rematch_isbn(&pool, isbn).await;
+
+        let real_meta = test_metadata(&format!("Real MultiMani {marker}"), "RM Author");
+        let real_work_id = find_or_create(&pool, &real_meta).await.unwrap();
+        let _ = insert_manifestation(&pool, real_work_id, Some(isbn), &format!("{marker}-a")).await;
+
+        let stub_meta = test_metadata(&format!("Stub MultiMani {marker}"), "SM Author");
+        let stub_work_id = find_or_create(&pool, &stub_meta).await.unwrap();
+        let target_m =
+            insert_manifestation(&pool, stub_work_id, Some(isbn), &format!("{marker}-b")).await;
+        // Add a second manifestation on the stub — should inhibit auto-merge.
+        let _sibling_m =
+            insert_manifestation(&pool, stub_work_id, None, &format!("{marker}-c")).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        let outcome = rematch_on_isbn_change(&mut tx, target_m).await.unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(
+            outcome,
+            RematchOutcome::Suspected {
+                matched_work: real_work_id
+            },
+            "expected Suspected outcome"
+        );
+
+        // Stub work must still exist.
+        let stub_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM works WHERE id = $1")
+            .bind(stub_work_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stub_exists, 1, "stub work should NOT be deleted");
+
+        // suspected_duplicate_work_id should be set.
+        let dup: Option<Uuid> = sqlx::query_scalar(
+            "SELECT suspected_duplicate_work_id FROM manifestations WHERE id = $1",
+        )
+        .bind(target_m)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(dup, Some(real_work_id));
+
+        cleanup_work(&pool, real_work_id).await;
+        cleanup_work(&pool, stub_work_id).await;
+    }
+
+    /// Stub work has a manual-source draft → suspected, not auto-merged.
+    #[tokio::test]
+    #[ignore] // Requires running postgres with applied migrations
+    async fn rematch_suspected_when_manual_draft_exists() {
+        let pool = PgPool::connect(&db_url()).await.unwrap();
+        let marker = Uuid::new_v4().simple().to_string();
+        let isbn = "9780000000003";
+        preclean_rematch_isbn(&pool, isbn).await;
+
+        let real_work_id = insert_work(&pool, &format!("Real-MD-{marker}")).await;
+        let _ = insert_manifestation(&pool, real_work_id, Some(isbn), &format!("{marker}-a")).await;
+
+        let stub_work_id = insert_work(&pool, &format!("Stub-MD-{marker}")).await;
+        let stub_m =
+            insert_manifestation(&pool, stub_work_id, Some(isbn), &format!("{marker}-b")).await;
+
+        // Add a manual-source draft on the stub.
+        sqlx::query(
+            "INSERT INTO metadata_versions \
+               (manifestation_id, source, field_name, new_value, value_hash, match_type, confidence_score) \
+             VALUES ($1, 'manual', 'title', '\"User Override\"'::jsonb, \
+                     digest('user-override', 'sha256'), 'isbn', 1.0)",
+        )
+        .bind(stub_m)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let mut tx = pool.begin().await.unwrap();
+        let outcome = rematch_on_isbn_change(&mut tx, stub_m).await.unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(
+            outcome,
+            RematchOutcome::Suspected {
+                matched_work: real_work_id
+            },
+            "expected Suspected because of manual draft"
+        );
+
+        let stub_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM works WHERE id = $1")
+            .bind(stub_work_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(stub_exists, 1, "stub work should NOT be deleted");
+
+        let dup: Option<Uuid> = sqlx::query_scalar(
+            "SELECT suspected_duplicate_work_id FROM manifestations WHERE id = $1",
+        )
+        .bind(stub_m)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(dup, Some(real_work_id));
+
+        cleanup_work(&pool, real_work_id).await;
+        cleanup_work(&pool, stub_work_id).await;
+    }
+
+    /// No other work has the ISBN → NoOp.
+    #[tokio::test]
+    #[ignore] // Requires running postgres with applied migrations
+    async fn rematch_noop_when_isbn_unique() {
+        let pool = PgPool::connect(&db_url()).await.unwrap();
+        let marker = Uuid::new_v4().simple().to_string();
+        let isbn = "9780000000004";
+        preclean_rematch_isbn(&pool, isbn).await;
+
+        let work_id = insert_work(&pool, &format!("Solo-{marker}")).await;
+        let m = insert_manifestation(&pool, work_id, Some(isbn), &format!("{marker}-solo")).await;
+
+        let mut tx = pool.begin().await.unwrap();
+        let outcome = rematch_on_isbn_change(&mut tx, m).await.unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(outcome, RematchOutcome::NoOp);
+
+        let dup: Option<Uuid> = sqlx::query_scalar(
+            "SELECT suspected_duplicate_work_id FROM manifestations WHERE id = $1",
+        )
+        .bind(m)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(dup.is_none(), "no suspected pointer should be set");
+
+        cleanup_work(&pool, work_id).await;
     }
 }

@@ -1156,4 +1156,288 @@ mod tests {
         let dest = library.path().join("Author/Book.pdf");
         cleanup_test_data(&pool, dest.to_str().unwrap(), source.to_str().unwrap()).await;
     }
+
+    // ── Task 30: ingest-invariant DB tests ────────────────────────────────
+
+    /// Pre-clean: remove any lingering rows with the target ISBN so
+    /// `match_existing` can't hit a stub work left over from a panicked
+    /// sibling test.  Without this, an orchestrator-test failure upstream
+    /// pollutes these tests with empty-title stubs that match by ISBN.
+    async fn preclean_isbn(pool: &sqlx::PgPool, isbn: &str) {
+        let work_ids: Vec<uuid::Uuid> =
+            sqlx::query_scalar("SELECT DISTINCT work_id FROM manifestations WHERE isbn_13 = $1")
+                .bind(isbn)
+                .fetch_all(pool)
+                .await
+                .unwrap_or_default();
+        for wid in work_ids {
+            let _ = sqlx::query(
+                "DELETE FROM metadata_versions WHERE manifestation_id IN \
+                 (SELECT id FROM manifestations WHERE work_id = $1)",
+            )
+            .bind(wid)
+            .execute(pool)
+            .await;
+            let _ = sqlx::query("DELETE FROM work_authors WHERE work_id = $1")
+                .bind(wid)
+                .execute(pool)
+                .await;
+            let _ = sqlx::query("DELETE FROM manifestations WHERE work_id = $1")
+                .bind(wid)
+                .execute(pool)
+                .await;
+            let _ = sqlx::query("DELETE FROM works WHERE id = $1")
+                .bind(wid)
+                .execute(pool)
+                .await;
+        }
+    }
+
+    /// Every non-NULL canonical field set by ingestion must have a matching
+    /// `*_version_id` pointer referencing a real `metadata_versions` row with
+    /// `source='opf'`.  Without this invariant, metadata_versions is optional
+    /// instead of authoritative.
+    #[tokio::test]
+    #[ignore] // Requires running postgres with applied migrations
+    async fn ingest_sets_version_pointers_for_all_canonical_fields() {
+        let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
+        preclean_isbn(&pool, "9780306406157").await;
+        let ingestion = tempfile::tempdir().unwrap();
+        let library = tempfile::tempdir().unwrap();
+        let quarantine = tempfile::tempdir().unwrap();
+
+        let marker = uuid::Uuid::new_v4().simple().to_string();
+        let source = ingestion.path().join(format!("invariant-{marker}.epub"));
+        std::fs::write(&source, make_metadata_epub()).unwrap();
+
+        let config = test_config_for(
+            ingestion.path().to_str().unwrap(),
+            library.path().to_str().unwrap(),
+            quarantine.path().to_str().unwrap(),
+        );
+        let result = scan_once(&config, &pool).await.unwrap();
+        assert_eq!(result.processed, 1, "expected 1 processed");
+
+        let dest = library
+            .path()
+            .join("McAuthor, Test/The Integration Test.epub");
+        assert!(dest.exists(), "expected file at {}", dest.display());
+
+        // Pull every canonical field + its pointer in one query.
+        #[derive(sqlx::FromRow)]
+        struct Invariant {
+            title: Option<String>,
+            title_version_id: Option<uuid::Uuid>,
+            language: Option<String>,
+            language_version_id: Option<uuid::Uuid>,
+            publisher: Option<String>,
+            publisher_version_id: Option<uuid::Uuid>,
+            pub_date_version_id: Option<uuid::Uuid>,
+            isbn_13: Option<String>,
+            isbn_13_version_id: Option<uuid::Uuid>,
+        }
+        let inv: Invariant = sqlx::query_as(
+            "SELECT w.title, w.title_version_id, \
+                    w.language, w.language_version_id, \
+                    m.publisher, m.publisher_version_id, \
+                    m.pub_date_version_id, \
+                    m.isbn_13, m.isbn_13_version_id \
+             FROM manifestations m \
+             JOIN works w ON w.id = m.work_id \
+             WHERE m.file_path = $1",
+        )
+        .bind(dest.to_str().unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let Invariant {
+            title,
+            title_version_id: title_ptr,
+            language,
+            language_version_id: language_ptr,
+            publisher,
+            publisher_version_id: publisher_ptr,
+            pub_date_version_id: pub_date_ptr,
+            isbn_13,
+            isbn_13_version_id: isbn_13_ptr,
+        } = inv;
+
+        // Invariant: non-NULL canonical value ⇒ non-NULL pointer.
+        if title.is_some() {
+            assert!(title_ptr.is_some(), "title set but title_version_id NULL");
+        }
+        if language.is_some() {
+            assert!(
+                language_ptr.is_some(),
+                "language set but language_version_id NULL"
+            );
+        }
+        if publisher.is_some() {
+            assert!(
+                publisher_ptr.is_some(),
+                "publisher set but publisher_version_id NULL"
+            );
+        }
+        if isbn_13.is_some() {
+            assert!(
+                isbn_13_ptr.is_some(),
+                "isbn_13 set but isbn_13_version_id NULL"
+            );
+        }
+
+        // Every non-NULL pointer must reference a real source='opf' row.
+        for pointer in [
+            title_ptr,
+            language_ptr,
+            publisher_ptr,
+            pub_date_ptr,
+            isbn_13_ptr,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let source_for_ptr: String =
+                sqlx::query_scalar("SELECT source FROM metadata_versions WHERE id = $1")
+                    .bind(pointer)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap_or_else(|e| {
+                        panic!("pointer {pointer} did not resolve to a metadata_versions row: {e}")
+                    });
+            assert_eq!(
+                source_for_ptr, "opf",
+                "pointer {pointer} resolved to source '{source_for_ptr}', expected 'opf'"
+            );
+        }
+
+        cleanup_test_data(&pool, dest.to_str().unwrap(), source.to_str().unwrap()).await;
+    }
+
+    /// When ingestion cannot extract OPF (e.g. for a non-EPUB file), a
+    /// heuristic-fallback row is written to `metadata_versions` with
+    /// `source='opf'`, `field_name='title'`, `confidence_score=0.2` and the
+    /// work's `title_version_id` pointer references it.
+    #[tokio::test]
+    #[ignore] // Requires running postgres with applied migrations
+    async fn ingest_without_opf_writes_heuristic_title_journal() {
+        let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
+        let ingestion = tempfile::tempdir().unwrap();
+        let library = tempfile::tempdir().unwrap();
+        let quarantine = tempfile::tempdir().unwrap();
+
+        // PDF has no OPF extraction path → heuristic fallback engages.
+        let marker = uuid::Uuid::new_v4().simple().to_string();
+        let source = ingestion
+            .path()
+            .join(format!("Heuristic Author - Heuristic Title {marker}.pdf"));
+        std::fs::write(&source, format!("heuristic-pdf-{marker}")).unwrap();
+
+        let config = test_config_for(
+            ingestion.path().to_str().unwrap(),
+            library.path().to_str().unwrap(),
+            quarantine.path().to_str().unwrap(),
+        );
+        let result = scan_once(&config, &pool).await.unwrap();
+        assert_eq!(result.processed, 1, "expected 1 processed");
+
+        let dest = library
+            .path()
+            .join(format!("Heuristic Author/Heuristic Title {marker}.pdf"));
+        assert!(dest.exists(), "expected file at {}", dest.display());
+
+        // The work should have its title_version_id pointing at the heuristic
+        // row, which must have source='opf', field_name='title', confidence=0.2.
+        let (title_ptr, title): (Option<uuid::Uuid>, String) = sqlx::query_as(
+            "SELECT w.title_version_id, w.title FROM works w \
+             JOIN manifestations m ON m.work_id = w.id \
+             WHERE m.file_path = $1",
+        )
+        .bind(dest.to_str().unwrap())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(
+            title.contains("Heuristic Title"),
+            "title should include heuristic value, got '{title}'"
+        );
+        let ptr = title_ptr.expect("title_version_id must be wired for heuristic row");
+
+        let (src, field_name, confidence_score): (String, String, Option<f32>) = sqlx::query_as(
+            "SELECT source, field_name, confidence_score \
+             FROM metadata_versions WHERE id = $1",
+        )
+        .bind(ptr)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(src, "opf");
+        assert_eq!(field_name, "title");
+        let score = confidence_score.expect("confidence_score must be set for heuristic row");
+        assert!(
+            (score - 0.2).abs() < 1e-4,
+            "heuristic confidence should be ~0.2, got {score}"
+        );
+
+        cleanup_test_data(&pool, dest.to_str().unwrap(), source.to_str().unwrap()).await;
+    }
+
+    /// `work_authors.source_version_id` must be wired to the `creators`
+    /// journal row so authors on the work trace back to their draft.
+    #[tokio::test]
+    #[ignore] // Requires running postgres with applied migrations
+    async fn ingest_sets_work_authors_source_version_id() {
+        let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
+        preclean_isbn(&pool, "9780306406157").await;
+        let ingestion = tempfile::tempdir().unwrap();
+        let library = tempfile::tempdir().unwrap();
+        let quarantine = tempfile::tempdir().unwrap();
+
+        let marker = uuid::Uuid::new_v4().simple().to_string();
+        let source = ingestion.path().join(format!("authors-{marker}.epub"));
+        std::fs::write(&source, make_metadata_epub()).unwrap();
+
+        let config = test_config_for(
+            ingestion.path().to_str().unwrap(),
+            library.path().to_str().unwrap(),
+            quarantine.path().to_str().unwrap(),
+        );
+        let result = scan_once(&config, &pool).await.unwrap();
+        assert_eq!(result.processed, 1, "expected 1 processed");
+
+        let dest = library
+            .path()
+            .join("McAuthor, Test/The Integration Test.epub");
+
+        // Every work_author row for this work must carry a source_version_id
+        // pointing at a metadata_versions row with field_name='creators'.
+        let rows: Vec<(uuid::Uuid, Option<uuid::Uuid>)> = sqlx::query_as(
+            "SELECT wa.author_id, wa.source_version_id \
+             FROM work_authors wa \
+             JOIN manifestations m ON m.work_id = wa.work_id \
+             WHERE m.file_path = $1",
+        )
+        .bind(dest.to_str().unwrap())
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert!(!rows.is_empty(), "expected at least one work_author row");
+
+        for (author_id, source_version_id) in rows {
+            let ptr = source_version_id.unwrap_or_else(|| {
+                panic!("work_authors.source_version_id NULL for author {author_id}")
+            });
+            let field_name: String =
+                sqlx::query_scalar("SELECT field_name FROM metadata_versions WHERE id = $1")
+                    .bind(ptr)
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap();
+            assert_eq!(
+                field_name, "creators",
+                "source_version_id should reference a 'creators' journal row"
+            );
+        }
+
+        cleanup_test_data(&pool, dest.to_str().unwrap(), source.to_str().unwrap()).await;
+    }
 }

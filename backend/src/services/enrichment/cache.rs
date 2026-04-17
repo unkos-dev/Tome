@@ -301,6 +301,54 @@ mod tests {
         cleanup(&pool).await;
     }
 
+    /// ISBN-10 and ISBN-13 of the same book resolve to one cache row via
+    /// `lookup_key::isbn_key` — the cache sees a single canonical key, so a
+    /// write via one form is visible via the other.
+    #[tokio::test]
+    #[ignore]
+    async fn isbn10_and_isbn13_dedupe_via_lookup_key() {
+        use crate::services::enrichment::lookup_key;
+
+        let pool = PgPool::connect(&db_url()).await.unwrap();
+        cleanup(&pool).await;
+
+        let key_from_isbn10 = lookup_key::isbn_key("0306406152").expect("valid ISBN-10");
+        let key_from_isbn13 = lookup_key::isbn_key("9780306406157").expect("valid ISBN-13");
+        assert_eq!(
+            key_from_isbn10, key_from_isbn13,
+            "lookup_key must converge ISBN-10 and ISBN-13"
+        );
+
+        // Prefix with 'test-' to match the cleanup predicate.
+        let canonical = format!("test-{key_from_isbn10}");
+        let payload = json!({"title": "Dune"});
+
+        write(
+            &pool,
+            TEST_SOURCE,
+            &canonical,
+            &payload,
+            ApiCacheKind::Hit,
+            Some(200),
+            &ttls_standard(),
+        )
+        .await
+        .unwrap();
+
+        // Recompute the key from the ISBN-13 form and ensure the read hits.
+        let roundtrip_key = format!(
+            "test-{}",
+            lookup_key::isbn_key("9780306406157").expect("valid ISBN-13")
+        );
+        let cached = read(&pool, TEST_SOURCE, &roundtrip_key)
+            .await
+            .unwrap()
+            .expect("ISBN-13 key should hit the ISBN-10-written row");
+        assert_eq!(cached.response, payload);
+
+        cleanup(&pool).await;
+    }
+
     #[tokio::test]
     #[ignore]
     async fn upsert_overwrites_previous_value() {

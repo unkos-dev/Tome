@@ -493,4 +493,59 @@ mod tests {
             "expected SsrfBlocked, got {result:?}"
         );
     }
+
+    /// Task 37 (DNS rebinding): when a cover URL redirects to a hostname
+    /// that resolves to a private/loopback IP, the SSRF-guarded
+    /// `cover_client` must reject the redirect hop — surfaced as
+    /// `CoverError::Network(_)` (the redirect policy returned an error).
+    ///
+    /// This exercises the *redirect* SSRF path distinct from the initial-URL
+    /// pre-check covered above.  We use `localhost` as the rebinding target
+    /// because the production guard uses the OS resolver
+    /// (`std::net::ToSocketAddrs`) — no injection point for a fake resolver,
+    /// so we rely on a hostname the OS will actually resolve to a denied IP.
+    #[tokio::test]
+    async fn redirect_to_hostname_resolving_to_loopback_blocked() {
+        use super::super::http::cover_client;
+
+        let tmp = TempDir::new().unwrap();
+        let server = MockServer::start().await;
+
+        // Wiremock responds 302 → http://localhost:1/ (OS resolver returns
+        // 127.0.0.1 / ::1 — both in the denied set).
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("location", "http://localhost:1/evil-cover.jpg"),
+            )
+            .mount(&server)
+            .await;
+
+        // `allow_private_hosts=true` lets the initial wiremock URL (127.0.0.1)
+        // past the pre-check.  The redirect policy is separate and always
+        // validates each hop.
+        let config = DownloadConfig {
+            library_root: tmp.path().to_path_buf(),
+            max_bytes: 10 * 1024 * 1024,
+            min_long_edge_px: 1,
+            allow_private_hosts: true,
+        };
+
+        let ssrf_client = cover_client(3, 10);
+        let result = download(
+            &server.uri(),
+            &ssrf_client,
+            &config,
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+        )
+        .await;
+
+        // The redirect policy errors → reqwest returns an Error →
+        // CoverError::Network(_).
+        assert!(
+            matches!(result, Err(CoverError::Network(_))),
+            "expected Network error (redirect blocked by SSRF guard), got {result:?}"
+        );
+    }
 }
