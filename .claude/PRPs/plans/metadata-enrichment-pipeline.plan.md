@@ -471,6 +471,7 @@ server.post("/api/...")
 > (6–8) before orchestration. Do not reorder.
 
 ### Task 1: Migration — `add_enrichment_pipeline.up.sql` / `.down.sql`
+- **STATUS**: Complete — Phase A (`4e61154`).
 - **ACTION**: Create paired migration at `backend/migrations/20260417NNNNNN_add_enrichment_pipeline.up.sql` and `.down.sql`. Serial number = largest existing + 1.
 - **IMPLEMENT**:
   1. Create `metadata_sources` table (id TEXT PK, display_name, kind, enabled, base_priority, config JSONB, added_at). Seed six rows: `opf/OPF Metadata/file/100`, `manual/Manual Override/user/10`, `openlibrary/Open Library/api/100`, `googlebooks/Google Books/api/100`, `hardcover/Hardcover/api/90`, `ai/AI-assisted/ai/500`.
@@ -495,6 +496,7 @@ server.post("/api/...")
 - **VALIDATE**: `DATABASE_URL=postgres://tome:tome@localhost:5433/tome_dev sqlx migrate run` succeeds; `sqlx migrate revert` succeeds; re-apply succeeds; existing OPF rows still queryable after backfill.
 
 ### Task 2: Rewrite `draft.rs` to new journal shape
+- **STATUS**: Complete — Phase A (`4e61154`).
 - **ACTION**: Replace `backend/src/services/metadata/draft.rs::insert_draft` SQL + change `write_drafts` return type.
 - **IMPLEMENT**:
   - Change `write_drafts` signature to `pub async fn write_drafts(conn: &mut PgConnection, manifestation_id: Uuid, metadata: &ExtractedMetadata) -> Result<HashMap<String, Uuid>, sqlx::Error>` — accept a transaction connection (so caller controls commit) and return `{field_name → metadata_versions.id}`.
@@ -508,6 +510,7 @@ server.post("/api/...")
 - **VALIDATE**: `cargo test -p tome-api services::metadata::draft --features --ignored`; verify a second call with same values bumps `observation_count` rather than failing.
 
 ### Task 3: Refactor `orchestrator::process_file` for ingest invariant
+- **STATUS**: Complete — Phase A (`4e61154`).
 - **ACTION**: Sequence manifestation insert → draft write → pointer update inside one transaction.
 - **IMPLEMENT**:
   - Open a transaction at the start of the DB section of `process_file`.
@@ -522,6 +525,7 @@ server.post("/api/...")
 - **VALIDATE**: new ingest invariant test (task 30): after `scan_once`, for every non-NULL canonical field on the manifestation, there exists a `metadata_versions` row with matching id at the `*_version_id` pointer.
 
 ### Task 4: Refactor `work::find_or_create` to wire work-level pointers
+- **STATUS**: Complete — Phase A (`4e61154`).
 - **ACTION**: Extend `find_or_create` to accept the HashMap from task 2 and set `works.{title,description,language}_version_id` + `work_authors.source_version_id`.
 - **IMPLEMENT**:
   - New signature: `find_or_create(tx: &mut Transaction<'_, Postgres>, metadata: &ExtractedMetadata, draft_ids: &HashMap<String, Uuid>) -> Result<Uuid, sqlx::Error>`. Use an already-open transaction (no `pool.begin()` inside).
@@ -534,6 +538,7 @@ server.post("/api/...")
 - **VALIDATE**: `cargo test --ignored -p tome-api models::work::tests::find_or_create_new_work` — extend to assert `works.title_version_id IS NOT NULL` and references a real `metadata_versions.id`.
 
 ### Task 5: Heuristic-fallback journal row
+- **STATUS**: Complete — Phase A (`4e61154`).
 - **ACTION**: In `orchestrator.rs` when `extracted.is_none()` (no OPF), write a low-confidence OPF journal row for the filename-inferred title so the canonical invariant holds.
 - **IMPLEMENT**:
   - Before the fallback `INSERT INTO works (title, sort_title)` branch, fabricate a synthetic `ExtractedMetadata` with only `title: Some(filename_title)` and `confidence: 0.2`.
@@ -545,6 +550,7 @@ server.post("/api/...")
 - **VALIDATE**: Test (task 30): ingest a file with NO OPF; assert a `metadata_versions` row exists with `source='opf', field_name='title', confidence_score=0.2` AND `works.title_version_id` points at it.
 
 ### Task 6: `work::rematch_on_isbn_change`
+- **STATUS**: Complete — Phase A (`4e61154`).
 - **ACTION**: Create `pub async fn rematch_on_isbn_change(tx: &mut PgConnection, manifestation_id: Uuid) -> Result<RematchOutcome, sqlx::Error>` in `backend/src/models/work.rs`.
 - **IMPLEMENT**:
   - Fetch current manifestation: `work_id`, `isbn_13`, `isbn_10`.
@@ -564,6 +570,7 @@ server.post("/api/...")
 - **VALIDATE**: task 34 unit tests (auto-merge, suspicion, no-op paths).
 
 ### Task 7: Auth helpers `require_admin` and `require_not_child`
+- **STATUS**: Complete — Phase A (`4e61154`).
 - **ACTION**: Add two methods to `CurrentUser` in `backend/src/auth/middleware.rs` and migrate 5 existing call sites.
 - **IMPLEMENT**:
   ```rust
@@ -587,11 +594,13 @@ server.post("/api/...")
 - **VALIDATE**: `cargo build` — dead-code lint clears once the allow attributes are removed. task 31 tests verify child 403 / adult 200 / admin 200 on all new routes.
 
 ### Task 8: Cargo deps
+- **STATUS**: Complete — Phase A/B (`a935f3e` async-trait, `cb0fd35` rate-limit + HTTP deps).
 - **ACTION**: `backend/Cargo.toml` — add `governor = "0.8"`, `hickory-resolver = "0.26"` (verify current majors via Context7). Update `image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }` — add `"webp"`.
 - **MIRROR**: existing Cargo.toml ordering (alphabetical within deps/dev-deps).
 - **VALIDATE**: `cargo build` succeeds; run `cargo audit` — no new advisories.
 
 ### Task 9: `services/enrichment/mod.rs`
+- **STATUS**: Complete — Phase B (`cb0fd35`).
 - **ACTION**: Module root with public surface.
 - **IMPLEMENT**:
   ```rust
@@ -615,6 +624,7 @@ server.post("/api/...")
 - **VALIDATE**: `cargo check` passes once all submodules exist.
 
 ### Task 10: `lookup_key.rs`
+- **STATUS**: Complete — Phase B (`cb0fd35`).
 - **ACTION**: Canonicalise raw titles/authors/ISBNs into stable cache keys.
 - **IMPLEMENT**:
   ```rust
@@ -638,6 +648,7 @@ server.post("/api/...")
 - **VALIDATE**: unit tests (task 29) prove ISBN-10 and ISBN-13 of the same book produce the same key; title/author whitespace and case variants produce the same key.
 
 ### Task 11: `value_hash.rs`
+- **STATUS**: Complete — Phase B (`cb0fd35`).
 - **ACTION**: Canonical-JSON + SHA-256 with per-field normalisation hooks.
 - **IMPLEMENT**:
   ```rust
@@ -667,6 +678,7 @@ server.post("/api/...")
 - **VALIDATE**: unit tests (task 29): same logical value → same hash regardless of key order or whitespace; `["a","b"]` and `["b","a"]` for list fields produce same hash; different values produce different hashes.
 
 ### Task 12: `cache.rs`
+- **STATUS**: Complete — Phase B (`cb0fd35`).
 - **ACTION**: `api_cache` read/write with per-kind TTL and eviction on stale read.
 - **IMPLEMENT**:
   - `read(pool, source, lookup_key) -> Option<CachedResponse>` — `SELECT ... WHERE (source, lookup_key) = ($1, $2) AND expires_at > now()`. On miss (expired OR absent) and pool-permission allows, `DELETE WHERE expires_at <= now() AND (source, lookup_key) = ($1, $2)` opportunistically.
@@ -677,6 +689,7 @@ server.post("/api/...")
 - **VALIDATE**: task 36 tests — distinct TTLs honoured; stale read does not return data.
 
 ### Task 13: `policy.rs`
+- **STATUS**: Complete — Phase B (`cb0fd35`).
 - **ACTION**: `FieldPolicy` enum + defaults + `decide` function.
 - **IMPLEMENT**:
   ```rust
@@ -721,6 +734,7 @@ server.post("/api/...")
 - **VALIDATE**: task 29 tests cover each branch of `decide`.
 
 ### Task 14: `confidence.rs`
+- **STATUS**: Complete — Phase B (`cb0fd35`).
 - **ACTION**: `score(source, match_type, quorum_count) -> f32`.
 - **IMPLEMENT**:
   ```rust
@@ -749,6 +763,7 @@ server.post("/api/...")
 - **VALIDATE**: task 29 tests cover the clamping edge (manual alone = 1.00; openlibrary+quorum_3 stays ≤ 0.99).
 
 ### Task 15: `http.rs` — two clients
+- **STATUS**: Complete — Phase B (`cb0fd35`).
 - **ACTION**: `api_client()` for metadata APIs (no SSRF guard); `cover_client()` for cover downloads (SSRF-guarded redirect policy).
 - **IMPLEMENT**:
   ```rust
@@ -787,6 +802,7 @@ server.post("/api/...")
 - **VALIDATE**: task 37 — mock DNS returns 127.0.0.1 for a public hostname → redirect blocked. Legit public IP → passes.
 
 ### Task 16: `cover_download.rs`
+- **STATUS**: Complete — Phase B (`cb0fd35`).
 - **ACTION**: Streaming download with byte cap, content-type allowlist, magic-byte sniff, dimension gate, stage path.
 - **IMPLEMENT**:
   - `pub async fn download(url: &str, client: &reqwest::Client, config: &Config, manifestation_id: Uuid, version_id: Uuid) -> Result<CoverArtifact, CoverError>`:
@@ -802,6 +818,7 @@ server.post("/api/...")
 - **VALIDATE**: task 37 — oversized body aborts mid-stream; wrong content-type rejected; sub-threshold rejected; valid 1200×1800 JPEG accepted and staged.
 
 ### Task 17: `sources/mod.rs` — trait
+- **STATUS**: Complete — Phase C (`c7d87be`).
 - **ACTION**: `MetadataSource` trait + common types.
 - **IMPLEMENT**:
   ```rust
@@ -824,6 +841,7 @@ server.post("/api/...")
 - **VALIDATE**: Compiles standalone.
 
 ### Task 18: `sources/open_library.rs`
+- **STATUS**: Complete — Phase C (`c7d87be`); migrated to `/api/books` in `1bdc3b9`.
 - **ACTION**: Adapter.
 - **IMPLEMENT**:
   - ISBN path: `GET {base_url}/isbn/{isbn}.json`. 404 → `Ok(vec![])`. 200 → map to `SourceResult`s (title → `dc:title`-ish, description, publishers[0], publish_date, authors, subjects[0..n]).
@@ -833,6 +851,7 @@ server.post("/api/...")
 - **VALIDATE**: task 32 `wiremock` integration tests (happy 200, 404, 429, 500, timeout).
 
 ### Task 19: `sources/google_books.rs`
+- **STATUS**: Complete — Phase C (`c7d87be`).
 - **ACTION**: Adapter.
 - **IMPLEMENT**:
   - ISBN: `GET {base_url}/volumes?q=isbn:{isbn}&maxResults=1`. If API key configured, append `&key={key}`.
@@ -843,6 +862,7 @@ server.post("/api/...")
 - **VALIDATE**: task 32.
 
 ### Task 20: `sources/hardcover.rs`
+- **STATUS**: Complete — Phase C (`c7d87be`).
 - **ACTION**: Adapter. GraphQL.
 - **IMPLEMENT**:
   - If `config.hardcover_api_token.is_empty()` → adapter reports `enabled() == false`. Log at startup: `hardcover disabled: token not configured`.
@@ -854,6 +874,7 @@ server.post("/api/...")
 - **VALIDATE**: task 32.
 
 ### Task 21: `enrichment/orchestrator.rs`
+- **STATUS**: Complete — Phase C (`c7d87be`).
 - **ACTION**: Per-manifestation flow.
 - **IMPLEMENT**:
   - `run_once(pool: &PgPool, config: &Config, manifestation_id: Uuid) -> Result<RunOutcome, anyhow::Error>`:
@@ -871,6 +892,7 @@ server.post("/api/...")
 - **VALIDATE**: task 33 — multi-source agreement, disagreement-staging, empty-canonical auto-fill, locked-field rejection.
 
 ### Task 22: `queue.rs` — background worker
+- **STATUS**: Complete — Phase C (`c7d87be`).
 - **ACTION**: Background task with atomic claim + retry backoff + graceful shutdown.
 - **IMPLEMENT**:
   ```rust
@@ -927,6 +949,7 @@ server.post("/api/...")
 - **VALIDATE**: task 35 — two-worker race test; retry backoff; max-attempts → skipped; shutdown reverts in-progress.
 
 ### Task 23: `dry_run.rs`
+- **STATUS**: Complete — Phase C (`c7d87be`).
 - **ACTION**: Preview diff without journal writes.
 - **IMPLEMENT**:
   - `pub async fn preview(pool: &PgPool, config: &Config, manifestation_id: Uuid) -> Result<DryRunDiff, anyhow::Error>`: reuse `orchestrator` steps 1–5 but compute the diff in memory and return `DryRunDiff { would_apply: Vec<FieldChange>, would_stage: Vec<FieldChange>, locked: Vec<String> }`.
@@ -937,6 +960,7 @@ server.post("/api/...")
 - **VALIDATE**: task 33 dry-run case — asserts journal row count unchanged but `api_cache` count increased.
 
 ### Task 24: `field_lock.rs`
+- **STATUS**: Complete — Phase C (`c7d87be`).
 - **ACTION**: CRUD helpers.
 - **IMPLEMENT**:
   - `is_locked(pool, manifestation_id, entity_type, field) -> Result<bool, sqlx::Error>`.
@@ -946,6 +970,7 @@ server.post("/api/...")
 - **VALIDATE**: inline `#[tokio::test] #[ignore]` tests.
 
 ### Task 25: `routes/enrichment.rs`
+- **STATUS**: Complete — Phase C (`c7d87be`).
 - **ACTION**: Three routes (trigger, dry-run, status).
 - **IMPLEMENT**:
   ```rust
@@ -973,6 +998,7 @@ server.post("/api/...")
 - **VALIDATE**: task 31 authz tests; task 33 dry-run smoke.
 
 ### Task 26: `routes/metadata.rs`
+- **STATUS**: Complete — Phase C (`c7d87be`).
 - **ACTION**: GET + accept/reject/revert/lock on both `/manifestations/{id}/metadata` and `/works/{id}/metadata`.
 - **IMPLEMENT**:
   - All write routes: open tx; `SELECT ... FOR UPDATE` on owning row (manifestation or work); apply change; commit.
@@ -987,6 +1013,7 @@ server.post("/api/...")
 - **VALIDATE**: task 31 authz; task 33 accept path writes canonical + pointer; revert path restores to a prior version; manual rematch on accepted ISBN change triggers auto-merge (task 34 path).
 
 ### Task 27: Config + `.env.example`
+- **STATUS**: Complete — Phase C (`c7d87be`).
 - **ACTION**: Add 14 env vars to `Config` + `.env.example`.
 - **IMPLEMENT**: Mirror `backend/src/config.rs:60-110` parsing + defaults:
   - `enrichment_enabled: bool` (default `true`)
@@ -1005,6 +1032,7 @@ server.post("/api/...")
 - **VALIDATE**: `cargo test config::tests` — extend `from_env_with_defaults` to assert new vars.
 
 ### Task 28: Wire queue into `main.rs`
+- **STATUS**: Complete — Phase C (`c7d87be`).
 - **ACTION**: Spawn `enrichment::spawn_queue` alongside the ingestion watcher.
 - **IMPLEMENT**:
   ```rust
@@ -1022,6 +1050,7 @@ server.post("/api/...")
 - **VALIDATE**: Run `cargo run`; observe startup logs include both `ingestion watcher started` and `enrichment queue started`.
 
 ### Task 29: Unit tests for pure modules
+- **STATUS**: Complete — Phase D (`bd28164`).
 - **ACTION**: `#[cfg(test)]` blocks in `lookup_key.rs`, `value_hash.rs`, `confidence.rs`, `policy.rs`.
 - **IMPLEMENT**:
   - `lookup_key`: ISBN-10 and ISBN-13 of same book → same key; whitespace/case variants of "Dune"/"Frank Herbert" converge.
@@ -1032,6 +1061,7 @@ server.post("/api/...")
 - **VALIDATE**: `cargo test` passes without `--ignored`; no DB required.
 
 ### Task 30: Ingest invariant tests (DB integration)
+- **STATUS**: Complete — Phase D (`bd28164`).
 - **ACTION**: New `#[ignore]` tests in `backend/src/services/ingestion/orchestrator.rs::tests`.
 - **IMPLEMENT**:
   - `ingest_sets_version_pointers_for_all_canonical_fields`: use `make_metadata_epub` helper; assert every non-NULL canonical field on the manifestation + work has a matching `*_version_id` pointer referencing a real `metadata_versions` row with `source='opf'`.
@@ -1041,6 +1071,7 @@ server.post("/api/...")
 - **VALIDATE**: `cargo test --ignored -p tome-api services::ingestion::orchestrator`.
 
 ### Task 31: Authz helper tests
+- **STATUS**: Complete — Phase D (`bd28164`).
 - **ACTION**: `#[cfg(test)]` in `backend/src/auth/middleware.rs` + route-level tests.
 - **IMPLEMENT**:
   - Unit: `require_admin` on `{admin: Ok, adult: Err(Forbidden), child: Err(Forbidden)}`; `require_not_child` on `{admin: Ok, adult: Ok, child: Err(Forbidden)}`.
@@ -1050,12 +1081,14 @@ server.post("/api/...")
 - **VALIDATE**: `cargo test auth::middleware`; `cargo test --ignored -p tome-api routes::enrichment routes::metadata`.
 
 ### Task 32: Per-adapter wiremock integration tests
+- **STATUS**: Complete — Phase D (`bd28164`).
 - **ACTION**: Tests in `sources/open_library.rs`, `google_books.rs`, `hardcover.rs`.
 - **IMPLEMENT**: Use `wiremock::MockServer` (already in dev-deps). Cover: 200 happy, 404, 429 with `Retry-After` header parsed, 500, timeout (configure server latency > client timeout).
 - **MIRROR**: No existing wiremock tests in the repo yet — use wiremock's docs pattern.
 - **VALIDATE**: `cargo test services::enrichment::sources`.
 
 ### Task 33: Orchestrator integration tests
+- **STATUS**: Complete — Phase D (`bd28164`).
 - **ACTION**: `#[ignore]` tests in `enrichment/orchestrator.rs::tests`.
 - **IMPLEMENT**:
   - **Multi-source agreement**: stub three sources returning the same title → assert Apply + quorum=3 boost.
@@ -1067,6 +1100,7 @@ server.post("/api/...")
 - **VALIDATE**: `cargo test --ignored services::enrichment::orchestrator`.
 
 ### Task 34: Rematch tests
+- **STATUS**: Complete — Phase D (`bd28164`).
 - **ACTION**: `#[ignore]` tests in `models/work.rs::tests`.
 - **IMPLEMENT**:
   - `rematch_auto_merge`: stub work with 1 manifestation, no manual drafts; real work exists with correct ISBN; call rematch; assert stub work deleted, manifestation moved, no suspected_duplicate_work_id.
@@ -1076,6 +1110,7 @@ server.post("/api/...")
 - **VALIDATE**: `cargo test --ignored models::work::tests::rematch`.
 
 ### Task 35: Queue tests
+- **STATUS**: Complete — Phase D (`bd28164`).
 - **ACTION**: `#[ignore]` in `queue.rs::tests`.
 - **IMPLEMENT**:
   - **Two-worker race**: spawn two `claim_next` calls concurrently against a single pending row; assert exactly one returns `Some`, other returns `None`.
@@ -1085,11 +1120,13 @@ server.post("/api/...")
 - **VALIDATE**: `cargo test --ignored services::enrichment::queue`.
 
 ### Task 36: Cache tests
+- **STATUS**: Complete — Phase D (`bd28164`).
 - **ACTION**: `#[ignore]` in `cache.rs::tests`.
 - **IMPLEMENT**: TTLs per kind; stale entry not returned; ISBN-10 and ISBN-13 inputs dedupe via `lookup_key`.
 - **VALIDATE**: `cargo test --ignored services::enrichment::cache`.
 
 ### Task 37: Cover-download safety tests
+- **STATUS**: Complete — Phase D (`bd28164`).
 - **ACTION**: Tests in `cover_download.rs` + `http.rs`.
 - **IMPLEMENT**:
   - SSRF: mock hickory-resolver to return 127.0.0.1 for a public hostname; redirect policy blocks; cover_download returns `CoverError::Network(...)`.
@@ -1240,15 +1277,22 @@ _Copied from BLUEPRINT Exit Criteria. Do not reinterpret._
 
 ## Completion Checklist
 
-- [ ] All tasks 1–37 complete and checked in.
-- [ ] Code follows patterns in **Patterns to Mirror**.
-- [ ] Error handling uses `AppError` variants — no ad-hoc `StatusCode::...` at route handlers.
-- [ ] Logging uses `tracing::{info,warn,error}!` with structured fields; no `println!`.
-- [ ] Tests follow TEST_STRUCTURE; DB tests `#[ignore]`-gated.
-- [ ] No hardcoded URLs, timeouts, or limits outside `Config`.
+Phase progress on `feat/metadata-enrichment-pipeline` (unmerged):
+
+- Phase A — schema + ingest invariant (Tasks 1–7): landed in `4e61154`.
+- Phase B — pure-logic modules + SSRF-safe cover pipeline (Tasks 8–16): landed in `a935f3e` + `cb0fd35`.
+- Phase C — source adapters, orchestrator, queue, routes (Tasks 17–28): landed in `c7d87be`; OpenLibrary `/api/books` + identified User-Agent follow-up in `1bdc3b9`.
+- Phase D — integration coverage (Tasks 29–37): landed in `bd28164`.
+
+- [x] All tasks 1–37 complete and checked in (see per-task `STATUS` lines).
+- [x] Code follows patterns in **Patterns to Mirror**.
+- [x] Error handling uses `AppError` variants — no ad-hoc `StatusCode::...` at route handlers.
+- [x] Logging uses `tracing::{info,warn,error}!` with structured fields; no `println!`.
+- [x] Tests follow TEST_STRUCTURE; DB tests `#[ignore]`-gated.
+- [x] No hardcoded URLs, timeouts, or limits outside `Config`.
 - [ ] Migration round-trip succeeds; `sqlx migrate revert` leaves DB in pre-migration state modulo preserved journal rows.
 - [ ] PR description includes "Depends on Step 6" and lists env vars added.
-- [ ] `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo test --ignored` all pass.
+- [ ] `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`, `cargo test --ignored` all pass. *(Phase D reported 1 pre-existing `lock_unlock_roundtrip` failure and 2 pre-existing clippy errors in `db.rs` + `cleanup.rs` — resolve before PR.)*
 - [ ] `cargo audit` has no new advisories.
 - [ ] Documentation (`backend/CLAUDE.md`) has no new entries required — conventions already documented.
 
