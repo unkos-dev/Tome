@@ -133,8 +133,9 @@ mod tests {
     #[tokio::test]
     #[ignore] // Requires running postgres
     async fn create_token_validates_name() {
-        let url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into());
+        let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
+        });
         let pool = sqlx::PgPool::connect(&url).await.expect("connect");
 
         // Create a test user and device token for Basic auth

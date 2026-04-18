@@ -966,8 +966,9 @@ mod tests {
     /// grants reverie_ingestion only SELECT on that table — writes (lock/unlock)
     /// remain a reverie_app surface.
     async fn reverie_app_pool() -> PgPool {
-        let url = std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into());
+        let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
+        });
         PgPool::connect(&url).await.unwrap()
     }
 

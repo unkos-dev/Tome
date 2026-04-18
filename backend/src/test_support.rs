@@ -116,8 +116,9 @@ pub mod db {
 
     /// `reverie_app` connection — what AppState.pool uses in production.
     pub fn app_url() -> String {
-        std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into())
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
+        })
     }
 
     /// `reverie_ingestion` connection — what AppState.ingestion_pool uses in
@@ -130,7 +131,9 @@ pub mod db {
     }
 
     pub async fn app_pool() -> PgPool {
-        PgPool::connect(&app_url()).await.expect("connect reverie_app")
+        PgPool::connect(&app_url())
+            .await
+            .expect("connect reverie_app")
     }
 
     pub async fn ingestion_pool() -> PgPool {

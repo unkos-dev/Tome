@@ -122,8 +122,9 @@ mod tests {
     /// reverie_app URL for `field_locks` writes.  The migration deliberately
     /// restricts lock/unlock to this role — reverie_ingestion only has SELECT.
     fn app_db_url() -> String {
-        std::env::var("DATABASE_URL")
-            .unwrap_or_else(|_| "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into())
+        std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+            "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
+        })
     }
 
     async fn setup_fixture(pool: &PgPool) -> (Uuid, Uuid) {
