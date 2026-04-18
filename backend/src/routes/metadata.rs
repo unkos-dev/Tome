@@ -90,7 +90,10 @@ async fn get_manifestation_metadata(
     Path(id): Path<Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
     current_user.require_not_child()?;
-    let rows = load_versions(&state.pool, id).await?;
+    let mut tx = db::acquire_with_rls(&state.pool, current_user.user_id)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+    let rows = load_versions(&mut tx, id).await?;
     Ok(axum::Json(rows))
 }
 
@@ -123,7 +126,7 @@ async fn get_work_metadata(
 }
 
 async fn load_versions(
-    pool: &sqlx::PgPool,
+    tx: &mut sqlx::PgConnection,
     manifestation_id: Uuid,
 ) -> Result<Vec<MetadataRow>, AppError> {
     let rows: Vec<MetadataRowRaw> = sqlx::query_as(
@@ -134,7 +137,7 @@ async fn load_versions(
          ORDER BY last_seen_at DESC",
     )
     .bind(manifestation_id)
-    .fetch_all(pool)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
 
