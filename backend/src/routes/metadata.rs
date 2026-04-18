@@ -15,6 +15,7 @@ use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 use crate::auth::middleware::CurrentUser;
+use crate::db;
 use crate::error::AppError;
 use crate::models::work;
 use crate::services::enrichment::field_lock::{self, EntityType};
@@ -100,6 +101,10 @@ async fn get_work_metadata(
 ) -> Result<impl IntoResponse, AppError> {
     current_user.require_not_child()?;
 
+    let mut tx = db::acquire_with_rls(&state.pool, current_user.user_id)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
     let rows: Vec<MetadataRowRaw> = sqlx::query_as(
         "SELECT mv.id, mv.field_name, mv.source, mv.new_value, mv.status::text, \
                 mv.confidence_score, mv.match_type, mv.observation_count \
@@ -109,7 +114,7 @@ async fn get_work_metadata(
          ORDER BY mv.last_seen_at DESC",
     )
     .bind(work_id)
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
 
@@ -164,9 +169,7 @@ async fn accept_manifestation(
 ) -> Result<impl IntoResponse, AppError> {
     current_user.require_not_child()?;
 
-    let mut tx = state
-        .pool
-        .begin()
+    let mut tx = db::acquire_with_rls(&state.pool, current_user.user_id)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
@@ -174,8 +177,9 @@ async fn accept_manifestation(
         "SELECT mv.id, mv.field_name, mv.new_value, m.work_id \
          FROM metadata_versions mv \
          JOIN manifestations m ON m.id = mv.manifestation_id \
+         JOIN works w ON w.id = m.work_id \
          WHERE mv.id = $1 AND mv.manifestation_id = $2 \
-         FOR UPDATE OF m",
+         FOR UPDATE OF m, w",
     )
     .bind(payload.version_id)
     .bind(manifestation_id)
@@ -216,6 +220,10 @@ async fn reject_manifestation(
 ) -> Result<impl IntoResponse, AppError> {
     current_user.require_not_child()?;
 
+    let mut tx = db::acquire_with_rls(&state.pool, current_user.user_id)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
     let rows = sqlx::query(
         "UPDATE metadata_versions \
          SET status = 'rejected', resolved_by = $1, resolved_at = now() \
@@ -224,13 +232,17 @@ async fn reject_manifestation(
     .bind(current_user.user_id)
     .bind(payload.version_id)
     .bind(manifestation_id)
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
 
     if rows.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
+
+    tx.commit()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
     Ok(StatusCode::OK)
 }
 
@@ -242,19 +254,22 @@ async fn revert_manifestation(
 ) -> Result<impl IntoResponse, AppError> {
     current_user.require_not_child()?;
 
-    let mut tx = state
-        .pool
-        .begin()
+    let mut tx = db::acquire_with_rls(&state.pool, current_user.user_id)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-    // Load work_id FOR UPDATE so we serialise concurrent revert calls.
-    let work_id: Option<Uuid> =
-        sqlx::query_scalar("SELECT work_id FROM manifestations WHERE id = $1 FOR UPDATE")
-            .bind(manifestation_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| AppError::Internal(e.into()))?;
+    // Lock both the manifestation row and its work row so concurrent
+    // accept/revert calls on sibling manifestations of the same work
+    // serialise on `works.{title,description,language}` updates.
+    let work_id: Option<Uuid> = sqlx::query_scalar(
+        "SELECT m.work_id FROM manifestations m \
+         JOIN works w ON w.id = m.work_id \
+         WHERE m.id = $1 FOR UPDATE OF m, w",
+    )
+    .bind(manifestation_id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| AppError::Internal(e.into()))?;
     let work_id = work_id.ok_or(AppError::NotFound)?;
 
     match payload.version_id {
@@ -508,7 +523,9 @@ async fn exec(
 
 fn parse_iso_date(s: &str) -> Result<time::Date, time::error::Parse> {
     use time::format_description::well_known::Iso8601;
-    if s.len() >= 10 {
+    // `s.len()` is in bytes; user-submitted strings can contain multi-byte
+    // UTF-8 codepoints. `is_char_boundary` keeps the slice valid.
+    if s.len() >= 10 && s.is_char_boundary(10) {
         time::Date::parse(&s[..10], &Iso8601::DATE)
     } else {
         let padded = match s.len() {
@@ -522,9 +539,23 @@ fn parse_iso_date(s: &str) -> Result<time::Date, time::error::Parse> {
 
 #[cfg(test)]
 mod tests {
+    use super::parse_iso_date;
     use crate::test_support;
     use axum::http::StatusCode;
     use uuid::Uuid;
+
+    #[test]
+    fn parse_iso_date_rejects_multibyte_garbage_without_panicking() {
+        // 3-byte codepoint pushes byte-10 mid-character; pre-fix this panicked.
+        let s = "2024-01-€€€garbage";
+        assert!(parse_iso_date(s).is_err());
+    }
+
+    #[test]
+    fn parse_iso_date_accepts_well_formed_iso() {
+        assert!(parse_iso_date("2024-01-15").is_ok());
+        assert!(parse_iso_date("2024-01-15T00:00:00Z").is_ok());
+    }
 
     #[tokio::test]
     async fn get_manifestation_metadata_requires_auth() {

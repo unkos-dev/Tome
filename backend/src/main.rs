@@ -99,12 +99,9 @@ async fn main() {
         }
     });
 
-    // Spawn enrichment queue worker. Uses state.pool (tome_app) because the
-    // worker may write to webhook_deliveries — tome_ingestion has no grants
-    // on that table.
     let enrich_token = cancel_token.clone();
     let enrich_config = config.clone();
-    let enrich_pool = state.pool.clone();
+    let enrich_pool = state.ingestion_pool.clone();
     tokio::spawn(async move {
         if let Err(e) =
             services::enrichment::spawn_queue(enrich_pool, enrich_config, enrich_token).await

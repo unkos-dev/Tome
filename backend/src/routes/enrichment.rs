@@ -15,6 +15,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::auth::middleware::CurrentUser;
+use crate::db;
 use crate::error::AppError;
 use crate::services;
 use crate::state::AppState;
@@ -33,6 +34,10 @@ async fn trigger(
 ) -> Result<impl IntoResponse, AppError> {
     current_user.require_not_child()?;
 
+    let mut tx = db::acquire_with_rls(&state.pool, current_user.user_id)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
     let rows = sqlx::query(
         "UPDATE manifestations \
          SET enrichment_status = 'pending', \
@@ -42,13 +47,17 @@ async fn trigger(
          WHERE id = $1",
     )
     .bind(id)
-    .execute(&state.pool)
+    .execute(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
 
     if rows.rows_affected() == 0 {
         return Err(AppError::NotFound);
     }
+
+    tx.commit()
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
     Ok(StatusCode::ACCEPTED)
 }
 
@@ -80,12 +89,16 @@ async fn status(
 ) -> Result<impl IntoResponse, AppError> {
     current_user.require_not_child()?;
 
+    let mut tx = db::acquire_with_rls(&state.pool, current_user.user_id)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+
     let rows: Vec<(String, i64)> = sqlx::query_as(
         "SELECT enrichment_status::text, COUNT(*)::bigint \
          FROM manifestations \
          GROUP BY enrichment_status",
     )
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
 
