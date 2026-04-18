@@ -27,11 +27,11 @@ CREATE TABLE device_tokens (
     revoked_at TIMESTAMPTZ
 );
 
--- Grants: tome_app only (user-facing tables — no ingestion access)
-GRANT SELECT, INSERT, UPDATE, DELETE ON shelves TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON shelf_items TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON device_tokens TO tome_app;
+-- Grants: reverie_app only (user-facing tables — no ingestion access)
+GRANT SELECT, INSERT, UPDATE, DELETE ON shelves TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON shelf_items TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON device_tokens TO reverie_app;
 
--- Grants: tome_readonly (SELECT — excludes device_tokens to protect token_hash)
-GRANT SELECT ON shelves TO tome_readonly;
-GRANT SELECT ON shelf_items TO tome_readonly;
+-- Grants: reverie_readonly (SELECT — excludes device_tokens to protect token_hash)
+GRANT SELECT ON shelves TO reverie_readonly;
+GRANT SELECT ON shelf_items TO reverie_readonly;

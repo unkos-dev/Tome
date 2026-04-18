@@ -48,18 +48,18 @@ CREATE TABLE webhook_deliveries (
     delivered_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Grants: tome_app (full DML on all system tables)
-GRANT SELECT, INSERT, UPDATE, DELETE ON api_cache TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ingestion_jobs TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON webhooks TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON webhook_deliveries TO tome_app;
+-- Grants: reverie_app (full DML on all system tables)
+GRANT SELECT, INSERT, UPDATE, DELETE ON api_cache TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ingestion_jobs TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON webhooks TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON webhook_deliveries TO reverie_app;
 
--- Grants: tome_ingestion (pipeline tables only — no webhook access)
-GRANT SELECT, INSERT, UPDATE, DELETE ON api_cache TO tome_ingestion;
-GRANT SELECT, INSERT, UPDATE, DELETE ON ingestion_jobs TO tome_ingestion;
+-- Grants: reverie_ingestion (pipeline tables only — no webhook access)
+GRANT SELECT, INSERT, UPDATE, DELETE ON api_cache TO reverie_ingestion;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ingestion_jobs TO reverie_ingestion;
 
--- Grants: tome_readonly (SELECT on all)
-GRANT SELECT ON api_cache TO tome_readonly;
-GRANT SELECT ON ingestion_jobs TO tome_readonly;
-GRANT SELECT ON webhooks TO tome_readonly;
-GRANT SELECT ON webhook_deliveries TO tome_readonly;
+-- Grants: reverie_readonly (SELECT on all)
+GRANT SELECT ON api_cache TO reverie_readonly;
+GRANT SELECT ON ingestion_jobs TO reverie_readonly;
+GRANT SELECT ON webhooks TO reverie_readonly;
+GRANT SELECT ON webhook_deliveries TO reverie_readonly;

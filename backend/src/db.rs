@@ -39,8 +39,9 @@ mod tests {
         // is captured, env mutations can't affect this test.
         let url = {
             let _env_guard = crate::test_support::ENV_LOCK.lock().unwrap();
-            std::env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "postgres://tome_app:tome_app@localhost:5433/tome_dev".into())
+            std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+                "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
+            })
         };
         let pool = init_pool(&url, 2).await.expect("failed to connect");
 

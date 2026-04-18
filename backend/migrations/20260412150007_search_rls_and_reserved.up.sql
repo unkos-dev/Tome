@@ -33,24 +33,24 @@ CREATE INDEX idx_metadata_versions_resolved_by ON metadata_versions (resolved_by
 -- Row Level Security on manifestations
 ---------------------------------------------------------------------------
 -- RLS contract:
---   tome       (owner)     — bypasses RLS. Used for migrations and admin only.
---   tome_app   (web app)   — enforced. Must SET LOCAL app.current_user_id in a
+--   reverie       (owner)     — bypasses RLS. Used for migrations and admin only.
+--   reverie_app   (web app)   — enforced. Must SET LOCAL app.current_user_id in a
 --                            transaction. SET LOCAL is transaction-scoped and
 --                            auto-resets on commit/rollback — safe with pools.
 --                            Use: SELECT set_config('app.current_user_id', $1::text, true)
---   tome_ingestion (pipeline) — has own permissive policy. No session var needed.
---   tome_readonly            — enforced, same visibility rules as tome_app.
+--   reverie_ingestion (pipeline) — has own permissive policy. No session var needed.
+--   reverie_readonly            — enforced, same visibility rules as reverie_app.
 ---------------------------------------------------------------------------
 
 ALTER TABLE manifestations ENABLE ROW LEVEL SECURITY;
 
 COMMENT ON TABLE manifestations IS
-    'RLS enabled. tome_app and tome_readonly must SET LOCAL app.current_user_id in a transaction. tome_ingestion has unconditional access. tome (owner) bypasses RLS.';
+    'RLS enabled. reverie_app and reverie_readonly must SET LOCAL app.current_user_id in a transaction. reverie_ingestion has unconditional access. reverie (owner) bypasses RLS.';
 
 -- SELECT: adults/admins see all, children see shelf-assigned only
 CREATE POLICY manifestations_select_adult ON manifestations
     FOR SELECT
-    TO tome_app, tome_readonly
+    TO reverie_app, reverie_readonly
     USING (
         EXISTS (
             SELECT 1 FROM users
@@ -61,7 +61,7 @@ CREATE POLICY manifestations_select_adult ON manifestations
 
 CREATE POLICY manifestations_select_child ON manifestations
     FOR SELECT
-    TO tome_app, tome_readonly
+    TO reverie_app, reverie_readonly
     USING (
         EXISTS (
             SELECT 1 FROM users
@@ -81,14 +81,14 @@ CREATE POLICY manifestations_select_child ON manifestations
 -- RLS only validates that the row is well-formed (always true here).
 CREATE POLICY manifestations_insert ON manifestations
     FOR INSERT
-    TO tome_app
+    TO reverie_app
     WITH CHECK (true);
 
 -- UPDATE: restricted to admin/adult only. Children manage visibility through
 -- shelf_items, not by modifying shared manifestation records.
 CREATE POLICY manifestations_update ON manifestations
     FOR UPDATE
-    TO tome_app
+    TO reverie_app
     USING (
         EXISTS (
             SELECT 1 FROM users
@@ -101,7 +101,7 @@ CREATE POLICY manifestations_update ON manifestations
 -- DELETE: restricted to admin/adult only. Same rationale as UPDATE.
 CREATE POLICY manifestations_delete ON manifestations
     FOR DELETE
-    TO tome_app
+    TO reverie_app
     USING (
         EXISTS (
             SELECT 1 FROM users
@@ -114,7 +114,7 @@ CREATE POLICY manifestations_delete ON manifestations
 -- The pipeline operates without user context — it must see and modify all rows.
 CREATE POLICY manifestations_ingestion_full_access ON manifestations
     FOR ALL
-    TO tome_ingestion
+    TO reverie_ingestion
     USING (true)
     WITH CHECK (true);
 
@@ -150,18 +150,18 @@ CREATE INDEX idx_reading_sessions_manifestation_id ON reading_sessions (manifest
 CREATE INDEX idx_reading_positions_manifestation_id ON reading_positions (manifestation_id);
 -- reading_positions(user_id) is covered by the UNIQUE(user_id, manifestation_id) index
 
--- Grants: tome_app only (reserved tables are user-scoped)
-GRANT SELECT, INSERT, UPDATE, DELETE ON reading_sessions TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON reading_positions TO tome_app;
+-- Grants: reverie_app only (reserved tables are user-scoped)
+GRANT SELECT, INSERT, UPDATE, DELETE ON reading_sessions TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON reading_positions TO reverie_app;
 
--- Grants: tome_readonly
-GRANT SELECT ON reading_sessions TO tome_readonly;
-GRANT SELECT ON reading_positions TO tome_readonly;
+-- Grants: reverie_readonly
+GRANT SELECT ON reading_sessions TO reverie_readonly;
+GRANT SELECT ON reading_positions TO reverie_readonly;
 
 -- pgvector reserved for future semantic search (Phase 2):
 -- When ready, run in a new migration:
 --   CREATE EXTENSION IF NOT EXISTS vector;
 --   ALTER TABLE works ADD COLUMN embedding vector(1536);
 --   CREATE INDEX idx_works_embedding ON works USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100);
---   GRANT SELECT ON works TO tome_readonly;  -- already granted, but embedding queries need it
---   -- tome_ingestion writes embeddings; tome_app queries them via SELECT (already granted).
+--   GRANT SELECT ON works TO reverie_readonly;  -- already granted, but embedding queries need it
+--   -- reverie_ingestion writes embeddings; reverie_app queries them via SELECT (already granted).

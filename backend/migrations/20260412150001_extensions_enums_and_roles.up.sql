@@ -13,9 +13,9 @@ CREATE TYPE tag_type AS ENUM ('genre', 'sub_genre', 'trope', 'theme');
 
 -- Grant schema usage to all application roles.
 -- Table-level grants are issued in subsequent migrations after tables exist.
-GRANT USAGE ON SCHEMA public TO tome_app;
-GRANT USAGE ON SCHEMA public TO tome_ingestion;
-GRANT USAGE ON SCHEMA public TO tome_readonly;
+GRANT USAGE ON SCHEMA public TO reverie_app;
+GRANT USAGE ON SCHEMA public TO reverie_ingestion;
+GRANT USAGE ON SCHEMA public TO reverie_readonly;
 
 -- NOTE on enum design:
 -- manifestations.ingestion_status tracks the file's lifecycle within the ingestion

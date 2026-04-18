@@ -9,13 +9,13 @@ Port 5433 (5432 is taken by the host's shared-postgres).
 
 | Role | Connection | Purpose |
 |------|-----------|---------|
-| `tome` | `postgres://tome:tome@localhost:5433/tome_dev` | Schema owner. Runs migrations. Never used at runtime. |
-| `tome_app` | `postgres://tome_app:tome_app@localhost:5433/tome_dev` | Web application. RLS enforced. |
-| `tome_ingestion` | `postgres://tome_ingestion:tome_ingestion@localhost:5433/tome_dev` | Background pipeline. Scoped RLS. |
-| `tome_readonly` | `postgres://tome_readonly:tome_readonly@localhost:5433/tome_dev` | Debug/reporting. SELECT only. |
+| `reverie` | `postgres://reverie:reverie@localhost:5433/reverie_dev` | Schema owner. Runs migrations. Never used at runtime. |
+| `reverie_app` | `postgres://reverie_app:reverie_app@localhost:5433/reverie_dev` | Web application. RLS enforced. |
+| `reverie_ingestion` | `postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev` | Background pipeline. Scoped RLS. |
+| `reverie_readonly` | `postgres://reverie_readonly:reverie_readonly@localhost:5433/reverie_dev` | Debug/reporting. SELECT only. |
 
 Run migrations as the schema owner:
-`DATABASE_URL=postgres://tome:tome@localhost:5433/tome_dev sqlx migrate run`
+`DATABASE_URL=postgres://reverie:reverie@localhost:5433/reverie_dev sqlx migrate run`
 
 ## Conventions
 

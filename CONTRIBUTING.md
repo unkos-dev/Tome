@@ -1,6 +1,6 @@
-# Contributing to Tome
+# Contributing to Reverie
 
-Thank you for your interest in contributing to Tome.
+Thank you for your interest in contributing to Reverie.
 
 ## Contributor License Agreement
 
@@ -26,8 +26,8 @@ See [CLAUDE.md](CLAUDE.md) for the full specification and examples.
 
 ```bash
 # Clone the repo
-git clone https://github.com/unkos-dev/Tome.git
-cd Tome
+git clone https://github.com/unkos-dev/Reverie.git
+cd Reverie
 ```
 
 ```bash

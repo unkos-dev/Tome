@@ -1,7 +1,7 @@
-REVOKE ALL ON reading_positions FROM tome_readonly;
-REVOKE ALL ON reading_sessions FROM tome_readonly;
-REVOKE ALL ON reading_positions FROM tome_app;
-REVOKE ALL ON reading_sessions FROM tome_app;
+REVOKE ALL ON reading_positions FROM reverie_readonly;
+REVOKE ALL ON reading_sessions FROM reverie_readonly;
+REVOKE ALL ON reading_positions FROM reverie_app;
+REVOKE ALL ON reading_sessions FROM reverie_app;
 
 DROP INDEX IF EXISTS idx_reading_positions_manifestation_id;
 DROP INDEX IF EXISTS idx_reading_sessions_manifestation_id;

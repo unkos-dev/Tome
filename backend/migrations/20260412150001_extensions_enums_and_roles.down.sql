@@ -1,6 +1,6 @@
-REVOKE USAGE ON SCHEMA public FROM tome_readonly;
-REVOKE USAGE ON SCHEMA public FROM tome_ingestion;
-REVOKE USAGE ON SCHEMA public FROM tome_app;
+REVOKE USAGE ON SCHEMA public FROM reverie_readonly;
+REVOKE USAGE ON SCHEMA public FROM reverie_ingestion;
+REVOKE USAGE ON SCHEMA public FROM reverie_app;
 
 DROP TYPE IF EXISTS tag_type;
 DROP TYPE IF EXISTS metadata_review_status;

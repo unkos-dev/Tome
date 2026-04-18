@@ -1,6 +1,6 @@
-# Tome — AI Workflow Instructions
+# Reverie — AI Workflow Instructions
 
-Tome is a self-hosted ebook library manager. This repo is a monorepo with `backend/`
+Reverie is a self-hosted ebook library manager. This repo is a monorepo with `backend/`
 (Rust + Axum) and `frontend/` (React + Vite + TypeScript).
 
 ---
@@ -50,7 +50,7 @@ refactor(db): replace raw SQL queries with sqlx query macros
 feat(config)!: migrate settings from JSON to TOML
 
 BREAKING CHANGE: existing config.json files must be converted.
-Run `tome migrate-config` to convert automatically.
+Run `reverie migrate-config` to convert automatically.
 ```
 
 Commit messages should explain **why**, not just **what**. The diff shows what changed;
@@ -74,7 +74,7 @@ Release PR:
 2. `CHANGELOG.md` is updated
 3. Git tag `vX.Y.Z` is created
 4. GitHub Release is published
-5. Docker image is built and pushed to `ghcr.io/unkos-dev/tome:X.Y.Z`
+5. Docker image is built and pushed to `ghcr.io/unkos-dev/reverie:X.Y.Z`
 
 ---
 
@@ -108,7 +108,7 @@ Release PR:
 
 ## Linear Integration
 
-This project is tracked in Linear under the **Unkos** team, **Tome** project.
+This project is tracked in Linear under the **Unkos** team, **Reverie** project.
 
 - Include issue IDs in branch names: `feat/unk-42-epub-import`
 - Include issue IDs in commit messages where relevant

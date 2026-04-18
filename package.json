@@ -1,7 +1,7 @@
 {
   "private": true,
-  "name": "tome-dev",
-  "description": "Development tooling for Tome",
+  "name": "reverie-dev",
+  "description": "Development tooling for Reverie",
   "scripts": {
     "prepare": "husky"
   },
