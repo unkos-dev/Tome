@@ -1,6 +1,6 @@
 # Database Schema
 
-Tome uses PostgreSQL with a FRBR-inspired data model. **Works** represent abstract
+Reverie uses PostgreSQL with a FRBR-inspired data model. **Works** represent abstract
 titles; **Manifestations** represent concrete files (EPUBs, PDFs, etc.). This
 separation allows multiple editions, formats, and translations to share metadata.
 
@@ -100,12 +100,12 @@ separate — a job can fail while individual files succeeded, and vice versa.
 
 | Role | Purpose | Privileges | RLS |
 |---|---|---|---|
-| `tome` | Schema owner, runs migrations | DDL + full DML | Bypasses (owner) |
-| `tome_app` | Web app, OPDS, webhooks | DML on all tables | Enforced — user-scoped |
-| `tome_ingestion` | Background pipeline | DML on pipeline tables only | Own permissive policy |
-| `tome_readonly` | Debugging, reporting | SELECT on most tables (excludes `device_tokens`) | Enforced — same as `tome_app` |
+| `reverie` | Schema owner, runs migrations | DDL + full DML | Bypasses (owner) |
+| `reverie_app` | Web app, OPDS, webhooks | DML on all tables | Enforced — user-scoped |
+| `reverie_ingestion` | Background pipeline | DML on pipeline tables only | Own permissive policy |
+| `reverie_readonly` | Debugging, reporting | SELECT on most tables (excludes `device_tokens`) | Enforced — same as `reverie_app` |
 
-### `tome_ingestion` Access Scope
+### `reverie_ingestion` Access Scope
 
 Has DML on: `works`, `authors`, `work_authors`, `manifestations`, `series`,
 `series_works`, `omnibus_contents`, `metadata_versions`, `tags`, `manifestation_tags`,
@@ -120,19 +120,19 @@ RLS is enabled on `manifestations` only. Six per-operation policies control acce
 
 | Policy | Operation | Roles | Logic |
 |---|---|---|---|
-| `manifestations_select_adult` | SELECT | `tome_app`, `tome_readonly` | Adults/admins see all |
-| `manifestations_select_child` | SELECT | `tome_app`, `tome_readonly` | Children see shelf-assigned only |
-| `manifestations_insert` | INSERT | `tome_app` | Unrestricted (WITH CHECK true) |
-| `manifestations_update` | UPDATE | `tome_app` | Admin/adult only |
-| `manifestations_delete` | DELETE | `tome_app` | Admin/adult only |
-| `manifestations_ingestion_full_access` | ALL | `tome_ingestion` | Unconditional access |
+| `manifestations_select_adult` | SELECT | `reverie_app`, `reverie_readonly` | Adults/admins see all |
+| `manifestations_select_child` | SELECT | `reverie_app`, `reverie_readonly` | Children see shelf-assigned only |
+| `manifestations_insert` | INSERT | `reverie_app` | Unrestricted (WITH CHECK true) |
+| `manifestations_update` | UPDATE | `reverie_app` | Admin/adult only |
+| `manifestations_delete` | DELETE | `reverie_app` | Admin/adult only |
+| `manifestations_ingestion_full_access` | ALL | `reverie_ingestion` | Unconditional access |
 
 Children cannot UPDATE or DELETE manifestations — these are shared library records.
 Children manage their visibility through `shelf_items` instead.
 
 ### Session Variable Contract
 
-`tome_app` and `tome_readonly` must set the user ID in a transaction:
+`reverie_app` and `reverie_readonly` must set the user ID in a transaction:
 
 ```sql
 BEGIN;

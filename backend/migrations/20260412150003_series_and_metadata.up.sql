@@ -55,26 +55,26 @@ CREATE TABLE manifestation_tags (
     PRIMARY KEY (manifestation_id, tag_id)
 );
 
--- Grants: tome_app (full DML)
-GRANT SELECT, INSERT, UPDATE, DELETE ON series TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON series_works TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON omnibus_contents TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON metadata_versions TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON tags TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON manifestation_tags TO tome_app;
+-- Grants: reverie_app (full DML)
+GRANT SELECT, INSERT, UPDATE, DELETE ON series TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON series_works TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON omnibus_contents TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON metadata_versions TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON tags TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON manifestation_tags TO reverie_app;
 
--- Grants: tome_ingestion (pipeline tables)
-GRANT SELECT, INSERT, UPDATE, DELETE ON series TO tome_ingestion;
-GRANT SELECT, INSERT, UPDATE, DELETE ON series_works TO tome_ingestion;
-GRANT SELECT, INSERT, UPDATE, DELETE ON omnibus_contents TO tome_ingestion;
-GRANT SELECT, INSERT, UPDATE, DELETE ON metadata_versions TO tome_ingestion;
-GRANT SELECT, INSERT, UPDATE, DELETE ON tags TO tome_ingestion;
-GRANT SELECT, INSERT, UPDATE, DELETE ON manifestation_tags TO tome_ingestion;
+-- Grants: reverie_ingestion (pipeline tables)
+GRANT SELECT, INSERT, UPDATE, DELETE ON series TO reverie_ingestion;
+GRANT SELECT, INSERT, UPDATE, DELETE ON series_works TO reverie_ingestion;
+GRANT SELECT, INSERT, UPDATE, DELETE ON omnibus_contents TO reverie_ingestion;
+GRANT SELECT, INSERT, UPDATE, DELETE ON metadata_versions TO reverie_ingestion;
+GRANT SELECT, INSERT, UPDATE, DELETE ON tags TO reverie_ingestion;
+GRANT SELECT, INSERT, UPDATE, DELETE ON manifestation_tags TO reverie_ingestion;
 
--- Grants: tome_readonly (SELECT)
-GRANT SELECT ON series TO tome_readonly;
-GRANT SELECT ON series_works TO tome_readonly;
-GRANT SELECT ON omnibus_contents TO tome_readonly;
-GRANT SELECT ON metadata_versions TO tome_readonly;
-GRANT SELECT ON tags TO tome_readonly;
-GRANT SELECT ON manifestation_tags TO tome_readonly;
+-- Grants: reverie_readonly (SELECT)
+GRANT SELECT ON series TO reverie_readonly;
+GRANT SELECT ON series_works TO reverie_readonly;
+GRANT SELECT ON omnibus_contents TO reverie_readonly;
+GRANT SELECT ON metadata_versions TO reverie_readonly;
+GRANT SELECT ON tags TO reverie_readonly;
+GRANT SELECT ON manifestation_tags TO reverie_readonly;

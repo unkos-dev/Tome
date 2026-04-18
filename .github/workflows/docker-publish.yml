@@ -11,7 +11,7 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: unkos-dev/tome
+  IMAGE_NAME: unkos-dev/reverie
 
 jobs:
   build-and-push:

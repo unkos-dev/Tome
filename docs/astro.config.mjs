@@ -4,15 +4,15 @@ import starlight from "@astrojs/starlight";
 
 export default defineConfig({
   site: "https://unkos-dev.github.io",
-  base: "/Tome",
+  base: "/Reverie",
   integrations: [
     starlight({
-      title: "Tome",
+      title: "Reverie",
       social: [
         {
           icon: "github",
           label: "GitHub",
-          href: "https://github.com/unkos-dev/Tome",
+          href: "https://github.com/unkos-dev/Reverie",
         },
       ],
       sidebar: [

@@ -16,11 +16,11 @@ RUN npm run build
 FROM debian:bookworm-slim AS runtime
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-RUN useradd -r -s /bin/false tome
+RUN useradd -r -s /bin/false reverie
 
-COPY --from=backend-builder /build/target/release/tome-api /usr/local/bin/tome-api
+COPY --from=backend-builder /build/target/release/reverie-api /usr/local/bin/reverie-api
 COPY --from=frontend-builder /build/dist /srv/frontend
 
-USER tome
+USER reverie
 EXPOSE 3000
-ENTRYPOINT ["tome-api"]
+ENTRYPOINT ["reverie-api"]

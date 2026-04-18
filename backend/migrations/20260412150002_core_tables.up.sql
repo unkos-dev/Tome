@@ -64,22 +64,22 @@ CREATE TABLE manifestations (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Grants: tome_app (full DML, all core tables)
-GRANT SELECT, INSERT, UPDATE, DELETE ON users TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON works TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON authors TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON work_authors TO tome_app;
-GRANT SELECT, INSERT, UPDATE, DELETE ON manifestations TO tome_app;
+-- Grants: reverie_app (full DML, all core tables)
+GRANT SELECT, INSERT, UPDATE, DELETE ON users TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON works TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON authors TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON work_authors TO reverie_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON manifestations TO reverie_app;
 
--- Grants: tome_ingestion (pipeline tables only — no users access)
-GRANT SELECT, INSERT, UPDATE, DELETE ON works TO tome_ingestion;
-GRANT SELECT, INSERT, UPDATE, DELETE ON authors TO tome_ingestion;
-GRANT SELECT, INSERT, UPDATE, DELETE ON work_authors TO tome_ingestion;
-GRANT SELECT, INSERT, UPDATE, DELETE ON manifestations TO tome_ingestion;
+-- Grants: reverie_ingestion (pipeline tables only — no users access)
+GRANT SELECT, INSERT, UPDATE, DELETE ON works TO reverie_ingestion;
+GRANT SELECT, INSERT, UPDATE, DELETE ON authors TO reverie_ingestion;
+GRANT SELECT, INSERT, UPDATE, DELETE ON work_authors TO reverie_ingestion;
+GRANT SELECT, INSERT, UPDATE, DELETE ON manifestations TO reverie_ingestion;
 
--- Grants: tome_readonly (SELECT on all)
-GRANT SELECT ON users TO tome_readonly;
-GRANT SELECT ON works TO tome_readonly;
-GRANT SELECT ON authors TO tome_readonly;
-GRANT SELECT ON work_authors TO tome_readonly;
-GRANT SELECT ON manifestations TO tome_readonly;
+-- Grants: reverie_readonly (SELECT on all)
+GRANT SELECT ON users TO reverie_readonly;
+GRANT SELECT ON works TO reverie_readonly;
+GRANT SELECT ON authors TO reverie_readonly;
+GRANT SELECT ON work_authors TO reverie_readonly;
+GRANT SELECT ON manifestations TO reverie_readonly;

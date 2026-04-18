@@ -6,7 +6,7 @@
 --   (3) canonical pointer columns (*_version_id) on works/manifestations/joins
 --
 -- See plans/BLUEPRINT.md Step 7 and
--- ~/.claude/projects/-home-coder-Tome/memory/project_enrichment_architecture.md
+-- ~/.claude/projects/-home-coder-Reverie/memory/project_enrichment_architecture.md
 -- for the architecture rationale.
 
 -- Required for the value_hash backfill (see section 4). Safe no-op if already
@@ -197,13 +197,13 @@ ALTER TABLE api_cache
 ---------------------------------------------------------------------------
 
 -- metadata_sources: FK-readable to pipeline + readonly; full DML to app.
-GRANT SELECT, INSERT, UPDATE, DELETE ON metadata_sources TO tome_app;
-GRANT SELECT                          ON metadata_sources TO tome_ingestion;
-GRANT SELECT                          ON metadata_sources TO tome_readonly;
+GRANT SELECT, INSERT, UPDATE, DELETE ON metadata_sources TO reverie_app;
+GRANT SELECT                          ON metadata_sources TO reverie_ingestion;
+GRANT SELECT                          ON metadata_sources TO reverie_readonly;
 
 -- field_locks: user-owned; no ingestion access; readable to readonly.
-GRANT SELECT, INSERT, UPDATE, DELETE ON field_locks TO tome_app;
-GRANT SELECT                          ON field_locks TO tome_readonly;
+GRANT SELECT, INSERT, UPDATE, DELETE ON field_locks TO reverie_app;
+GRANT SELECT                          ON field_locks TO reverie_readonly;
 
 -- No grant changes on existing rewritten tables (metadata_versions, manifestations,
 -- works, work_authors, manifestation_tags, api_cache) — existing grants remain valid.

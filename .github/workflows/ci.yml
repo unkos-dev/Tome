@@ -22,24 +22,24 @@ jobs:
       postgres:
         image: postgres:17
         env:
-          POSTGRES_USER: tome
-          POSTGRES_PASSWORD: tome
-          POSTGRES_DB: tome_dev
+          POSTGRES_USER: reverie
+          POSTGRES_PASSWORD: reverie
+          POSTGRES_DB: reverie_dev
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U tome -d tome_dev"
+          --health-cmd "pg_isready -U reverie -d reverie_dev"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 5
     env:
-      DATABASE_URL: postgres://tome_app:tome_app@localhost:5432/tome_dev
-      DATABASE_URL_INGESTION: postgres://tome_ingestion:tome_ingestion@localhost:5432/tome_dev
+      DATABASE_URL: postgres://reverie_app:reverie_app@localhost:5432/reverie_dev
+      DATABASE_URL_INGESTION: postgres://reverie_ingestion:reverie_ingestion@localhost:5432/reverie_dev
     steps:
       - uses: actions/checkout@v6
 
       - name: Create database roles
-        run: psql postgres://tome:tome@localhost:5432/tome_dev -f docker/init-roles.sql
+        run: psql postgres://reverie:reverie@localhost:5432/reverie_dev -f docker/init-roles.sql
         working-directory: ${{ github.workspace }}
 
       - uses: dtolnay/rust-toolchain@stable
@@ -53,7 +53,7 @@ jobs:
       - name: Run migrations
         run: >-
           cargo install sqlx-cli --no-default-features --features postgres --locked
-          && DATABASE_URL=postgres://tome:tome@localhost:5432/tome_dev sqlx migrate run
+          && DATABASE_URL=postgres://reverie:reverie@localhost:5432/reverie_dev sqlx migrate run
 
       - name: Check formatting
         run: cargo fmt --check
@@ -77,7 +77,7 @@ jobs:
         # Suppressed advisories — each must have a justification:
         #
         # RUSTSEC-2023-0071 — rsa: Marvin Attack (PKCS#1 v1.5 timing sidechannel).
-        #   No patched version exists upstream. Tome uses rsa transitively via
+        #   No patched version exists upstream. Reverie uses rsa transitively via
         #   openidconnect for JWT *verification* only — the vulnerable PKCS#1 v1.5
         #   *decryption* path is never invoked.
         #
