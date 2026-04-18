@@ -68,7 +68,26 @@ async fn dry_run(
 ) -> Result<impl IntoResponse, AppError> {
     current_user.require_not_child()?;
 
-    let diff = services::enrichment::dry_run::preview(&state.pool, &state.config, id)
+    // RLS-gated visibility check: hide manifestations the user can't see.
+    // The check runs on the user's pool with `app.current_user_id` set; the
+    // subsequent fan-out runs on `ingestion_pool` (matching the queue's
+    // pattern) because the dry-run service reads through several joined
+    // tables without re-checking RLS at each step.
+    let mut tx = db::acquire_with_rls(&state.pool, current_user.user_id)
+        .await
+        .map_err(|e| AppError::Internal(e.into()))?;
+    let visible: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM manifestations WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+    drop(tx);
+    if visible.is_none() {
+        return Err(AppError::NotFound);
+    }
+
+    let diff = services::enrichment::dry_run::preview(&state.ingestion_pool, &state.config, id)
         .await
         .map_err(AppError::Internal)?;
     Ok(axum::Json(diff))
