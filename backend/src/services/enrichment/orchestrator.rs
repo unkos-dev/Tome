@@ -572,7 +572,10 @@ async fn apply_field(
 
     match field {
         "title" => {
-            let v = json_as_string(&value);
+            let Some(v) = json_as_string(&value) else {
+                tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
+                return Ok(());
+            };
             sqlx::query(
                 "UPDATE works SET title = $1, sort_title = lower($1), title_version_id = $2 \
                  WHERE id = $3",
@@ -584,7 +587,10 @@ async fn apply_field(
             .await?;
         }
         "description" => {
-            let v = json_as_string(&value);
+            let Some(v) = json_as_string(&value) else {
+                tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
+                return Ok(());
+            };
             sqlx::query(
                 "UPDATE works SET description = $1, description_version_id = $2 WHERE id = $3",
             )
@@ -595,7 +601,10 @@ async fn apply_field(
             .await?;
         }
         "language" => {
-            let v = json_as_string(&value);
+            let Some(v) = json_as_string(&value) else {
+                tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
+                return Ok(());
+            };
             sqlx::query("UPDATE works SET language = $1, language_version_id = $2 WHERE id = $3")
                 .bind(&v)
                 .bind(version_id)
@@ -604,7 +613,10 @@ async fn apply_field(
                 .await?;
         }
         "publisher" => {
-            let v = json_as_string(&value);
+            let Some(v) = json_as_string(&value) else {
+                tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
+                return Ok(());
+            };
             sqlx::query(
                 "UPDATE manifestations SET publisher = $1, publisher_version_id = $2 WHERE id = $3",
             )
@@ -615,7 +627,10 @@ async fn apply_field(
             .await?;
         }
         "pub_date" => {
-            let v = json_as_string(&value);
+            let Some(v) = json_as_string(&value) else {
+                tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
+                return Ok(());
+            };
             if let Ok(date) = parse_iso_date(&v) {
                 sqlx::query(
                     "UPDATE manifestations SET pub_date = $1, pub_date_version_id = $2 WHERE id = $3",
@@ -630,7 +645,10 @@ async fn apply_field(
             }
         }
         "isbn_10" => {
-            let v = json_as_string(&value);
+            let Some(v) = json_as_string(&value) else {
+                tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
+                return Ok(());
+            };
             sqlx::query(
                 "UPDATE manifestations SET isbn_10 = $1, isbn_10_version_id = $2 WHERE id = $3",
             )
@@ -641,7 +659,10 @@ async fn apply_field(
             .await?;
         }
         "isbn_13" => {
-            let v = json_as_string(&value);
+            let Some(v) = json_as_string(&value) else {
+                tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
+                return Ok(());
+            };
             sqlx::query(
                 "UPDATE manifestations SET isbn_13 = $1, isbn_13_version_id = $2 WHERE id = $3",
             )
@@ -658,10 +679,18 @@ async fn apply_field(
     Ok(())
 }
 
-fn json_as_string(v: &serde_json::Value) -> String {
+/// Coerce a JSON journal value into the scalar string that canonical
+/// columns expect. `Array` and `Object` are rejected — stringifying them
+/// produces raw JSON (e.g. `["Dune"]`) which would corrupt text columns
+/// like `title`. `Null` is also rejected.
+fn json_as_string(v: &serde_json::Value) -> Option<String> {
     match v {
-        serde_json::Value::String(s) => s.clone(),
-        other => other.to_string(),
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Number(n) => Some(n.to_string()),
+        serde_json::Value::Bool(b) => Some(b.to_string()),
+        serde_json::Value::Null
+        | serde_json::Value::Array(_)
+        | serde_json::Value::Object(_) => None,
     }
 }
 
