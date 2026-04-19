@@ -45,13 +45,15 @@ stays immutable as the audit trail.
    gated on `app.current_user_id` being unset — user-facing handlers still
    hit the user policies because they SET LOCAL that variable.
 
-3. **Task 21 (post-validation rollback) integration test deferred.** The
+3. **Task 21 (post-validation rollback) integration test deferred.** ~~The
    `is_regression` decision logic has 4 unit tests covering all four
    Clean/Repaired/Degraded/Quarantined pairs; `std::fs::write` byte-restore
-   is standard semantics. Inducing a real regression in a test fixture
-   would require an EPUB generator that reliably downgrades under
-   `validate_and_repair` — out of scope for MVP. Covered by the BLUEPRINT
-   manual-smoke checklist.
+   is standard semantics.~~
+   **Resolved post-adversarial review:** the post-validation logic is
+   refactored into `finalise_post_writeback`, which routes both regression
+   and validator-`Err` branches through `rollback_atomic` (NamedTempFile +
+   fsync + `path_rename::commit`). Five new unit tests cover commit / rollback-on-regression /
+   rollback-on-validator-error / atomic byte-restoration / no-orphan-tempfiles.
 
 4. **Task 1's refactor IS a semantics change, not pure.** Per-entry
    compression preservation is now enforced (`repack::with_modifications`
@@ -59,12 +61,16 @@ stays immutable as the audit trail.
    Deflate-everything). `repack_round_trip_preserves_per_entry_compression`
    is the regression test. Noted in the commit body.
 
-5. **Path rename deferred from orchestrator happy path.** `path_rename`
+5. **Path rename deferred from orchestrator happy path.** ~~`path_rename`
    module is complete with EXDEV fallback + collision check + tests, but
-   the orchestrator's `run_once` keeps `src_path == dest_path` for MVP.
-   Adding the full rename flow (render via `path_template::render`,
-   update `manifestations.file_path`) is a one-line extension the
-   `path_rename::{commit, check_collision}` API already supports.
+   the orchestrator's `run_once` keeps `src_path == dest_path` for MVP.~~
+   **Resolved post-adversarial review:** `run_once` now calls
+   `path_rename_step` (rendered via `path_template::render` against the
+   primary author's `sort_name` + `works.title`), invokes
+   `path_rename::move_existing` (same-FS rename + EXDEV fallback), and
+   updates `manifestations.file_path`. Skipped when `library_path` is
+   empty (test/dev guard). Covered by `render_target_path` unit tests +
+   `run_once_renames_file_to_template_path` E2E DB test.
 
 ---
 
@@ -93,7 +99,7 @@ stays immutable as the audit trail.
 | 18  | Custom `<meta>` + `<dc:coverage>` preservation                          | `backend/src/services/writeback/opf_rewrite.rs`      | ✅     |
 | 19  | Cover embed tests (replace + insert EPUB 2/3)                           | `backend/src/services/writeback/cover_embed.rs`      | ✅     |
 | 20  | Path rename matrix (collision + same-dir + EXDEV + normalise)           | `backend/src/services/writeback/path_rename.rs`      | ✅     |
-| 21  | Post-validation rollback (unit-tested via `is_regression`)              | `backend/src/services/writeback/orchestrator.rs`     | ⚠ (partial — see Deviations) |
+| 21  | Post-validation rollback (atomic via tempfile + tests for regression AND validator-err) | `backend/src/services/writeback/orchestrator.rs`     | ✅     |
 | 22  | Queue concurrency/retry/shutdown/max-attempts                           | `backend/src/services/writeback/queue.rs`            | ✅     |
 | 23  | Crash-recovery reconciler                                               | `backend/src/services/writeback/queue.rs`            | ✅     |
 | 24  | `current_file_hash` updates + `ingestion_file_hash` immutable           | `backend/src/services/writeback/orchestrator.rs`     | ✅     |

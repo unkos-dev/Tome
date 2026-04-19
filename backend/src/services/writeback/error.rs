@@ -4,10 +4,8 @@
 //! thence to `AppError::Internal` at the route boundary via the blanket
 //! `From<anyhow::Error>`.  No direct `StatusCode` at handlers.
 
-use std::path::PathBuf;
-
 #[derive(Debug, thiserror::Error)]
-#[allow(dead_code)] // NoManagedFile / UnsupportedFormat reserved for future orchestrator paths
+#[allow(dead_code)] // NoManagedFile / UnsupportedFormat / ValidationRegressed reserved for future paths
 pub enum WritebackError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
@@ -19,8 +17,6 @@ pub enum WritebackError {
     Epub(#[from] crate::services::epub::EpubError),
     #[error("post-writeback validation regressed: {0}")]
     ValidationRegressed(String),
-    #[error("path collision: {0}")]
-    PathCollision(PathBuf),
     #[error("manifestation has no managed file")]
     NoManagedFile,
     #[error("unsupported format: {0}")]

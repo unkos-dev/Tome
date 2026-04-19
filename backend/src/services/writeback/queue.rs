@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use crate::config::Config;
 
+use super::events;
 use super::orchestrator::{self, RunOutcome};
 
 /// Spawn the writeback queue worker loop.  Returns when `cancel` fires,
@@ -135,21 +136,45 @@ async fn finish(
 ) -> sqlx::Result<()> {
     match result {
         Ok(outcome) => {
-            if let Some(reason) = outcome.skipped {
+            let manifestation_id = outcome.manifestation_id;
+            let reason = outcome.reason;
+            if let Some(skip_reason) = outcome.skipped {
                 // Terminal skip (e.g. unsupported format): bypass retry path.
-                mark_skipped(pool, id, &reason).await?;
+                mark_skipped(pool, id, &skip_reason).await?;
+                events::emit_writeback_failed(
+                    manifestation_id,
+                    &reason,
+                    attempt_count,
+                    &skip_reason,
+                );
             } else if outcome.success {
                 mark_complete(pool, id).await?;
+                let hash = outcome.current_file_hash.as_deref().unwrap_or("");
+                events::emit_writeback_complete(manifestation_id, &reason, attempt_count, hash);
             } else {
                 let err = outcome
                     .error
                     .unwrap_or_else(|| "writeback failed without specific error".into());
                 mark_failed(pool, id, attempt_count, config, Some(&err)).await?;
+                events::emit_writeback_failed(manifestation_id, &reason, attempt_count, &err);
             }
         }
         Err(e) => {
             warn!(error = %e, %id, "writeback run_once failed");
-            mark_failed(pool, id, attempt_count, config, Some(&e.to_string())).await?;
+            let err_str = e.to_string();
+            mark_failed(pool, id, attempt_count, config, Some(&err_str)).await?;
+            // Best-effort manifestation lookup — this path only fires when
+            // run_once failed before producing a RunOutcome (e.g. snapshot
+            // load).  No outcome = no reason string, so log-only.
+            if let Ok(Some(mid)) = sqlx::query_scalar::<_, Uuid>(
+                "SELECT manifestation_id FROM writeback_jobs WHERE id = $1",
+            )
+            .bind(id)
+            .fetch_optional(pool)
+            .await
+            {
+                events::emit_writeback_failed(mid, "unknown", attempt_count, &err_str);
+            }
         }
     }
     Ok(())

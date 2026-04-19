@@ -18,20 +18,20 @@ use quick_xml::events::Event;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use sqlx::Row;
+use tempfile::NamedTempFile;
 use uuid::Uuid;
 use zip::ZipArchive;
 
 use crate::config::Config;
-use crate::services::epub::{self, ValidationOutcome, repack};
+use crate::services::epub::{self, ValidationOutcome, ValidationReport, repack};
+use crate::services::ingestion::path_template;
 
 use super::cover_embed;
 use super::error::WritebackError;
-use super::events;
 use super::opf_rewrite::{self, Target};
 use super::path_rename;
 
 #[derive(Debug)]
-#[allow(dead_code)] // manifestation_id / reason consumed via tracing + future webhook
 pub struct RunOutcome {
     pub manifestation_id: Uuid,
     pub success: bool,
@@ -41,6 +41,21 @@ pub struct RunOutcome {
     /// path).  For cases where retrying won't help (unsupported format,
     /// missing file).
     pub skipped: Option<String>,
+    /// New hash of the on-disk file on success; None otherwise.  Consumed
+    /// by the queue's `finish` to populate the `writeback_complete` event.
+    pub current_file_hash: Option<String>,
+}
+
+/// Outcome of the post-writeback validation decision.  Extracted for
+/// testability: both branches need to rollback, so the shared decision
+/// point lives in one place.
+#[cfg_attr(test, derive(Debug))]
+enum FinaliseAction {
+    /// Post-validation passed — keep the new on-disk file.
+    Commit,
+    /// Post-validation failed (regression or validator error) — the
+    /// rollback has already restored the original bytes atomically.
+    RolledBack(String),
 }
 
 struct JobSnapshot {
@@ -56,18 +71,19 @@ struct JobSnapshot {
     pub_date: Option<String>,
     isbn_10: Option<String>,
     isbn_13: Option<String>,
-    attempt_count: i32,
+    /// Primary author's `sort_name` (role = 'author', position 0).
+    /// Used to render the path template; `None` falls back to `Unknown`.
+    primary_author: Option<String>,
 }
 
 pub async fn run_once(
     pool: &PgPool,
-    _config: &Config,
+    config: &Config,
     job_id: Uuid,
 ) -> Result<RunOutcome, WritebackError> {
     let snap = load_snapshot(pool, job_id).await?;
     let manifestation_id = snap.manifestation_id;
     let reason = snap.reason.clone();
-    let attempt = snap.attempt_count;
 
     // Skip early when retrying won't help.
     if snap.format != "epub" {
@@ -77,6 +93,7 @@ pub async fn run_once(
             reason,
             error: None,
             skipped: Some(format!("format_unsupported: {}", snap.format)),
+            current_file_hash: None,
         });
     }
     let src_path = PathBuf::from(&snap.file_path);
@@ -87,6 +104,7 @@ pub async fn run_once(
             reason,
             error: None,
             skipped: Some(format!("file_missing: {}", snap.file_path)),
+            current_file_hash: None,
         });
     }
 
@@ -152,28 +170,36 @@ pub async fn run_once(
     // via path_rename::commit's EXDEV fallback.
     path_rename::commit(temp, &src_path)?;
 
-    // Post-writeback validation: roll back if regressed.
-    let post_report = epub::validate_and_repair(&src_path).map_err(WritebackError::Epub)?;
-    if is_regression(&pre_report.outcome, &post_report.outcome) {
-        // Rollback by re-writing the original bytes.
-        std::fs::write(&src_path, &original_bytes)?;
-        let err_msg = format!(
-            "post_writeback_validation_regressed: pre={:?} post={:?}",
-            pre_report.outcome, post_report.outcome
-        );
-        events::emit_writeback_failed(manifestation_id, &reason, attempt, &err_msg);
-        return Ok(RunOutcome {
-            manifestation_id,
-            success: false,
-            reason,
-            error: Some(err_msg),
-            skipped: None,
-        });
+    // Post-writeback validation: rollback atomically on regression OR
+    // validator error.  Both paths share `finalise_post_writeback`.
+    let post_validation = epub::validate_and_repair(&src_path);
+    match finalise_post_writeback(
+        &pre_report.outcome,
+        post_validation,
+        &src_path,
+        &original_bytes,
+        dest_dir,
+    )? {
+        FinaliseAction::Commit => {}
+        FinaliseAction::RolledBack(err_msg) => {
+            return Ok(RunOutcome {
+                manifestation_id,
+                success: false,
+                reason,
+                error: Some(err_msg),
+                skipped: None,
+                current_file_hash: None,
+            });
+        }
     }
 
-    // Update current_file_hash.  file_path is unchanged in the MVP
-    // orchestrator (path rename is deferred to a future iteration).
-    let new_hash = compute_hex_sha256(&src_path)?;
+    // Path-rename: re-render the path template against the canonical
+    // metadata and move the file if the rendered path differs.
+    // Skipped when `library_path` is empty (test/dev shortcut).
+    let final_path = path_rename_step(&snap, config, src_path.clone(), pool).await?;
+
+    // Update current_file_hash from the final on-disk file.
+    let new_hash = compute_hex_sha256(&final_path)?;
     sqlx::query("UPDATE manifestations SET current_file_hash = $1 WHERE id = $2")
         .bind(&new_hash)
         .bind(manifestation_id)
@@ -189,22 +215,150 @@ pub async fn run_once(
         let _ = move_cover_sidecar(pending);
     }
 
-    events::emit_writeback_complete(manifestation_id, &reason, attempt, &new_hash);
     Ok(RunOutcome {
         manifestation_id,
         success: true,
         reason,
         error: None,
         skipped: None,
+        current_file_hash: Some(new_hash),
     })
+}
+
+/// Decide what to do after the post-writeback validation runs.  Both
+/// regression and validator-error branches perform the atomic rollback
+/// in one place, so the on-disk file can never be left in a broken state
+/// while the DB still points at the original hash.
+///
+/// Returns `WritebackError` only when the rollback itself fails
+/// (disk-full, permissions).  A failed rollback is genuinely fatal —
+/// the queue will mark the job failed and Step 11 will flag the
+/// divergence on its next sweep.
+fn finalise_post_writeback(
+    pre_outcome: &ValidationOutcome,
+    post_result: Result<ValidationReport, crate::services::epub::EpubError>,
+    src_path: &Path,
+    original_bytes: &[u8],
+    dest_dir: &Path,
+) -> Result<FinaliseAction, WritebackError> {
+    match post_result {
+        Err(e) => {
+            let err_msg = format!("post_writeback_validation_errored: {e}");
+            rollback_atomic(src_path, original_bytes, dest_dir)?;
+            Ok(FinaliseAction::RolledBack(err_msg))
+        }
+        Ok(post_report) if is_regression(pre_outcome, &post_report.outcome) => {
+            let err_msg = format!(
+                "post_writeback_validation_regressed: pre={:?} post={:?}",
+                pre_outcome, post_report.outcome
+            );
+            rollback_atomic(src_path, original_bytes, dest_dir)?;
+            Ok(FinaliseAction::RolledBack(err_msg))
+        }
+        Ok(_) => Ok(FinaliseAction::Commit),
+    }
+}
+
+/// Render the path template, move the on-disk file if the rendered path
+/// differs from `src_path`, and `UPDATE manifestations.file_path` on
+/// success.  Returns the final on-disk path (either `src_path` unchanged
+/// or the new location).
+///
+/// Skipped (no-op) when `config.library_path` is empty — keeps tests that
+/// place fixtures outside any library root from triggering renames.
+/// Collisions resolve via `path_template::resolve_collision` (numeric
+/// suffix), mirroring the ingestion orchestrator's behaviour.
+async fn path_rename_step(
+    snap: &JobSnapshot,
+    config: &Config,
+    src_path: PathBuf,
+    pool: &PgPool,
+) -> Result<PathBuf, WritebackError> {
+    let candidate = match render_target_path(snap, &config.library_path, &src_path)? {
+        Some(p) => p,
+        None => return Ok(src_path),
+    };
+
+    if let Some(parent) = candidate.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Resolve collisions deterministically (numeric suffix), mirroring
+    // ingestion behaviour.
+    let new_path = path_template::resolve_collision(&candidate)?;
+    path_rename::move_existing(&src_path, &new_path)?;
+
+    let new_path_str = new_path.to_str().ok_or_else(|| {
+        WritebackError::Persist(format!("non-UTF8 rendered path: {}", new_path.display()))
+    })?;
+    sqlx::query("UPDATE manifestations SET file_path = $1 WHERE id = $2")
+        .bind(new_path_str)
+        .bind(snap.manifestation_id)
+        .execute(pool)
+        .await?;
+
+    Ok(new_path)
+}
+
+/// Pure helper: compute the rendered target path from the snapshot +
+/// library root.  Returns `None` when path-rename should be skipped
+/// (empty library_path, or rendered path equals current `src_path`).
+fn render_target_path(
+    snap: &JobSnapshot,
+    library_path: &str,
+    src_path: &Path,
+) -> Result<Option<PathBuf>, WritebackError> {
+    if library_path.is_empty() {
+        return Ok(None);
+    }
+    let mut vars: HashMap<String, String> = HashMap::new();
+    if let Some(t) = snap.title.as_deref() {
+        vars.insert("Title".into(), t.to_string());
+    }
+    if let Some(a) = snap.primary_author.as_deref() {
+        vars.insert("Author".into(), a.to_string());
+    }
+    let ext = src_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("epub")
+        .to_string();
+    vars.insert("ext".into(), ext);
+
+    let relative = path_template::render(path_template::DEFAULT_TEMPLATE, &vars);
+    let relative = path_rename::normalise_relative(&relative)?;
+    let candidate = PathBuf::from(library_path).join(&relative);
+
+    if candidate == src_path {
+        Ok(None)
+    } else {
+        Ok(Some(candidate))
+    }
+}
+
+/// Restore `original_bytes` to `dest` atomically.
+///
+/// Uses a tempfile in the same directory (for atomic rename semantics) +
+/// fsync before persist.  A SIGKILL or power loss between `write` and
+/// `persist` leaves the original file intact; only the tempfile is lost.
+fn rollback_atomic(
+    dest: &Path,
+    original_bytes: &[u8],
+    dest_dir: &Path,
+) -> Result<(), WritebackError> {
+    let temp = NamedTempFile::new_in(dest_dir)?;
+    std::fs::write(temp.path(), original_bytes)?;
+    // fsync the tempfile before rename so the bytes durably hit disk.
+    std::fs::File::open(temp.path())?.sync_all()?;
+    path_rename::commit(temp, dest)
 }
 
 // ── Snapshot load ─────────────────────────────────────────────────────────
 
 async fn load_snapshot(pool: &PgPool, job_id: Uuid) -> Result<JobSnapshot, WritebackError> {
     let row = sqlx::query(
-        "SELECT wj.manifestation_id, wj.reason, wj.attempt_count, \
-                m.file_path, m.format::text AS format, m.cover_path, \
+        "SELECT wj.manifestation_id, wj.reason, \
+                m.work_id, m.file_path, m.format::text AS format, m.cover_path, \
                 m.publisher, m.pub_date, m.isbn_10, m.isbn_13, \
                 w.title, w.description, w.language \
            FROM writeback_jobs wj \
@@ -216,6 +370,19 @@ async fn load_snapshot(pool: &PgPool, job_id: Uuid) -> Result<JobSnapshot, Write
     .fetch_optional(pool)
     .await?
     .ok_or_else(|| WritebackError::Persist(format!("job {job_id} not found")))?;
+
+    let work_id: Uuid = row.try_get("work_id")?;
+    let primary_author: Option<String> = sqlx::query_scalar(
+        "SELECT a.sort_name \
+           FROM work_authors wa \
+           JOIN authors a ON a.id = wa.author_id \
+          WHERE wa.work_id = $1 AND wa.role = 'author' \
+          ORDER BY wa.position \
+          LIMIT 1",
+    )
+    .bind(work_id)
+    .fetch_optional(pool)
+    .await?;
 
     let pub_date: Option<time::Date> = row.try_get("pub_date").ok();
     Ok(JobSnapshot {
@@ -231,7 +398,7 @@ async fn load_snapshot(pool: &PgPool, job_id: Uuid) -> Result<JobSnapshot, Write
         pub_date: pub_date.map(|d| d.to_string()),
         isbn_10: row.try_get("isbn_10")?,
         isbn_13: row.try_get("isbn_13")?,
-        attempt_count: row.try_get("attempt_count")?,
+        primary_author,
     })
 }
 
@@ -631,14 +798,305 @@ mod tests {
         cleanup_fixture(&app_pool, &ing_pool, work_id, m_id).await;
     }
 
-    // Task 21 (post-validation rollback) is covered by the `is_regression_*`
-    // unit tests below (decision logic) + the std::fs::write+rename
-    // byte-restore semantics in `run_once`.  Triggering a real regression
-    // end-to-end requires a fixture that reliably downgrades the
-    // ValidationOutcome (Clean → Degraded or any → Quarantined) — the
-    // simple fixtures we can build in-test don't reach that threshold
-    // under `validate_and_repair`.  Live regression scenarios are covered
-    // by the BLUEPRINT manual-smoke checklist.
+    /// Path-rename E2E (Step 8 acceptance criterion): when the rendered
+    /// path differs from the on-disk file, run_once must move the file
+    /// AND update `manifestations.file_path`.
+    #[tokio::test]
+    #[ignore]
+    async fn run_once_renames_file_to_template_path() {
+        let app_pool = PgPool::connect(&app_url()).await.unwrap();
+        let ing_pool = PgPool::connect(&ing_url()).await.unwrap();
+        let marker = Uuid::new_v4().simple().to_string();
+
+        // Build the fixture inside a tempdir that doubles as library_root.
+        let (lib_dir, src_path) = make_fixture_epub(&format!("Initial-{marker}"));
+        let original_bytes = std::fs::read(&src_path).unwrap();
+        let original_hash = initial_hex_sha256(&original_bytes);
+        let library_root = lib_dir.path().to_str().unwrap().to_string();
+
+        let (work_id, m_id) = insert_fixture(
+            &ing_pool,
+            &marker,
+            src_path.to_str().unwrap(),
+            &original_hash,
+        )
+        .await;
+
+        // Bind an author so the template renders {Author}/{Title}.epub.
+        let author_sort = format!("Author{marker}");
+        let author_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO authors (name, sort_name) VALUES ($1, $1) RETURNING id",
+        )
+        .bind(&author_sort)
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO work_authors (work_id, author_id, role, position) \
+             VALUES ($1, $2, 'author', 0)",
+        )
+        .bind(work_id)
+        .bind(author_id)
+        .execute(&ing_pool)
+        .await
+        .unwrap();
+
+        // Set works.title to a value that drives a rename (template
+        // renders to a different path than the fixture's tempdir name).
+        let new_title = format!("Renamed{marker}");
+        sqlx::query("UPDATE works SET title = $1 WHERE id = $2")
+            .bind(&new_title)
+            .bind(work_id)
+            .execute(&ing_pool)
+            .await
+            .unwrap();
+
+        let job_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO writeback_jobs (manifestation_id, reason) \
+             VALUES ($1, 'metadata') RETURNING id",
+        )
+        .bind(m_id)
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
+
+        // Use a config with the lib_dir as library_path so path-rename engages.
+        let mut cfg = test_config();
+        cfg.library_path = library_root.clone();
+
+        let outcome = run_once(&app_pool, &cfg, job_id).await.unwrap();
+        assert!(outcome.success, "run_once should succeed: {:?}", outcome);
+
+        // The src_path should no longer exist; the new template path should.
+        let expected_new = std::path::PathBuf::from(&library_root)
+            .join(&author_sort)
+            .join(format!("{new_title}.epub"));
+        assert!(
+            !src_path.exists(),
+            "old src path must be unlinked: {}",
+            src_path.display()
+        );
+        assert!(
+            expected_new.exists(),
+            "rendered path must exist: {}",
+            expected_new.display()
+        );
+
+        // DB: file_path updated, current_file_hash matches new file.
+        let (db_path, current_hash): (String, String) =
+            sqlx::query_as("SELECT file_path, current_file_hash FROM manifestations WHERE id = $1")
+                .bind(m_id)
+                .fetch_one(&app_pool)
+                .await
+                .unwrap();
+        assert_eq!(db_path, expected_new.to_str().unwrap());
+        assert_ne!(current_hash, original_hash);
+
+        // Cleanup author rows alongside the standard fixture cleanup.
+        let _ = sqlx::query("DELETE FROM work_authors WHERE work_id = $1")
+            .bind(work_id)
+            .execute(&ing_pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM authors WHERE id = $1")
+            .bind(author_id)
+            .execute(&ing_pool)
+            .await;
+        cleanup_fixture(&app_pool, &ing_pool, work_id, m_id).await;
+    }
+
+    // ── Rollback + post-validation decision tests ───────────────────────
+    //
+    // These exercise the S1 (atomic rollback) and S2 (rollback on
+    // validator Err, not just regression) invariants.  Live-regression
+    // end-to-end fixtures are covered by the BLUEPRINT manual-smoke
+    // checklist — the simple in-test fixtures don't reliably trigger
+    // `ValidationOutcome::Quarantined` under `validate_and_repair`.
+
+    fn scratch_with_bytes(bytes: &[u8]) -> (tempfile::TempDir, std::path::PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("book.epub");
+        std::fs::write(&path, bytes).unwrap();
+        (dir, path)
+    }
+
+    /// Rollback restores the original bytes byte-for-byte.
+    #[test]
+    fn rollback_atomic_restores_original_bytes() {
+        let original = b"ORIGINAL EPUB BYTES 1234567890".repeat(16);
+        let modified = b"CORRUPT WRITEBACK RESULT".repeat(4);
+        let (dir, path) = scratch_with_bytes(&original);
+        std::fs::write(&path, &modified).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), modified);
+
+        rollback_atomic(&path, &original, dir.path()).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+    }
+
+    /// Rollback leaves no orphan tempfiles in the destination directory.
+    #[test]
+    fn rollback_atomic_cleans_up_tempfiles() {
+        let original = b"ORIGINAL".to_vec();
+        let (dir, path) = scratch_with_bytes(&original);
+        std::fs::write(&path, b"OVERWRITTEN").unwrap();
+
+        rollback_atomic(&path, &original, dir.path()).unwrap();
+
+        let remaining: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().into_string().unwrap())
+            .collect();
+        assert_eq!(
+            remaining,
+            vec!["book.epub".to_string()],
+            "tempfile must not linger"
+        );
+    }
+
+    fn ok_report(outcome: ValidationOutcome) -> ValidationReport {
+        ValidationReport {
+            issues: vec![],
+            outcome,
+            accessibility_metadata: None,
+            opf_data: None,
+        }
+    }
+
+    /// `Ok(Clean)` post-validation → Commit.  No rollback, file unchanged.
+    #[test]
+    fn finalise_post_writeback_commits_when_clean() {
+        let original = b"ORIG".to_vec();
+        let written = b"NEW".to_vec();
+        let (dir, path) = scratch_with_bytes(&written);
+
+        let action = finalise_post_writeback(
+            &ValidationOutcome::Clean,
+            Ok(ok_report(ValidationOutcome::Clean)),
+            &path,
+            &original,
+            dir.path(),
+        )
+        .unwrap();
+
+        assert!(matches!(action, FinaliseAction::Commit));
+        assert_eq!(std::fs::read(&path).unwrap(), written, "file untouched");
+    }
+
+    /// `Ok(Quarantined)` post-validation → RolledBack.  File restored.
+    #[test]
+    fn finalise_post_writeback_rolls_back_on_regression() {
+        let original = b"ORIG".to_vec();
+        let written = b"CORRUPT".to_vec();
+        let (dir, path) = scratch_with_bytes(&written);
+
+        let action = finalise_post_writeback(
+            &ValidationOutcome::Clean,
+            Ok(ok_report(ValidationOutcome::Quarantined)),
+            &path,
+            &original,
+            dir.path(),
+        )
+        .unwrap();
+
+        match action {
+            FinaliseAction::RolledBack(msg) => {
+                assert!(msg.contains("regressed"), "msg: {msg}");
+            }
+            _ => panic!("expected RolledBack, got {:?}", action),
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), original, "rollback restored");
+    }
+
+    /// `Err(EpubError)` post-validation → RolledBack.  This is the S2
+    /// branch: a validator error must not leave a corrupted file on disk.
+    #[test]
+    fn finalise_post_writeback_rolls_back_on_validator_error() {
+        use crate::services::epub::EpubError;
+
+        let original = b"ORIG".to_vec();
+        let written = b"CORRUPT".to_vec();
+        let (dir, path) = scratch_with_bytes(&written);
+
+        let err: Result<ValidationReport, EpubError> =
+            Err(EpubError::Io(std::io::Error::other("simulated")));
+
+        let action =
+            finalise_post_writeback(&ValidationOutcome::Clean, err, &path, &original, dir.path())
+                .unwrap();
+
+        match action {
+            FinaliseAction::RolledBack(msg) => {
+                assert!(msg.contains("errored"), "msg: {msg}");
+                assert!(msg.contains("simulated"), "msg: {msg}");
+            }
+            _ => panic!("expected RolledBack, got {:?}", action),
+        }
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            original,
+            "validator-err rollback restored"
+        );
+    }
+
+    // ── Path-rename target rendering ────────────────────────────────────
+
+    fn snap_with(title: Option<&str>, author: Option<&str>) -> JobSnapshot {
+        JobSnapshot {
+            manifestation_id: Uuid::nil(),
+            reason: "metadata".into(),
+            file_path: String::new(),
+            format: "epub".into(),
+            cover_path: None,
+            title: title.map(|s| s.to_string()),
+            description: None,
+            language: None,
+            publisher: None,
+            pub_date: None,
+            isbn_10: None,
+            isbn_13: None,
+            primary_author: author.map(|s| s.to_string()),
+        }
+    }
+
+    #[test]
+    fn render_target_path_skipped_when_library_path_empty() {
+        let snap = snap_with(Some("T"), Some("A"));
+        let src = std::path::Path::new("/tmp/anything.epub");
+        assert!(render_target_path(&snap, "", src).unwrap().is_none());
+    }
+
+    #[test]
+    fn render_target_path_yields_author_title_layout() {
+        let snap = snap_with(Some("Frankenstein"), Some("Shelley, Mary"));
+        let src = std::path::Path::new("/lib/old/file.epub");
+        let target = render_target_path(&snap, "/lib", src).unwrap().unwrap();
+        assert_eq!(
+            target,
+            std::path::PathBuf::from("/lib/Shelley, Mary/Frankenstein.epub")
+        );
+    }
+
+    #[test]
+    fn render_target_path_returns_none_when_unchanged() {
+        let snap = snap_with(Some("Frankenstein"), Some("Shelley, Mary"));
+        let already = std::path::PathBuf::from("/lib/Shelley, Mary/Frankenstein.epub");
+        assert!(
+            render_target_path(&snap, "/lib", &already)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn render_target_path_falls_back_to_unknown_when_metadata_missing() {
+        let snap = snap_with(None, None);
+        let src = std::path::Path::new("/lib/orphan.epub");
+        let target = render_target_path(&snap, "/lib", src).unwrap().unwrap();
+        assert_eq!(
+            target,
+            std::path::PathBuf::from("/lib/Unknown/Unknown.epub")
+        );
+    }
 
     #[test]
     fn is_regression_detects_quarantine() {

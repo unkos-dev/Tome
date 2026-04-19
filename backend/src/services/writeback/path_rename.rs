@@ -12,18 +12,6 @@ use tempfile::NamedTempFile;
 
 use super::error::WritebackError;
 
-/// Abort if `dest` already exists AND is not the same file as `src`.
-#[allow(dead_code)] // wired in future path-rename iteration; tests exercise it today
-pub fn check_collision(src: &Path, dest: &Path) -> Result<(), WritebackError> {
-    if !dest.exists() {
-        return Ok(());
-    }
-    match (std::fs::canonicalize(src), std::fs::canonicalize(dest)) {
-        (Ok(a), Ok(b)) if a == b => Ok(()),
-        _ => Err(WritebackError::PathCollision(dest.to_path_buf())),
-    }
-}
-
 /// Persist `temp` onto `dest` atomically on same-FS, or fall back to
 /// copy + verify + unlink when crossing filesystem boundaries.
 pub fn commit(temp: NamedTempFile, dest: &Path) -> Result<(), WritebackError> {
@@ -73,11 +61,35 @@ fn exdev_fallback(temp: NamedTempFile, dest: &Path) -> Result<(), WritebackError
     Ok(())
 }
 
+/// Move an existing on-disk file to `dest`.  Same-FS → atomic rename.
+/// Cross-FS (EXDEV) → tempfile-in-dest-dir + persist + unlink-original.
+///
+/// This is the "rename a file already on disk" sibling of [`commit`]
+/// (which takes a [`NamedTempFile`]).  Used by the orchestrator's
+/// path-rename step after post-writeback validation passes.
+pub fn move_existing(src: &Path, dest: &Path) -> Result<(), WritebackError> {
+    match std::fs::rename(src, dest) {
+        Ok(_) => return Ok(()),
+        Err(e) if !is_cross_device(&e) => return Err(WritebackError::Io(e)),
+        Err(_) => {}
+    }
+    // Cross-FS fallback: copy via a tempfile in dest's dir, then unlink src.
+    let parent = dest
+        .parent()
+        .ok_or_else(|| WritebackError::Persist("dest has no parent dir".into()))?;
+    let bytes = std::fs::read(src)?;
+    let temp = NamedTempFile::new_in(parent)?;
+    std::fs::write(temp.path(), &bytes)?;
+    std::fs::File::open(temp.path())?.sync_all()?;
+    commit(temp, dest)?;
+    std::fs::remove_file(src)?;
+    Ok(())
+}
+
 /// Normalise a rendered path: reject `..` components and absolute paths
 /// that escape the library root.  Returns the input unchanged if it is
 /// already safe.  This is a defensive second line — primary sanitisation
 /// happens inside `services::ingestion::path_template::render`.
-#[allow(dead_code)] // wired in future path-rename iteration; tests exercise it today
 pub fn normalise_relative(p: &Path) -> Result<PathBuf, WritebackError> {
     let mut out = PathBuf::new();
     for comp in p.components() {
@@ -107,36 +119,6 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn check_collision_no_dest() {
-        let dir = tempfile::tempdir().unwrap();
-        let src = dir.path().join("src.epub");
-        std::fs::write(&src, b"x").unwrap();
-        let dest = dir.path().join("dest.epub");
-        assert!(check_collision(&src, &dest).is_ok());
-    }
-
-    #[test]
-    fn check_collision_same_path_ok() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("file.epub");
-        std::fs::write(&path, b"x").unwrap();
-        assert!(check_collision(&path, &path).is_ok());
-    }
-
-    #[test]
-    fn check_collision_different_content_errors() {
-        let dir = tempfile::tempdir().unwrap();
-        let src = dir.path().join("src.epub");
-        let dest = dir.path().join("dest.epub");
-        std::fs::write(&src, b"A").unwrap();
-        std::fs::write(&dest, b"B").unwrap();
-        assert!(matches!(
-            check_collision(&src, &dest),
-            Err(WritebackError::PathCollision(_))
-        ));
-    }
-
-    #[test]
     fn commit_same_directory_persists() {
         let dir = tempfile::tempdir().unwrap();
         let mut temp = NamedTempFile::new_in(dir.path()).unwrap();
@@ -164,6 +146,23 @@ mod tests {
         let p = Path::new("./sub/file.epub");
         let out = normalise_relative(p).unwrap();
         assert_eq!(out, PathBuf::from("sub/file.epub"));
+    }
+
+    /// `move_existing` performs an atomic rename within the same FS and
+    /// removes the source file in the process.
+    #[test]
+    fn move_existing_same_fs_renames_atomically() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("orig.epub");
+        let dest = dir.path().join("subdir/new.epub");
+        std::fs::write(&src, b"PAYLOAD").unwrap();
+        std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+
+        move_existing(&src, &dest).unwrap();
+
+        assert!(!src.exists(), "source must be unlinked after move");
+        assert!(dest.exists(), "dest must exist after move");
+        assert_eq!(std::fs::read(&dest).unwrap(), b"PAYLOAD");
     }
 
     /// Exercise the EXDEV branch by invoking it directly.  Real cross-FS
