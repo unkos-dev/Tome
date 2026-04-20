@@ -41,7 +41,7 @@ ingestion_jobs     (standalone)
 | `works` | Abstract titles | `title`, `sort_title`, `search_vector` |
 | `authors` | Author/contributor records | `name`, `sort_name` |
 | `work_authors` | Work-Author join (M:N) | `work_id`, `author_id`, `role`, `position` |
-| `manifestations` | Concrete files | `work_id`, `format`, `file_path`, `file_hash`, `validation_status`, `ingestion_status` |
+| `manifestations` | Concrete files | `work_id`, `format`, `file_path`, `ingestion_file_hash`, `current_file_hash`, `validation_status`, `ingestion_status` |
 
 ### Series & Metadata
 
@@ -68,6 +68,7 @@ ingestion_jobs     (standalone)
 |---|---|---|
 | `api_cache` | External API response cache | `source`, `lookup_key`, `response`, `expires_at` |
 | `ingestion_jobs` | Batch job tracking | `batch_id`, `source_path`, `status` |
+| `writeback_jobs` | Queue of pending OPF writeback operations | `manifestation_id`, `reason`, `status`, `attempt_count` |
 | `webhooks` | User-configured webhooks | `user_id`, `url`, `events`, `enabled` |
 | `webhook_deliveries` | Delivery log | `webhook_id`, `event_type`, `response_status` |
 
@@ -91,6 +92,7 @@ ingestion_jobs     (standalone)
 | `metadata_review_status` | draft, accepted, rejected | `metadata_versions.status` |
 | `tag_type` | genre, sub_genre, trope, theme | `tags.tag_type` |
 | `job_status` | queued, running, complete, failed | `ingestion_jobs.status` |
+| `writeback_status` | pending, in_progress, complete, failed, skipped | `writeback_jobs.status` |
 
 **Note:** `ingestion_status` tracks per-file lifecycle on manifestations.
 `job_status` tracks batch orchestration on ingestion_jobs. These are intentionally
