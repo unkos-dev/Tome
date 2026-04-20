@@ -805,7 +805,11 @@ mod tests {
         .unwrap();
 
         let outcome = run_once(&app_pool, &test_config(), job_id).await.unwrap();
-        assert!(matches!(outcome, RunOutcome::Success { .. }), "run_once should succeed: {:?}", outcome);
+        assert!(
+            matches!(outcome, RunOutcome::Success { .. }),
+            "run_once should succeed: {:?}",
+            outcome
+        );
 
         // OPF at OEBPS/package.opf should contain the new title.
         let new_bytes = std::fs::read(&path).unwrap();
@@ -976,7 +980,11 @@ mod tests {
         cfg.library_path = library_root.clone();
 
         let outcome = run_once(&app_pool, &cfg, job_id).await.unwrap();
-        assert!(matches!(outcome, RunOutcome::Success { .. }), "run_once should succeed: {:?}", outcome);
+        assert!(
+            matches!(outcome, RunOutcome::Success { .. }),
+            "run_once should succeed: {:?}",
+            outcome
+        );
 
         // The src_path should no longer exist; the new template path should.
         let expected_new = std::path::PathBuf::from(&library_root)
@@ -1117,8 +1125,13 @@ mod tests {
         let pending_path = pending_dir.join(&cover_filename);
         std::fs::write(&pending_path, PNG_REPLACEMENT).unwrap();
 
-        let (work_id, m_id) =
-            insert_fixture(&ing_pool, &marker, src_path.to_str().unwrap(), &original_hash).await;
+        let (work_id, m_id) = insert_fixture(
+            &ing_pool,
+            &marker,
+            src_path.to_str().unwrap(),
+            &original_hash,
+        )
+        .await;
         sqlx::query("UPDATE manifestations SET cover_path = $1 WHERE id = $2")
             .bind(pending_path.to_str().unwrap())
             .bind(m_id)

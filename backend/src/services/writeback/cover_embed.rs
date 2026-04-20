@@ -460,7 +460,8 @@ mod tests {
         let opf = epub2_opf_with_cover();
         let plan = plan_embed(opf.as_bytes(), JPEG_MINIMAL).unwrap();
         assert!(
-            plan.binary_replacements.contains_key("images/old-cover.jpg"),
+            plan.binary_replacements
+                .contains_key("images/old-cover.jpg"),
             "same-media path should replace existing JPEG by href: {:?}",
             plan.binary_replacements
         );

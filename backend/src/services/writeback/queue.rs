@@ -716,13 +716,12 @@ mod tests {
         .await
         .unwrap();
 
-        let (status, error): (String, Option<String>) = sqlx::query_as(
-            "SELECT status::text, error FROM writeback_jobs WHERE id = $1",
-        )
-        .bind(job_id)
-        .fetch_one(&ing_pool)
-        .await
-        .unwrap();
+        let (status, error): (String, Option<String>) =
+            sqlx::query_as("SELECT status::text, error FROM writeback_jobs WHERE id = $1")
+                .bind(job_id)
+                .fetch_one(&ing_pool)
+                .await
+                .unwrap();
         assert_eq!(status, "complete");
         assert_eq!(error, None);
 
@@ -755,13 +754,12 @@ mod tests {
         .await
         .unwrap();
 
-        let (status, error): (String, Option<String>) = sqlx::query_as(
-            "SELECT status::text, error FROM writeback_jobs WHERE id = $1",
-        )
-        .bind(job_id)
-        .fetch_one(&ing_pool)
-        .await
-        .unwrap();
+        let (status, error): (String, Option<String>) =
+            sqlx::query_as("SELECT status::text, error FROM writeback_jobs WHERE id = $1")
+                .bind(job_id)
+                .fetch_one(&ing_pool)
+                .await
+                .unwrap();
         assert_eq!(status, "skipped");
         assert_eq!(error.as_deref(), Some("format_unsupported: pdf"));
 
@@ -793,13 +791,12 @@ mod tests {
         .await
         .unwrap();
 
-        let (status, error): (String, Option<String>) = sqlx::query_as(
-            "SELECT status::text, error FROM writeback_jobs WHERE id = $1",
-        )
-        .bind(job_id)
-        .fetch_one(&ing_pool)
-        .await
-        .unwrap();
+        let (status, error): (String, Option<String>) =
+            sqlx::query_as("SELECT status::text, error FROM writeback_jobs WHERE id = $1")
+                .bind(job_id)
+                .fetch_one(&ing_pool)
+                .await
+                .unwrap();
         assert_eq!(status, "failed");
         assert_eq!(error.as_deref(), Some("regression"));
 
@@ -897,13 +894,12 @@ mod tests {
         .await
         .unwrap();
 
-        let (status, error): (String, Option<String>) = sqlx::query_as(
-            "SELECT status::text, error FROM writeback_jobs WHERE id = $1",
-        )
-        .bind(job_id)
-        .fetch_one(&ing_pool)
-        .await
-        .unwrap();
+        let (status, error): (String, Option<String>) =
+            sqlx::query_as("SELECT status::text, error FROM writeback_jobs WHERE id = $1")
+                .bind(job_id)
+                .fetch_one(&ing_pool)
+                .await
+                .unwrap();
         assert_eq!(status, "failed");
         let err_text = error.expect("error column should record the run_once error");
         assert!(

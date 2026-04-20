@@ -549,7 +549,10 @@ mod tests {
         };
         let out = transform_str(&input, &target);
         assert!(out.contains("<dc:language>fr</dc:language>"), "got: {out}");
-        assert!(!out.contains("<dc:language>en"), "old language leaked: {out}");
+        assert!(
+            !out.contains("<dc:language>en"),
+            "old language leaked: {out}"
+        );
     }
 
     #[test]
@@ -575,10 +578,7 @@ mod tests {
             ..Default::default()
         };
         let out = transform_str(&input, &target);
-        assert!(
-            out.contains("<dc:date>2026-04-19</dc:date>"),
-            "got: {out}"
-        );
+        assert!(out.contains("<dc:date>2026-04-19</dc:date>"), "got: {out}");
         assert!(!out.contains("1990-01-01"), "old date leaked: {out}");
     }
 
