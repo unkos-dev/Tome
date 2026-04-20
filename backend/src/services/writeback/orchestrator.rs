@@ -286,16 +286,39 @@ async fn path_rename_step(
     // Resolve collisions deterministically (numeric suffix), mirroring
     // ingestion behaviour.
     let new_path = path_template::resolve_collision(&candidate)?;
+
+    // Validate UTF-8 before the FS rename: a non-UTF-8 rendered path
+    // would otherwise orphan the file between the rename and the DB write.
+    let new_path_str = new_path
+        .to_str()
+        .ok_or_else(|| {
+            WritebackError::Persist(format!("non-UTF8 rendered path: {}", new_path.display()))
+        })?
+        .to_owned();
+
     path_rename::move_existing(&src_path, &new_path)?;
 
-    let new_path_str = new_path.to_str().ok_or_else(|| {
-        WritebackError::Persist(format!("non-UTF8 rendered path: {}", new_path.display()))
-    })?;
-    sqlx::query("UPDATE manifestations SET file_path = $1 WHERE id = $2")
-        .bind(new_path_str)
+    // If the DB update fails the file is orphaned: `file_path` still
+    // points at `src_path` (missing on disk), and the next run_once would
+    // skip as `file_missing` — permanently removing the book from the
+    // library index. Compensate with a best-effort move-back.
+    let update_result = sqlx::query("UPDATE manifestations SET file_path = $1 WHERE id = $2")
+        .bind(&new_path_str)
         .bind(snap.manifestation_id)
         .execute(pool)
-        .await?;
+        .await;
+
+    if let Err(e) = update_result {
+        if let Err(re) = path_rename::move_existing(&new_path, &src_path) {
+            tracing::error!(
+                error = %re,
+                original = %src_path.display(),
+                attempted = %new_path.display(),
+                "writeback: path-rename DB update failed AND compensating move-back failed — on-disk state diverges from DB",
+            );
+        }
+        return Err(WritebackError::Db(e));
+    }
 
     Ok(new_path)
 }

@@ -222,11 +222,9 @@ fn rewrite_opf_cover_reference(
                     };
                     new_el.push_attribute((attr.key.as_ref(), new_val.as_slice()));
                 }
-                writer
-                    .write_event(Event::Empty(new_el))
-                    .map_err(WritebackError::Io)?;
+                writer.write_event(Event::Empty(new_el))?;
             }
-            ev => writer.write_event(ev).map_err(WritebackError::Io)?,
+            ev => writer.write_event(ev)?,
         }
         buf.clear();
     }
@@ -256,9 +254,7 @@ fn insert_opf_cover(
             Event::Eof => break,
             Event::Start(e) if local_name(e.name().as_ref()) == b"metadata" => {
                 saw_metadata_open = true;
-                writer
-                    .write_event(Event::Start(e.into_owned()))
-                    .map_err(WritebackError::Io)?;
+                writer.write_event(Event::Start(e.into_owned()))?;
             }
             Event::Empty(e) if local_name(e.name().as_ref()) == b"metadata" => {
                 // Self-closing <metadata/>: open it, inject the EPUB-2 cover
@@ -268,22 +264,16 @@ fn insert_opf_cover(
                 for attr in e.attributes().flatten() {
                     start.push_attribute(attr);
                 }
-                writer
-                    .write_event(Event::Start(start))
-                    .map_err(WritebackError::Io)?;
+                writer.write_event(Event::Start(start))?;
                 if !is_epub3 {
                     let mut m = BytesStart::new("meta");
                     m.push_attribute(("name", "cover"));
                     m.push_attribute(("content", "cover-image"));
-                    writer
-                        .write_event(Event::Empty(m))
-                        .map_err(WritebackError::Io)?;
+                    writer.write_event(Event::Empty(m))?;
                 }
-                writer
-                    .write_event(Event::End(BytesEnd::new(
-                        String::from_utf8_lossy(&name).to_string(),
-                    )))
-                    .map_err(WritebackError::Io)?;
+                writer.write_event(Event::End(BytesEnd::new(
+                    String::from_utf8_lossy(&name).to_string(),
+                )))?;
             }
             Event::End(e) if local_name(e.name().as_ref()) == b"metadata" => {
                 // For EPUB 2, insert <meta name="cover" content="cover-image"/> here.
@@ -291,19 +281,13 @@ fn insert_opf_cover(
                     let mut m = BytesStart::new("meta");
                     m.push_attribute(("name", "cover"));
                     m.push_attribute(("content", "cover-image"));
-                    writer
-                        .write_event(Event::Empty(m))
-                        .map_err(WritebackError::Io)?;
+                    writer.write_event(Event::Empty(m))?;
                 }
-                writer
-                    .write_event(Event::End(e.into_owned()))
-                    .map_err(WritebackError::Io)?;
+                writer.write_event(Event::End(e.into_owned()))?;
             }
             Event::Start(e) if local_name(e.name().as_ref()) == b"manifest" => {
                 saw_manifest_open = true;
-                writer
-                    .write_event(Event::Start(e.into_owned()))
-                    .map_err(WritebackError::Io)?;
+                writer.write_event(Event::Start(e.into_owned()))?;
                 // Insert new cover manifest item immediately after the opening tag.
                 let mut item = BytesStart::new("item");
                 item.push_attribute(("id", "cover-image"));
@@ -312,11 +296,9 @@ fn insert_opf_cover(
                 if is_epub3 {
                     item.push_attribute(("properties", "cover-image"));
                 }
-                writer
-                    .write_event(Event::Empty(item))
-                    .map_err(WritebackError::Io)?;
+                writer.write_event(Event::Empty(item))?;
             }
-            ev => writer.write_event(ev).map_err(WritebackError::Io)?,
+            ev => writer.write_event(ev)?,
         }
         buf.clear();
     }

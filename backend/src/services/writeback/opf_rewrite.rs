@@ -80,9 +80,7 @@ pub fn transform(opf_bytes: &[u8], target: &Target<'_>) -> Result<Vec<u8>, Write
 
                 if local == b"metadata" && in_metadata_depth.is_none() {
                     in_metadata_depth = Some(element_stack.len());
-                    writer
-                        .write_event(Event::Start(e.clone()))
-                        .map_err(WritebackError::Io)?;
+                    writer.write_event(Event::Start(e.clone()))?;
                     i += 1;
                     continue;
                 }
@@ -129,9 +127,7 @@ pub fn transform(opf_bytes: &[u8], target: &Target<'_>) -> Result<Vec<u8>, Write
                     }
                 }
 
-                writer
-                    .write_event(Event::Start(e.clone()))
-                    .map_err(WritebackError::Io)?;
+                writer.write_event(Event::Start(e.clone()))?;
             }
             Event::Empty(e) => {
                 let name_bytes = e.name().as_ref().to_vec();
@@ -179,9 +175,7 @@ pub fn transform(opf_bytes: &[u8], target: &Target<'_>) -> Result<Vec<u8>, Write
                     }
                 }
 
-                writer
-                    .write_event(Event::Empty(e.clone()))
-                    .map_err(WritebackError::Io)?;
+                writer.write_event(Event::Empty(e.clone()))?;
             }
             Event::End(e) => {
                 let name_bytes = e.name().as_ref().to_vec();
@@ -218,14 +212,10 @@ pub fn transform(opf_bytes: &[u8], target: &Target<'_>) -> Result<Vec<u8>, Write
                 }
 
                 let _ = popped;
-                writer
-                    .write_event(Event::End(e.clone()))
-                    .map_err(WritebackError::Io)?;
+                writer.write_event(Event::End(e.clone()))?;
             }
             other => {
-                writer
-                    .write_event(other.clone())
-                    .map_err(WritebackError::Io)?;
+                writer.write_event(other.clone())?;
             }
         }
         i += 1;
@@ -285,17 +275,11 @@ fn write_replaced_element(
     new_text: &str,
 ) -> Result<(), WritebackError> {
     let name_bytes = start.name().as_ref().to_vec();
-    writer
-        .write_event(Event::Start(start.clone()))
-        .map_err(WritebackError::Io)?;
-    writer
-        .write_event(Event::Text(BytesText::new(new_text)))
-        .map_err(WritebackError::Io)?;
-    writer
-        .write_event(Event::End(BytesEnd::new(
-            String::from_utf8_lossy(&name_bytes).to_string(),
-        )))
-        .map_err(WritebackError::Io)?;
+    writer.write_event(Event::Start(start.clone()))?;
+    writer.write_event(Event::Text(BytesText::new(new_text)))?;
+    writer.write_event(Event::End(BytesEnd::new(
+        String::from_utf8_lossy(&name_bytes).to_string(),
+    )))?;
     Ok(())
 }
 
@@ -309,17 +293,11 @@ fn write_replaced_element_from_empty(
     for attr in empty.attributes().flatten() {
         start.push_attribute(attr);
     }
-    writer
-        .write_event(Event::Start(start))
-        .map_err(WritebackError::Io)?;
-    writer
-        .write_event(Event::Text(BytesText::new(new_text)))
-        .map_err(WritebackError::Io)?;
-    writer
-        .write_event(Event::End(BytesEnd::new(
-            String::from_utf8_lossy(&name_bytes).to_string(),
-        )))
-        .map_err(WritebackError::Io)?;
+    writer.write_event(Event::Start(start))?;
+    writer.write_event(Event::Text(BytesText::new(new_text)))?;
+    writer.write_event(Event::End(BytesEnd::new(
+        String::from_utf8_lossy(&name_bytes).to_string(),
+    )))?;
     Ok(())
 }
 
@@ -329,15 +307,9 @@ fn write_new_isbn_identifier(
 ) -> Result<(), WritebackError> {
     let mut start = BytesStart::new("dc:identifier");
     start.push_attribute(("opf:scheme", "ISBN"));
-    writer
-        .write_event(Event::Start(start))
-        .map_err(WritebackError::Io)?;
-    writer
-        .write_event(Event::Text(BytesText::new(isbn)))
-        .map_err(WritebackError::Io)?;
-    writer
-        .write_event(Event::End(BytesEnd::new("dc:identifier")))
-        .map_err(WritebackError::Io)?;
+    writer.write_event(Event::Start(start))?;
+    writer.write_event(Event::Text(BytesText::new(isbn)))?;
+    writer.write_event(Event::End(BytesEnd::new("dc:identifier")))?;
     Ok(())
 }
 
@@ -350,15 +322,9 @@ fn write_belongs_to_collection(
     let mut start = BytesStart::new("meta");
     start.push_attribute(("property", "belongs-to-collection"));
     start.push_attribute(("id", id_str.as_ref()));
-    writer
-        .write_event(Event::Start(start))
-        .map_err(WritebackError::Io)?;
-    writer
-        .write_event(Event::Text(BytesText::new(name)))
-        .map_err(WritebackError::Io)?;
-    writer
-        .write_event(Event::End(BytesEnd::new("meta")))
-        .map_err(WritebackError::Io)?;
+    writer.write_event(Event::Start(start))?;
+    writer.write_event(Event::Text(BytesText::new(name)))?;
+    writer.write_event(Event::End(BytesEnd::new("meta")))?;
     Ok(())
 }
 
@@ -371,30 +337,18 @@ fn write_belongs_to_collection_refinements(
     let mut t = BytesStart::new("meta");
     t.push_attribute(("refines", refines_target.as_str()));
     t.push_attribute(("property", "collection-type"));
-    writer
-        .write_event(Event::Start(t))
-        .map_err(WritebackError::Io)?;
-    writer
-        .write_event(Event::Text(BytesText::new("series")))
-        .map_err(WritebackError::Io)?;
-    writer
-        .write_event(Event::End(BytesEnd::new("meta")))
-        .map_err(WritebackError::Io)?;
+    writer.write_event(Event::Start(t))?;
+    writer.write_event(Event::Text(BytesText::new("series")))?;
+    writer.write_event(Event::End(BytesEnd::new("meta")))?;
 
     if let Some(idx) = index {
         let mut t = BytesStart::new("meta");
         t.push_attribute(("refines", refines_target.as_str()));
         t.push_attribute(("property", "group-position"));
-        writer
-            .write_event(Event::Start(t))
-            .map_err(WritebackError::Io)?;
+        writer.write_event(Event::Start(t))?;
         let idx_str = format_index(idx);
-        writer
-            .write_event(Event::Text(BytesText::new(&idx_str)))
-            .map_err(WritebackError::Io)?;
-        writer
-            .write_event(Event::End(BytesEnd::new("meta")))
-            .map_err(WritebackError::Io)?;
+        writer.write_event(Event::Text(BytesText::new(&idx_str)))?;
+        writer.write_event(Event::End(BytesEnd::new("meta")))?;
     }
     Ok(())
 }
@@ -406,9 +360,7 @@ fn write_calibre_series(
     let mut el = BytesStart::new("meta");
     el.push_attribute(("name", "calibre:series"));
     el.push_attribute(("content", name));
-    writer
-        .write_event(Event::Empty(el))
-        .map_err(WritebackError::Io)?;
+    writer.write_event(Event::Empty(el))?;
     Ok(())
 }
 
@@ -421,9 +373,7 @@ fn write_calibre_series_index(
         let idx_str = format_index(idx);
         el.push_attribute(("name", "calibre:series_index"));
         el.push_attribute(("content", idx_str.as_str()));
-        writer
-            .write_event(Event::Empty(el))
-            .map_err(WritebackError::Io)?;
+        writer.write_event(Event::Empty(el))?;
     }
     Ok(())
 }
