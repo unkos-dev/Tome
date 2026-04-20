@@ -154,16 +154,56 @@ pub async fn run_once(
         .and_then(|p| p.opf_replacement.clone())
         .unwrap_or(new_opf);
 
+    // `plan_embed` returns manifest hrefs relative to the OPF file's
+    // location.  The repack layer keys off ZIP-absolute paths, so
+    // translate hrefs by joining with the OPF's parent directory
+    // (e.g. `images/cover.png` → `OEBPS/images/cover.png`).  When the
+    // OPF is at ZIP root (`content.opf`), the two coincide.
+    let opf_dir = opf_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
     let empty_replacements: HashMap<String, Vec<u8>> = HashMap::new();
-    let binary_replacements = cover_plan
+    let translated_replacements: HashMap<String, Vec<u8>> = cover_plan
         .as_ref()
-        .map(|p| &p.binary_replacements)
-        .unwrap_or(&empty_replacements);
-    let empty_additions: Vec<_> = Vec::new();
-    let additions = cover_plan
+        .map(|p| {
+            p.binary_replacements
+                .iter()
+                .map(|(href, bytes)| (resolve_opf_relative(opf_dir, href), bytes.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let binary_replacements = if translated_replacements.is_empty() {
+        &empty_replacements
+    } else {
+        &translated_replacements
+    };
+    let empty_additions: Vec<(
+        String,
+        Vec<u8>,
+        zip::write::FileOptions<'static, zip::write::ExtendedFileOptions>,
+    )> = Vec::new();
+    let translated_additions: Vec<(
+        String,
+        Vec<u8>,
+        zip::write::FileOptions<'static, zip::write::ExtendedFileOptions>,
+    )> = cover_plan
         .as_ref()
-        .map(|p| p.additions.as_slice())
-        .unwrap_or(&empty_additions);
+        .map(|p| {
+            p.additions
+                .iter()
+                .map(|(href, bytes, opts)| {
+                    (
+                        resolve_opf_relative(opf_dir, href),
+                        bytes.clone(),
+                        opts.clone(),
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let additions: &[_] = if translated_additions.is_empty() {
+        &empty_additions
+    } else {
+        &translated_additions
+    };
 
     // Repack into a temp file in the destination directory.
     let dest_dir = src_path.parent().unwrap_or(Path::new("."));
@@ -532,6 +572,19 @@ fn compute_hex_sha256(path: &Path) -> Result<String, WritebackError> {
         let _ = write!(hex, "{b:02x}");
     }
     Ok(hex)
+}
+
+/// Resolve an OPF-relative href against the OPF's directory, yielding a
+/// ZIP-absolute path suitable for `repack::with_modifications`.
+/// Collapses `./` and absolute-looking inputs but does NOT validate `..`
+/// — real-world EPUBs with parent-dir hrefs in the manifest are
+/// pathological and should be caught by validation before writeback.
+fn resolve_opf_relative(opf_dir: &str, href: &str) -> String {
+    if opf_dir.is_empty() {
+        return href.to_string();
+    }
+    let stripped = href.strip_prefix("./").unwrap_or(href);
+    format!("{opf_dir}/{stripped}")
 }
 
 fn move_cover_sidecar(pending_path: &str) -> std::io::Result<()> {
@@ -968,6 +1021,297 @@ mod tests {
         cleanup_fixture(&app_pool, &ing_pool, work_id, m_id).await;
     }
 
+    /// Build a fixture EPUB that already carries an EPUB 3
+    /// `cover-image` manifest entry + placeholder PNG bytes.  Enables
+    /// the cover-reason writeback to take the *same-media* branch of
+    /// `plan_embed` — a binary replacement on the existing manifest
+    /// item with no OPF rewrite — so the post-validation doesn't
+    /// register the OPF structural change as a regression.
+    fn make_fixture_epub_with_cover(
+        title: &str,
+        cover_bytes: &[u8],
+    ) -> (tempfile::TempDir, std::path::PathBuf) {
+        let container_xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/package.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>"#;
+        let opf = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="pub-id" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+  <metadata>
+    <dc:identifier id="pub-id">urn:uuid:fixture</dc:identifier>
+    <dc:title>{title}</dc:title>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="cover-image" href="images/cover.png" media-type="image/png" properties="cover-image"/>
+  </manifest>
+  <spine><itemref idref="nav"/></spine>
+</package>"#
+        );
+        let nav = br#"<?xml version="1.0"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>nav</title></head><body><nav epub:type="toc" xmlns:epub="http://www.idpf.org/2007/ops"><ol><li><a href="nav.xhtml">nav</a></li></ol></nav></body></html>"#;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fixture.epub");
+        let file = std::fs::File::create(&path).unwrap();
+        let mut w = ZipWriter::new(file);
+        let stored: FileOptions<ExtendedFileOptions> =
+            FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        w.start_file("mimetype", stored).unwrap();
+        w.write_all(b"application/epub+zip").unwrap();
+        let deflate: FileOptions<ExtendedFileOptions> = FileOptions::default();
+        w.start_file("META-INF/container.xml", deflate.clone())
+            .unwrap();
+        w.write_all(container_xml).unwrap();
+        w.start_file("OEBPS/package.opf", deflate.clone()).unwrap();
+        w.write_all(opf.as_bytes()).unwrap();
+        w.start_file("OEBPS/nav.xhtml", deflate.clone()).unwrap();
+        w.write_all(nav).unwrap();
+        w.start_file("OEBPS/images/cover.png", deflate).unwrap();
+        w.write_all(cover_bytes).unwrap();
+        w.finish().unwrap();
+        (dir, path)
+    }
+
+    /// Cover-reason writeback E2E: a pending cover sidecar under
+    /// `_covers/pending/` must end up embedded in the EPUB and moved to
+    /// `_covers/accepted/` after `run_once`.  Guards the one pipeline
+    /// branch that was E2E-untested in the prior review (cover-reason
+    /// path through `plan_embed` + sidecar move).
+    #[tokio::test]
+    #[ignore]
+    async fn run_once_cover_embeds_and_moves_sidecar() {
+        // Tiny valid PNG: 1x1 black pixel.  Two variants so we can tell
+        // the original from the replacement when inspecting the ZIP.
+        const PNG_ORIGINAL: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9C, 0x62, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+        // Same minimal PNG structure but with a sentinel in the IDAT
+        // payload so we can prove the bytes were swapped.
+        const PNG_REPLACEMENT: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9C, 0x62, 0xFF, 0xFF, 0xFF, 0x7F, 0x00, 0x05, 0xFE, 0x02, 0xFE, 0xDC, 0xCC, 0x59,
+            0xE7, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+
+        let app_pool = PgPool::connect(&app_url()).await.unwrap();
+        let ing_pool = PgPool::connect(&ing_url()).await.unwrap();
+        let marker = Uuid::new_v4().simple().to_string();
+
+        // Fixture EPUB that already has a cover-image manifest entry so
+        // plan_embed takes the same-media binary_replacements branch.
+        let (_epub_dir, src_path) =
+            make_fixture_epub_with_cover(&format!("Cover-{marker}"), PNG_ORIGINAL);
+        let original_bytes = std::fs::read(&src_path).unwrap();
+        let original_hash = initial_hex_sha256(&original_bytes);
+
+        // Pending cover sidecar under `_covers/pending/`.
+        let cover_dir = tempfile::tempdir().unwrap();
+        let pending_dir = cover_dir.path().join("_covers").join("pending");
+        std::fs::create_dir_all(&pending_dir).unwrap();
+        let cover_filename = format!("{marker}.png");
+        let pending_path = pending_dir.join(&cover_filename);
+        std::fs::write(&pending_path, PNG_REPLACEMENT).unwrap();
+
+        let (work_id, m_id) =
+            insert_fixture(&ing_pool, &marker, src_path.to_str().unwrap(), &original_hash).await;
+        sqlx::query("UPDATE manifestations SET cover_path = $1 WHERE id = $2")
+            .bind(pending_path.to_str().unwrap())
+            .bind(m_id)
+            .execute(&ing_pool)
+            .await
+            .unwrap();
+
+        let job_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO writeback_jobs (manifestation_id, reason) \
+             VALUES ($1, 'cover') RETURNING id",
+        )
+        .bind(m_id)
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
+
+        let outcome = run_once(&app_pool, &test_config(), job_id).await.unwrap();
+        assert!(
+            matches!(outcome, RunOutcome::Success { .. }),
+            "cover writeback should succeed: {:?}",
+            outcome
+        );
+
+        // The cover bytes inside the EPUB match the replacement, not
+        // the original.  (Same-media replacement is in-place under the
+        // existing manifest href.)
+        let new_bytes = std::fs::read(&src_path).unwrap();
+        let embedded_cover = read_entry_bytes(&new_bytes, "OEBPS/images/cover.png").unwrap();
+        assert_eq!(
+            embedded_cover, PNG_REPLACEMENT,
+            "embedded cover bytes should match the replacement sidecar"
+        );
+
+        // Sidecar moved pending → accepted.
+        let accepted_path = cover_dir
+            .path()
+            .join("_covers")
+            .join("accepted")
+            .join(&cover_filename);
+        assert!(
+            !pending_path.exists(),
+            "pending sidecar must be moved: {}",
+            pending_path.display()
+        );
+        assert!(
+            accepted_path.exists(),
+            "accepted sidecar must exist: {}",
+            accepted_path.display()
+        );
+        assert_eq!(
+            std::fs::read(&accepted_path).unwrap(),
+            PNG_REPLACEMENT,
+            "accepted sidecar bytes must match the original cover"
+        );
+
+        // current_file_hash advanced; ingestion_file_hash unchanged.
+        let (current, ingestion): (String, String) = sqlx::query_as(
+            "SELECT current_file_hash, ingestion_file_hash FROM manifestations WHERE id = $1",
+        )
+        .bind(m_id)
+        .fetch_one(&app_pool)
+        .await
+        .unwrap();
+        assert_ne!(current, original_hash);
+        assert_eq!(ingestion, original_hash);
+
+        cleanup_fixture(&app_pool, &ing_pool, work_id, m_id).await;
+    }
+
+    /// Collision branch of `resolve_collision`: if the rendered target
+    /// already exists, the writeback lands at `<stem> (2).<ext>` instead.
+    /// Guards against regressions where the suffix logic silently
+    /// overwrites an unrelated pre-existing file at the rendered path.
+    #[tokio::test]
+    #[ignore]
+    async fn run_once_rename_resolves_collision_with_suffix() {
+        let app_pool = PgPool::connect(&app_url()).await.unwrap();
+        let ing_pool = PgPool::connect(&ing_url()).await.unwrap();
+        let marker = Uuid::new_v4().simple().to_string();
+
+        let (lib_dir, src_path) = make_fixture_epub(&format!("Initial-{marker}"));
+        let original_bytes = std::fs::read(&src_path).unwrap();
+        let original_hash = initial_hex_sha256(&original_bytes);
+        let library_root = lib_dir.path().to_str().unwrap().to_string();
+
+        let (work_id, m_id) = insert_fixture(
+            &ing_pool,
+            &marker,
+            src_path.to_str().unwrap(),
+            &original_hash,
+        )
+        .await;
+
+        let author_sort = format!("Author{marker}");
+        let author_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO authors (name, sort_name) VALUES ($1, $1) RETURNING id",
+        )
+        .bind(&author_sort)
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO work_authors (work_id, author_id, role, position) \
+             VALUES ($1, $2, 'author', 0)",
+        )
+        .bind(work_id)
+        .bind(author_id)
+        .execute(&ing_pool)
+        .await
+        .unwrap();
+
+        let new_title = format!("Renamed{marker}");
+        sqlx::query("UPDATE works SET title = $1 WHERE id = $2")
+            .bind(&new_title)
+            .bind(work_id)
+            .execute(&ing_pool)
+            .await
+            .unwrap();
+
+        // Pre-create the exact rendered target so `resolve_collision`
+        // must add the " (2)" suffix.  Place it under the expected
+        // `{Author}/{Title}.epub` layout.
+        let pre_existing_dir = std::path::PathBuf::from(&library_root).join(&author_sort);
+        std::fs::create_dir_all(&pre_existing_dir).unwrap();
+        let pre_existing_path = pre_existing_dir.join(format!("{new_title}.epub"));
+        std::fs::write(&pre_existing_path, b"pre-existing-sentinel").unwrap();
+
+        let job_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO writeback_jobs (manifestation_id, reason) \
+             VALUES ($1, 'metadata') RETURNING id",
+        )
+        .bind(m_id)
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
+
+        let mut cfg = test_config();
+        cfg.library_path = library_root.clone();
+        let outcome = run_once(&app_pool, &cfg, job_id).await.unwrap();
+        assert!(
+            matches!(outcome, RunOutcome::Success { .. }),
+            "run_once should succeed: {:?}",
+            outcome
+        );
+
+        // Pre-existing file must be untouched.
+        assert!(
+            pre_existing_path.exists(),
+            "collision target must not be overwritten"
+        );
+        assert_eq!(
+            std::fs::read(&pre_existing_path).unwrap(),
+            b"pre-existing-sentinel",
+            "collision target contents must not change"
+        );
+
+        // Writeback landed at `<Title> (2).epub` instead.
+        let expected_collision_path = pre_existing_dir.join(format!("{new_title} (2).epub"));
+        assert!(
+            expected_collision_path.exists(),
+            "collision-suffixed path must exist: {}",
+            expected_collision_path.display()
+        );
+
+        let db_path: String =
+            sqlx::query_scalar("SELECT file_path FROM manifestations WHERE id = $1")
+                .bind(m_id)
+                .fetch_one(&app_pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            db_path,
+            expected_collision_path.to_str().unwrap(),
+            "DB file_path must record the collision-suffixed path"
+        );
+
+        let _ = sqlx::query("DELETE FROM work_authors WHERE work_id = $1")
+            .bind(work_id)
+            .execute(&ing_pool)
+            .await;
+        let _ = sqlx::query("DELETE FROM authors WHERE id = $1")
+            .bind(author_id)
+            .execute(&ing_pool)
+            .await;
+        cleanup_fixture(&app_pool, &ing_pool, work_id, m_id).await;
+    }
+
     // ── Rollback + post-validation decision tests ───────────────────────
     //
     // These exercise the S1 (atomic rollback) and S2 (rollback on
@@ -1207,5 +1551,31 @@ mod tests {
   </rootfiles>
 </container>"#;
         assert_eq!(extract_opf_path(xml).as_deref(), Some("OEBPS/package.opf"));
+    }
+
+    // ── resolve_opf_relative ────────────────────────────────────────────
+
+    #[test]
+    fn resolve_opf_relative_joins_with_opf_dir() {
+        assert_eq!(
+            resolve_opf_relative("OEBPS", "images/cover.png"),
+            "OEBPS/images/cover.png"
+        );
+    }
+
+    #[test]
+    fn resolve_opf_relative_no_op_when_opf_at_zip_root() {
+        assert_eq!(
+            resolve_opf_relative("", "content/cover.png"),
+            "content/cover.png"
+        );
+    }
+
+    #[test]
+    fn resolve_opf_relative_strips_leading_dot_slash() {
+        assert_eq!(
+            resolve_opf_relative("OEBPS", "./images/cover.png"),
+            "OEBPS/images/cover.png"
+        );
     }
 }

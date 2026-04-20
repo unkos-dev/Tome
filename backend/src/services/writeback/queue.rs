@@ -682,4 +682,235 @@ mod tests {
 
         cleanup(&pool, &ing_pool, work_id, m_id).await;
     }
+
+    // ── finish() terminal-state coverage ────────────────────────────────
+    //
+    // These exercise the S3 adversarial finding: every terminal transition
+    // must both mark the job row AND emit a webhook event.  We assert the
+    // DB-side of the transition here; event emission is a thin
+    // tracing-stub wrapper (see events.rs) so structural coverage of the
+    // DB write is the load-bearing test.
+
+    /// `finish(Ok(Success))` transitions the row to `complete` and
+    /// clears the `error` column.
+    #[tokio::test]
+    #[ignore]
+    async fn finish_marks_complete_on_success_outcome() {
+        let pool = PgPool::connect(&app_url()).await.unwrap();
+        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+        let marker = Uuid::new_v4().simple().to_string();
+        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let job_id = insert_job(&ing_pool, m_id, "metadata").await;
+
+        finish(
+            &pool,
+            &test_config_with_max_attempts(3),
+            job_id,
+            1,
+            Ok(RunOutcome::Success {
+                manifestation_id: m_id,
+                reason: "metadata".into(),
+                current_file_hash: "abc123".into(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        let (status, error): (String, Option<String>) = sqlx::query_as(
+            "SELECT status::text, error FROM writeback_jobs WHERE id = $1",
+        )
+        .bind(job_id)
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
+        assert_eq!(status, "complete");
+        assert_eq!(error, None);
+
+        cleanup(&pool, &ing_pool, work_id, m_id).await;
+    }
+
+    /// `finish(Ok(Skipped))` transitions to `skipped` and records the
+    /// skip reason in `error`.  Skipped bypasses retry regardless of
+    /// attempt_count.
+    #[tokio::test]
+    #[ignore]
+    async fn finish_marks_skipped_on_skipped_outcome() {
+        let pool = PgPool::connect(&app_url()).await.unwrap();
+        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+        let marker = Uuid::new_v4().simple().to_string();
+        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let job_id = insert_job(&ing_pool, m_id, "metadata").await;
+
+        finish(
+            &pool,
+            &test_config_with_max_attempts(3),
+            job_id,
+            1, // well below max — still terminal for Skipped
+            Ok(RunOutcome::Skipped {
+                manifestation_id: m_id,
+                reason: "metadata".into(),
+                skip_reason: "format_unsupported: pdf".into(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        let (status, error): (String, Option<String>) = sqlx::query_as(
+            "SELECT status::text, error FROM writeback_jobs WHERE id = $1",
+        )
+        .bind(job_id)
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
+        assert_eq!(status, "skipped");
+        assert_eq!(error.as_deref(), Some("format_unsupported: pdf"));
+
+        cleanup(&pool, &ing_pool, work_id, m_id).await;
+    }
+
+    /// `finish(Ok(Failed))` with `attempt_count < max_attempts` leaves
+    /// the row as `failed` for later retry, with the error recorded.
+    #[tokio::test]
+    #[ignore]
+    async fn finish_marks_failed_below_max_attempts() {
+        let pool = PgPool::connect(&app_url()).await.unwrap();
+        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+        let marker = Uuid::new_v4().simple().to_string();
+        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let job_id = insert_job(&ing_pool, m_id, "metadata").await;
+
+        finish(
+            &pool,
+            &test_config_with_max_attempts(3),
+            job_id,
+            1, // below max=3 → stays failed for retry
+            Ok(RunOutcome::Failed {
+                manifestation_id: m_id,
+                reason: "metadata".into(),
+                error: "regression".into(),
+            }),
+        )
+        .await
+        .unwrap();
+
+        let (status, error): (String, Option<String>) = sqlx::query_as(
+            "SELECT status::text, error FROM writeback_jobs WHERE id = $1",
+        )
+        .bind(job_id)
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
+        assert_eq!(status, "failed");
+        assert_eq!(error.as_deref(), Some("regression"));
+
+        cleanup(&pool, &ing_pool, work_id, m_id).await;
+    }
+
+    /// RLS system-context policy: with no user context set (NULL
+    /// `app.current_user_id`), `reverie_app` can UPDATE `manifestations`
+    /// — the worker's operational pathway.  Matches how the real worker
+    /// connects: it never calls `SET LOCAL app.current_user_id`, so the
+    /// setting stays at its session default of NULL.
+    #[tokio::test]
+    #[ignore]
+    async fn rls_system_update_policy_allows_writeback_worker_without_user_context() {
+        let pool = PgPool::connect(&app_url()).await.unwrap();
+        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+        let marker = Uuid::new_v4().simple().to_string();
+        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+
+        // No SET LOCAL — default is NULL, which matches the real worker.
+        let res = sqlx::query("UPDATE manifestations SET current_file_hash = $1 WHERE id = $2")
+            .bind("system-context-hash")
+            .bind(m_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            res.rows_affected(),
+            1,
+            "system-context worker must be able to UPDATE manifestations"
+        );
+        cleanup(&pool, &ing_pool, work_id, m_id).await;
+    }
+
+    /// RLS system-context policy: with a non-empty `app.current_user_id`
+    /// pointing at a non-existent user, neither the system policy nor the
+    /// user-role policies match, so the UPDATE is filtered out.  This
+    /// guards the worker's isolation: a misconfigured worker session
+    /// that inherits a user context does NOT quietly succeed under the
+    /// system policy.
+    #[tokio::test]
+    #[ignore]
+    async fn rls_system_update_policy_blocks_unknown_user_context() {
+        let pool = PgPool::connect(&app_url()).await.unwrap();
+        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+        let marker = Uuid::new_v4().simple().to_string();
+        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+
+        // Random UUID that will not match any users row.
+        let imposter = Uuid::new_v4();
+
+        let mut conn = pool.acquire().await.unwrap();
+        sqlx::query("BEGIN").execute(&mut *conn).await.unwrap();
+        sqlx::query("SELECT set_config('app.current_user_id', $1, true)")
+            .bind(imposter.to_string())
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        let res = sqlx::query("UPDATE manifestations SET current_file_hash = $1 WHERE id = $2")
+            .bind("imposter-hash")
+            .bind(m_id)
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        sqlx::query("ROLLBACK").execute(&mut *conn).await.unwrap();
+
+        assert_eq!(
+            res.rows_affected(),
+            0,
+            "a session with a bogus user context must NOT be able to update manifestations via the system policy"
+        );
+        drop(conn);
+        cleanup(&pool, &ing_pool, work_id, m_id).await;
+    }
+
+    /// `finish(Err(WritebackError))` records `mark_failed` with the
+    /// error string.  This is the S3 Err arm: `run_once` failed before
+    /// producing a `RunOutcome`.
+    #[tokio::test]
+    #[ignore]
+    async fn finish_marks_failed_on_run_once_error() {
+        let pool = PgPool::connect(&app_url()).await.unwrap();
+        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+        let marker = Uuid::new_v4().simple().to_string();
+        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let job_id = insert_job(&ing_pool, m_id, "metadata").await;
+
+        finish(
+            &pool,
+            &test_config_with_max_attempts(3),
+            job_id,
+            1,
+            Err(super::super::error::WritebackError::JobNotFound(job_id)),
+        )
+        .await
+        .unwrap();
+
+        let (status, error): (String, Option<String>) = sqlx::query_as(
+            "SELECT status::text, error FROM writeback_jobs WHERE id = $1",
+        )
+        .bind(job_id)
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
+        assert_eq!(status, "failed");
+        let err_text = error.expect("error column should record the run_once error");
+        assert!(
+            err_text.contains("not found"),
+            "error should describe the JobNotFound: {err_text}"
+        );
+
+        cleanup(&pool, &ing_pool, work_id, m_id).await;
+    }
 }

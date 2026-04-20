@@ -543,6 +543,89 @@ mod tests {
     }
 
     #[test]
+    fn transform_replaces_dc_description() {
+        let input = sample_epub3(r#"<dc:description>Old blurb</dc:description>"#);
+        let target = Target {
+            description: Some("New blurb"),
+            ..Default::default()
+        };
+        let out = transform_str(&input, &target);
+        assert!(
+            out.contains("<dc:description>New blurb</dc:description>"),
+            "got: {out}"
+        );
+        assert!(!out.contains("Old blurb"), "old description leaked: {out}");
+    }
+
+    #[test]
+    fn transform_replaces_dc_language() {
+        let input = sample_epub3("");
+        let target = Target {
+            language: Some("fr"),
+            ..Default::default()
+        };
+        let out = transform_str(&input, &target);
+        assert!(out.contains("<dc:language>fr</dc:language>"), "got: {out}");
+        assert!(!out.contains("<dc:language>en"), "old language leaked: {out}");
+    }
+
+    #[test]
+    fn transform_replaces_dc_publisher() {
+        let input = sample_epub3(r#"<dc:publisher>Old House</dc:publisher>"#);
+        let target = Target {
+            publisher: Some("New House"),
+            ..Default::default()
+        };
+        let out = transform_str(&input, &target);
+        assert!(
+            out.contains("<dc:publisher>New House</dc:publisher>"),
+            "got: {out}"
+        );
+        assert!(!out.contains("Old House"), "old publisher leaked: {out}");
+    }
+
+    #[test]
+    fn transform_replaces_dc_date() {
+        let input = sample_epub3(r#"<dc:date>1990-01-01</dc:date>"#);
+        let target = Target {
+            pub_date: Some("2026-04-19"),
+            ..Default::default()
+        };
+        let out = transform_str(&input, &target);
+        assert!(
+            out.contains("<dc:date>2026-04-19</dc:date>"),
+            "got: {out}"
+        );
+        assert!(!out.contains("1990-01-01"), "old date leaked: {out}");
+    }
+
+    #[test]
+    fn transform_expands_self_closing_dc_title() {
+        // `<dc:title/>` (empty element) must be rewritten as a paired
+        // `<dc:title>NEW</dc:title>`.  Without this we'd leave the empty
+        // element in place and drop the update silently.
+        let input = r#"<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="pub-id" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <metadata>
+    <dc:identifier id="pub-id">urn:uuid:A1B2C3D4</dc:identifier>
+    <dc:title/>
+    <dc:language>en</dc:language>
+  </metadata>
+  <manifest/>
+  <spine/>
+</package>"#;
+        let target = Target {
+            title: Some("Inserted"),
+            ..Default::default()
+        };
+        let out = transform_str(input, &target);
+        assert!(
+            out.contains("<dc:title>Inserted</dc:title>"),
+            "self-closing title was not expanded: {out}"
+        );
+    }
+
+    #[test]
     fn transform_preserves_epub_version() {
         let input = sample_epub3("");
         let target = Target {

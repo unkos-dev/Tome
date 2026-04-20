@@ -349,6 +349,13 @@ mod tests {
         0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
     ];
 
+    // Minimal JPEG: SOI + JFIF app0 + EOI.  `image::guess_format` only
+    // sniffs magic bytes, so we don't need a decodable frame.
+    const JPEG_MINIMAL: &[u8] = &[
+        0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x00, 0x00,
+        0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9,
+    ];
+
     fn epub3_opf_with_cover() -> String {
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid">
@@ -444,10 +451,35 @@ mod tests {
         );
     }
 
+    /// Existing manifest entry is JPEG and new cover is also JPEG →
+    /// in-place binary replacement, no new manifest entry, no OPF rewrite.
+    /// This is the true same-media path that the PR claimed but did not
+    /// actually exercise.
     #[test]
     fn plan_replaces_existing_epub2_same_media() {
         let opf = epub2_opf_with_cover();
-        // New cover is PNG, old was JPEG → different media-type.
+        let plan = plan_embed(opf.as_bytes(), JPEG_MINIMAL).unwrap();
+        assert!(
+            plan.binary_replacements.contains_key("images/old-cover.jpg"),
+            "same-media path should replace existing JPEG by href: {:?}",
+            plan.binary_replacements
+        );
+        assert!(
+            plan.additions.is_empty(),
+            "same-media replacement should not add a new entry: {:?}",
+            plan.additions
+        );
+        assert!(
+            plan.opf_replacement.is_none(),
+            "same-media replacement should not rewrite the OPF"
+        );
+    }
+
+    /// New cover is PNG but the existing manifest entry is JPEG → need a
+    /// fresh manifest entry with the new media-type; the OPF is rewritten.
+    #[test]
+    fn plan_replaces_existing_epub2_different_media() {
+        let opf = epub2_opf_with_cover();
         let plan = plan_embed(opf.as_bytes(), PNG_1X1).unwrap();
         assert!(plan.binary_replacements.is_empty());
         assert_eq!(plan.additions.len(), 1);
