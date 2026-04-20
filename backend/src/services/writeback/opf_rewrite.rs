@@ -55,9 +55,7 @@ pub fn transform(opf_bytes: &[u8], target: &Target<'_>) -> Result<Vec<u8>, Write
     // Rewrite pass.
     let mut writer = Writer::new(Cursor::new(Vec::new()));
     let mut in_metadata_depth: Option<usize> = None;
-    let mut element_stack: Vec<Vec<u8>> = Vec::new();
-    let mut identifier_seen_in_pass = 0usize;
-    let mut handled_non_isbn_identifier_count = 0usize;
+    let mut depth: usize = 0;
     let mut belongs_to_written = false;
     let mut calibre_series_written = false;
     let mut isbn_identifier_written = false;
@@ -75,11 +73,11 @@ pub fn transform(opf_bytes: &[u8], target: &Target<'_>) -> Result<Vec<u8>, Write
         match ev {
             Event::Start(e) => {
                 let name_bytes = e.name().as_ref().to_vec();
-                element_stack.push(name_bytes.clone());
+                depth += 1;
                 let local = local_name(&name_bytes).to_vec();
 
                 if local == b"metadata" && in_metadata_depth.is_none() {
-                    in_metadata_depth = Some(element_stack.len());
+                    in_metadata_depth = Some(depth);
                     writer.write_event(Event::Start(e.clone()))?;
                     i += 1;
                     continue;
@@ -91,23 +89,19 @@ pub fn transform(opf_bytes: &[u8], target: &Target<'_>) -> Result<Vec<u8>, Write
                         // Skip everything until the matching End tag.
                         write_replaced_element(&mut writer, e, new_text)?;
                         i = skip_to_matching_end(&events, i) + 1;
-                        element_stack.pop();
+                        depth -= 1;
                         continue;
                     }
                     // dc:identifier — update if opf:scheme matches ISBN.
-                    if local == b"identifier" {
-                        identifier_seen_in_pass += 1;
-                        if is_isbn_identifier(e) {
-                            if let Some(new_isbn) = target.isbn_13.or(target.isbn_10) {
-                                write_replaced_element(&mut writer, e, new_isbn)?;
-                                isbn_identifier_written = true;
-                                i = skip_to_matching_end(&events, i);
-                                element_stack.pop();
-                                continue;
-                            }
-                        } else {
-                            handled_non_isbn_identifier_count += 1;
-                        }
+                    if local == b"identifier"
+                        && is_isbn_identifier(e)
+                        && let Some(new_isbn) = target.isbn_13.or(target.isbn_10)
+                    {
+                        write_replaced_element(&mut writer, e, new_isbn)?;
+                        isbn_identifier_written = true;
+                        i = skip_to_matching_end(&events, i) + 1;
+                        depth -= 1;
+                        continue;
                     }
                     // <meta property="belongs-to-collection"> — update text + refinement metas.
                     if local == b"meta"
@@ -117,8 +111,8 @@ pub fn transform(opf_bytes: &[u8], target: &Target<'_>) -> Result<Vec<u8>, Write
                     {
                         let id = attr_value(e, b"id").unwrap_or_else(|| b"series-1".to_vec());
                         write_belongs_to_collection(&mut writer, &id, series.name)?;
-                        i = skip_to_matching_end(&events, i);
-                        element_stack.pop();
+                        i = skip_to_matching_end(&events, i) + 1;
+                        depth -= 1;
                         belongs_to_written = true;
                         // Best-effort: don't drop refinement metas that follow.
                         // The downstream writer rewrites them if they match id.
@@ -140,18 +134,14 @@ pub fn transform(opf_bytes: &[u8], target: &Target<'_>) -> Result<Vec<u8>, Write
                         i += 1;
                         continue;
                     }
-                    if local == b"identifier" {
-                        identifier_seen_in_pass += 1;
-                        if is_isbn_identifier_empty(e) {
-                            if let Some(new_isbn) = target.isbn_13.or(target.isbn_10) {
-                                write_replaced_element_from_empty(&mut writer, e, new_isbn)?;
-                                isbn_identifier_written = true;
-                                i += 1;
-                                continue;
-                            }
-                        } else {
-                            handled_non_isbn_identifier_count += 1;
-                        }
+                    if local == b"identifier"
+                        && is_isbn_identifier(e)
+                        && let Some(new_isbn) = target.isbn_13.or(target.isbn_10)
+                    {
+                        write_replaced_element_from_empty(&mut writer, e, new_isbn)?;
+                        isbn_identifier_written = true;
+                        i += 1;
+                        continue;
                     }
                     // <meta name="calibre:series" content="..."/>
                     if local == b"meta"
@@ -179,11 +169,11 @@ pub fn transform(opf_bytes: &[u8], target: &Target<'_>) -> Result<Vec<u8>, Write
             }
             Event::End(e) => {
                 let name_bytes = e.name().as_ref().to_vec();
-                let popped = element_stack.pop();
+                depth -= 1;
                 let local = local_name(&name_bytes).to_vec();
 
                 // Before closing <metadata>, insert any fresh elements we need.
-                if in_metadata_depth == Some(element_stack.len() + 1) && local == b"metadata" {
+                if in_metadata_depth == Some(depth + 1) && local == b"metadata" {
                     // ISBN insertion when absent.
                     if !isbn_identifier_written
                         && let Some(new_isbn) = target.isbn_13.or(target.isbn_10)
@@ -211,7 +201,6 @@ pub fn transform(opf_bytes: &[u8], target: &Target<'_>) -> Result<Vec<u8>, Write
                     in_metadata_depth = None;
                 }
 
-                let _ = popped;
                 writer.write_event(Event::End(e.clone()))?;
             }
             other => {
@@ -221,8 +210,6 @@ pub fn transform(opf_bytes: &[u8], target: &Target<'_>) -> Result<Vec<u8>, Write
         i += 1;
     }
 
-    let _ = identifier_seen_in_pass;
-    let _ = handled_non_isbn_identifier_count;
     Ok(writer.into_inner().into_inner())
 }
 
@@ -423,10 +410,6 @@ fn is_isbn_identifier(start: &BytesStart<'_>) -> bool {
         }
     }
     false
-}
-
-fn is_isbn_identifier_empty(start: &BytesStart<'_>) -> bool {
-    is_isbn_identifier(start)
 }
 
 fn local_name(name: &[u8]) -> &[u8] {

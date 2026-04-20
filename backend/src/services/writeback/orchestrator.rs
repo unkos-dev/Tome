@@ -292,22 +292,16 @@ fn finalise_post_writeback(
     original_bytes: &[u8],
     dest_dir: &Path,
 ) -> Result<FinaliseAction, WritebackError> {
-    match post_result {
-        Err(e) => {
-            let err_msg = format!("post_writeback_validation_errored: {e}");
-            rollback_atomic(src_path, original_bytes, dest_dir)?;
-            Ok(FinaliseAction::RolledBack(err_msg))
-        }
-        Ok(post_report) if is_regression(pre_outcome, &post_report.outcome) => {
-            let err_msg = format!(
-                "post_writeback_validation_regressed: pre={:?} post={:?}",
-                pre_outcome, post_report.outcome
-            );
-            rollback_atomic(src_path, original_bytes, dest_dir)?;
-            Ok(FinaliseAction::RolledBack(err_msg))
-        }
-        Ok(_) => Ok(FinaliseAction::Commit),
-    }
+    let err_msg = match &post_result {
+        Err(e) => format!("post_writeback_validation_errored: {e}"),
+        Ok(report) if is_regression(pre_outcome, &report.outcome) => format!(
+            "post_writeback_validation_regressed: pre={:?} post={:?}",
+            pre_outcome, report.outcome
+        ),
+        Ok(_) => return Ok(FinaliseAction::Commit),
+    };
+    rollback_atomic(src_path, original_bytes, dest_dir)?;
+    Ok(FinaliseAction::RolledBack(err_msg))
 }
 
 /// Render the path template, move the on-disk file if the rendered path

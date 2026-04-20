@@ -71,6 +71,9 @@ pub fn move_existing(src: &Path, dest: &Path) -> Result<(), WritebackError> {
     match std::fs::rename(src, dest) {
         Ok(_) => return Ok(()),
         Err(e) if !is_cross_device(&e) => return Err(WritebackError::Io(e)),
+        // EXDEV: src + dest sit on different mounts, so std::fs::rename
+        // can't perform the atomic same-FS rename.  Fall through to the
+        // copy-via-tempfile fallback below.
         Err(_) => {}
     }
     // Cross-FS fallback: copy via a tempfile in dest's dir, then unlink src.
