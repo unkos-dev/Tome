@@ -659,17 +659,12 @@ async fn quarantine_async(source: &Path, quarantine_path: &Path, reason: &str) {
 mod tests {
     use super::*;
     use crate::config::CleanupMode;
-
-    fn db_url() -> String {
-        std::env::var("DATABASE_URL_INGESTION").unwrap_or_else(|_| {
-            "postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev".into()
-        })
-    }
+    use crate::test_support::db::ingestion_pool_for;
 
     fn test_config_for(ingestion: &str, library: &str, quarantine: &str) -> Config {
         Config {
             port: 3000,
-            database_url: db_url(),
+            database_url: String::new(),
             library_path: library.to_string(),
             ingestion_path: ingestion.to_string(),
             quarantine_path: quarantine.to_string(),
@@ -679,7 +674,7 @@ mod tests {
             oidc_client_id: String::new(),
             oidc_client_secret: String::new(),
             oidc_redirect_uri: String::new(),
-            ingestion_database_url: db_url(),
+            ingestion_database_url: String::new(),
             format_priority: vec!["epub".into(), "pdf".into()],
             // Preserve source files during tests so we can run multiple scans
             cleanup_mode: CleanupMode::None,
@@ -715,88 +710,9 @@ mod tests {
         }
     }
 
-    /// Clean up DB records created during a test run.
-    async fn cleanup_test_data(pool: &PgPool, library_file_path: &str, source_path: &str) {
-        // Fetch IDs before deleting so we can clean orphaned authors/series
-        let manifestation_id: Option<uuid::Uuid> =
-            sqlx::query_scalar("SELECT id FROM manifestations WHERE file_path = $1")
-                .bind(library_file_path)
-                .fetch_optional(pool)
-                .await
-                .ok()
-                .flatten();
-        let work_id: Option<uuid::Uuid> =
-            sqlx::query_scalar("SELECT work_id FROM manifestations WHERE file_path = $1")
-                .bind(library_file_path)
-                .fetch_optional(pool)
-                .await
-                .ok()
-                .flatten();
-
-        // Clean metadata_versions
-        if let Some(mid) = manifestation_id {
-            let _ = sqlx::query("DELETE FROM metadata_versions WHERE manifestation_id = $1")
-                .bind(mid)
-                .execute(pool)
-                .await;
-        }
-
-        // Collect author/series IDs before cascading delete
-        let author_ids: Vec<uuid::Uuid> = if let Some(wid) = work_id {
-            sqlx::query_scalar("SELECT author_id FROM work_authors WHERE work_id = $1")
-                .bind(wid)
-                .fetch_all(pool)
-                .await
-                .unwrap_or_default()
-        } else {
-            vec![]
-        };
-        let series_ids: Vec<uuid::Uuid> = if let Some(wid) = work_id {
-            sqlx::query_scalar("SELECT series_id FROM series_works WHERE work_id = $1")
-                .bind(wid)
-                .fetch_all(pool)
-                .await
-                .unwrap_or_default()
-        } else {
-            vec![]
-        };
-
-        // Delete manifestation → work (cascades work_authors, series_works)
-        let _ = sqlx::query("DELETE FROM manifestations WHERE file_path = $1")
-            .bind(library_file_path)
-            .execute(pool)
-            .await;
-        if let Some(wid) = work_id {
-            let _ = sqlx::query("DELETE FROM works WHERE id = $1")
-                .bind(wid)
-                .execute(pool)
-                .await;
-        }
-
-        // Clean orphaned authors and series
-        for aid in author_ids {
-            let _ = sqlx::query("DELETE FROM authors WHERE id = $1")
-                .bind(aid)
-                .execute(pool)
-                .await;
-        }
-        for sid in series_ids {
-            let _ = sqlx::query("DELETE FROM series WHERE id = $1")
-                .bind(sid)
-                .execute(pool)
-                .await;
-        }
-
-        let _ = sqlx::query("DELETE FROM ingestion_jobs WHERE source_path = $1")
-            .bind(source_path)
-            .execute(pool)
-            .await;
-    }
-
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn scan_once_empty_dir_returns_zero() {
-        let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
+    #[sqlx::test(migrations = "./migrations")]
+    async fn scan_once_empty_dir_returns_zero(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let ingestion = tempfile::tempdir().unwrap();
         let library = tempfile::tempdir().unwrap();
         let quarantine = tempfile::tempdir().unwrap();
@@ -811,10 +727,9 @@ mod tests {
         assert_eq!(result.skipped, 0);
     }
 
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn scan_once_processes_pdf_end_to_end() {
-        let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
+    #[sqlx::test(migrations = "./migrations")]
+    async fn scan_once_processes_pdf_end_to_end(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let ingestion = tempfile::tempdir().unwrap();
         let library = tempfile::tempdir().unwrap();
         let quarantine = tempfile::tempdir().unwrap();
@@ -848,8 +763,6 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(count, 1, "expected 1 manifestation row");
-
-        cleanup_test_data(&pool, dest.to_str().unwrap(), source.to_str().unwrap()).await;
     }
 
     /// Build a minimal valid EPUB ZIP in memory.
@@ -948,10 +861,9 @@ mod tests {
         w.finish().unwrap().into_inner()
     }
 
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn scan_once_extracts_metadata_from_epub() {
-        let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
+    #[sqlx::test(migrations = "./migrations")]
+    async fn scan_once_extracts_metadata_from_epub(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let ingestion = tempfile::tempdir().unwrap();
         let library = tempfile::tempdir().unwrap();
         let quarantine = tempfile::tempdir().unwrap();
@@ -1039,16 +951,13 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(series_count, 1, "expected series link");
-
-        cleanup_test_data(&pool, dest.to_str().unwrap(), source.to_str().unwrap()).await;
     }
 
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn scan_once_processes_epub_end_to_end() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn scan_once_processes_epub_end_to_end(pool: PgPool) {
         // P1: exercise the EPUB validation path end-to-end, verifying that a valid
         // EPUB gets validation_status='valid' in the manifestation row.
-        let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
+        let pool = ingestion_pool_for(&pool).await;
         let ingestion = tempfile::tempdir().unwrap();
         let library = tempfile::tempdir().unwrap();
         let quarantine = tempfile::tempdir().unwrap();
@@ -1078,16 +987,13 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(status, "valid", "expected validation_status=valid");
-
-        cleanup_test_data(&pool, dest.to_str().unwrap(), source.to_str().unwrap()).await;
     }
 
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn scan_once_quarantines_corrupt_epub() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn scan_once_quarantines_corrupt_epub(pool: PgPool) {
         // P2: a corrupt EPUB (not a valid ZIP) must be quarantined — the source
         // gets a quarantine sidecar, the library copy is removed, and failed=1.
-        let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
+        let pool = ingestion_pool_for(&pool).await;
         let ingestion = tempfile::tempdir().unwrap();
         let library = tempfile::tempdir().unwrap();
         let quarantine = tempfile::tempdir().unwrap();
@@ -1131,10 +1037,9 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn scan_once_skips_duplicate_on_second_run() {
-        let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
+    #[sqlx::test(migrations = "./migrations")]
+    async fn scan_once_skips_duplicate_on_second_run(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let ingestion = tempfile::tempdir().unwrap();
         let library = tempfile::tempdir().unwrap();
         let quarantine = tempfile::tempdir().unwrap();
@@ -1159,56 +1064,17 @@ mod tests {
         let r2 = scan_once(&config, &pool).await.unwrap();
         assert_eq!(r2.skipped, 1, "second scan: expected skipped=1");
         assert_eq!(r2.processed, 0);
-
-        let dest = library.path().join("Author/Book.pdf");
-        cleanup_test_data(&pool, dest.to_str().unwrap(), source.to_str().unwrap()).await;
     }
 
     // ── Task 30: ingest-invariant DB tests ────────────────────────────────
-
-    /// Pre-clean: remove any lingering rows with the target ISBN so
-    /// `match_existing` can't hit a stub work left over from a panicked
-    /// sibling test.  Without this, an orchestrator-test failure upstream
-    /// pollutes these tests with empty-title stubs that match by ISBN.
-    async fn preclean_isbn(pool: &sqlx::PgPool, isbn: &str) {
-        let work_ids: Vec<uuid::Uuid> =
-            sqlx::query_scalar("SELECT DISTINCT work_id FROM manifestations WHERE isbn_13 = $1")
-                .bind(isbn)
-                .fetch_all(pool)
-                .await
-                .unwrap_or_default();
-        for wid in work_ids {
-            let _ = sqlx::query(
-                "DELETE FROM metadata_versions WHERE manifestation_id IN \
-                 (SELECT id FROM manifestations WHERE work_id = $1)",
-            )
-            .bind(wid)
-            .execute(pool)
-            .await;
-            let _ = sqlx::query("DELETE FROM work_authors WHERE work_id = $1")
-                .bind(wid)
-                .execute(pool)
-                .await;
-            let _ = sqlx::query("DELETE FROM manifestations WHERE work_id = $1")
-                .bind(wid)
-                .execute(pool)
-                .await;
-            let _ = sqlx::query("DELETE FROM works WHERE id = $1")
-                .bind(wid)
-                .execute(pool)
-                .await;
-        }
-    }
 
     /// Every non-NULL canonical field set by ingestion must have a matching
     /// `*_version_id` pointer referencing a real `metadata_versions` row with
     /// `source='opf'`.  Without this invariant, metadata_versions is optional
     /// instead of authoritative.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn ingest_sets_version_pointers_for_all_canonical_fields() {
-        let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
-        preclean_isbn(&pool, "9780306406157").await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn ingest_sets_version_pointers_for_all_canonical_fields(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let ingestion = tempfile::tempdir().unwrap();
         let library = tempfile::tempdir().unwrap();
         let quarantine = tempfile::tempdir().unwrap();
@@ -1316,18 +1182,15 @@ mod tests {
                 "pointer {pointer} resolved to source '{source_for_ptr}', expected 'opf'"
             );
         }
-
-        cleanup_test_data(&pool, dest.to_str().unwrap(), source.to_str().unwrap()).await;
     }
 
     /// When ingestion cannot extract OPF (e.g. for a non-EPUB file), a
     /// heuristic-fallback row is written to `metadata_versions` with
     /// `source='opf'`, `field_name='title'`, `confidence_score=0.2` and the
     /// work's `title_version_id` pointer references it.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn ingest_without_opf_writes_heuristic_title_journal() {
-        let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
+    #[sqlx::test(migrations = "./migrations")]
+    async fn ingest_without_opf_writes_heuristic_title_journal(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let ingestion = tempfile::tempdir().unwrap();
         let library = tempfile::tempdir().unwrap();
         let quarantine = tempfile::tempdir().unwrap();
@@ -1384,17 +1247,13 @@ mod tests {
             (score - 0.2).abs() < 1e-4,
             "heuristic confidence should be ~0.2, got {score}"
         );
-
-        cleanup_test_data(&pool, dest.to_str().unwrap(), source.to_str().unwrap()).await;
     }
 
     /// `work_authors.source_version_id` must be wired to the `creators`
     /// journal row so authors on the work trace back to their draft.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn ingest_sets_work_authors_source_version_id() {
-        let pool = sqlx::PgPool::connect(&db_url()).await.expect("connect");
-        preclean_isbn(&pool, "9780306406157").await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn ingest_sets_work_authors_source_version_id(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let ingestion = tempfile::tempdir().unwrap();
         let library = tempfile::tempdir().unwrap();
         let quarantine = tempfile::tempdir().unwrap();
@@ -1444,7 +1303,5 @@ mod tests {
                 "source_version_id should reference a 'creators' journal row"
             );
         }
-
-        cleanup_test_data(&pool, dest.to_str().unwrap(), source.to_str().unwrap()).await;
     }
 }

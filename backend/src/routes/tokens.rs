@@ -130,13 +130,9 @@ mod tests {
         assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     }
 
-    #[tokio::test]
-    #[ignore] // Requires running postgres
-    async fn create_token_validates_name() {
-        let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
-        });
-        let pool = sqlx::PgPool::connect(&url).await.expect("connect");
+    #[sqlx::test(migrations = "./migrations")]
+    async fn create_token_validates_name(pool: sqlx::PgPool) {
+        let pool = test_support::db::app_pool_for(&pool).await;
 
         // Create a test user and device token for Basic auth
         let subject = format!("token-route-test-{}", uuid::Uuid::new_v4());
@@ -183,17 +179,5 @@ mod tests {
             .json(&serde_json::json!({"name": long_name}))
             .await;
         assert_eq!(response.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
-
-        // Cleanup
-        sqlx::query("DELETE FROM device_tokens WHERE user_id = $1")
-            .bind(user.id)
-            .execute(&pool)
-            .await
-            .expect("cleanup tokens");
-        sqlx::query("DELETE FROM users WHERE id = $1")
-            .bind(user.id)
-            .execute(&pool)
-            .await
-            .expect("cleanup user");
     }
 }

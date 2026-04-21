@@ -640,12 +640,11 @@ mod tests {
         .expect("insert metadata_versions")
     }
 
-    #[tokio::test]
-    #[ignore] // requires running postgres + applied migrations
-    async fn accept_admin_writes_canonical_title() {
-        let app_pool = test_support::db::app_pool().await;
-        let ing_pool = test_support::db::ingestion_pool().await;
-        let (admin_id, basic) = test_support::db::create_admin_and_basic_auth(&app_pool).await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn accept_admin_writes_canonical_title(pool: sqlx::PgPool) {
+        let app_pool = test_support::db::app_pool_for(&pool).await;
+        let ing_pool = test_support::db::ingestion_pool_for(&pool).await;
+        let (_admin_id, basic) = test_support::db::create_admin_and_basic_auth(&app_pool).await;
         let marker = Uuid::new_v4().simple().to_string();
         let (work_id, m_id) =
             test_support::db::insert_work_and_manifestation(&ing_pool, &marker).await;
@@ -693,19 +692,15 @@ mod tests {
             job_count, 1,
             "accept must enqueue exactly one writeback job; got {job_count}"
         );
-
-        test_support::db::cleanup_work(&ing_pool, work_id).await;
-        test_support::db::cleanup_user(&app_pool, admin_id).await;
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn reject_admin_marks_version_rejected() {
-        let app_pool = test_support::db::app_pool().await;
-        let ing_pool = test_support::db::ingestion_pool().await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn reject_admin_marks_version_rejected(pool: sqlx::PgPool) {
+        let app_pool = test_support::db::app_pool_for(&pool).await;
+        let ing_pool = test_support::db::ingestion_pool_for(&pool).await;
         let (admin_id, basic) = test_support::db::create_admin_and_basic_auth(&app_pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) =
+        let (_work_id, m_id) =
             test_support::db::insert_work_and_manifestation(&ing_pool, &marker).await;
         let version_id = insert_version(
             &ing_pool,
@@ -744,17 +739,13 @@ mod tests {
             job_count, 0,
             "reject must NOT enqueue writeback; got {job_count}"
         );
-
-        test_support::db::cleanup_work(&ing_pool, work_id).await;
-        test_support::db::cleanup_user(&app_pool, admin_id).await;
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn revert_admin_clears_field_to_null() {
-        let app_pool = test_support::db::app_pool().await;
-        let ing_pool = test_support::db::ingestion_pool().await;
-        let (admin_id, basic) = test_support::db::create_admin_and_basic_auth(&app_pool).await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn revert_admin_clears_field_to_null(pool: sqlx::PgPool) {
+        let app_pool = test_support::db::app_pool_for(&pool).await;
+        let ing_pool = test_support::db::ingestion_pool_for(&pool).await;
+        let (_admin_id, basic) = test_support::db::create_admin_and_basic_auth(&app_pool).await;
         let marker = Uuid::new_v4().simple().to_string();
         let (work_id, m_id) =
             test_support::db::insert_work_and_manifestation(&ing_pool, &marker).await;
@@ -809,19 +800,15 @@ mod tests {
             job_count, 1,
             "revert must enqueue exactly one writeback job; got {job_count}"
         );
-
-        test_support::db::cleanup_work(&ing_pool, work_id).await;
-        test_support::db::cleanup_user(&app_pool, admin_id).await;
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn double_accept_enqueues_two_jobs() {
-        let app_pool = test_support::db::app_pool().await;
-        let ing_pool = test_support::db::ingestion_pool().await;
-        let (admin_id, basic) = test_support::db::create_admin_and_basic_auth(&app_pool).await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn double_accept_enqueues_two_jobs(pool: sqlx::PgPool) {
+        let app_pool = test_support::db::app_pool_for(&pool).await;
+        let ing_pool = test_support::db::ingestion_pool_for(&pool).await;
+        let (_admin_id, basic) = test_support::db::create_admin_and_basic_auth(&app_pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) =
+        let (_work_id, m_id) =
             test_support::db::insert_work_and_manifestation(&ing_pool, &marker).await;
 
         let v1 = insert_version(
@@ -857,8 +844,5 @@ mod tests {
                 .await
                 .expect("fetch job count");
         assert_eq!(job_count, 2, "two accepts must enqueue two rows (no dedup)");
-
-        test_support::db::cleanup_work(&ing_pool, work_id).await;
-        test_support::db::cleanup_user(&app_pool, admin_id).await;
     }
 }

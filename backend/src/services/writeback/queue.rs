@@ -334,17 +334,7 @@ mod tests {
     use crate::config::{CleanupMode, CoverConfig, EnrichmentConfig, WritebackConfig};
     use tokio::sync::Barrier;
 
-    fn db_url() -> String {
-        std::env::var("DATABASE_URL_INGESTION").unwrap_or_else(|_| {
-            "postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev".into()
-        })
-    }
-
-    fn app_url() -> String {
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
-        })
-    }
+    use crate::test_support::db::{app_pool_for, ingestion_pool_for};
 
     fn test_config_with_max_attempts(max_attempts: u32) -> Config {
         Config {
@@ -394,17 +384,6 @@ mod tests {
         }
     }
 
-    /// Defuse any stale rows from prior runs so claim_next only sees rows
-    /// this test inserted.
-    async fn quiesce_writeback_jobs(pool: &PgPool) {
-        let _ = sqlx::query(
-            "UPDATE writeback_jobs SET status = 'complete' \
-             WHERE status IN ('pending', 'failed', 'in_progress')",
-        )
-        .execute(pool)
-        .await;
-    }
-
     /// Insert a minimal work + manifestation fixture and return ids.
     async fn insert_fixture(pool: &PgPool, marker: &str) -> (Uuid, Uuid) {
         let work_id: Uuid = sqlx::query_scalar(
@@ -446,24 +425,6 @@ mod tests {
         .unwrap()
     }
 
-    /// Cleanup uses `app_pool` for writeback_jobs (reverie_ingestion has no
-    /// DELETE grant) and `ing_pool` for manifestations/works (reverie_app
-    /// has RLS + no FK cascade from here).
-    async fn cleanup(app_pool: &PgPool, ing_pool: &PgPool, work_id: Uuid, manifestation_id: Uuid) {
-        let _ = sqlx::query("DELETE FROM writeback_jobs WHERE manifestation_id = $1")
-            .bind(manifestation_id)
-            .execute(app_pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM manifestations WHERE id = $1")
-            .bind(manifestation_id)
-            .execute(ing_pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM works WHERE id = $1")
-            .bind(work_id)
-            .execute(ing_pool)
-            .await;
-    }
-
     /// NOT EXISTS soft filter: when one sibling is already `in_progress`,
     /// the CTE predicate treats the remaining pending siblings as
     /// ineligible.  This is the common-path optimisation — it avoids a
@@ -471,21 +432,20 @@ mod tests {
     /// concurrent workers is guaranteed by the partial UNIQUE index
     /// (`concurrent_claims_on_same_manifestation_serialise_via_unique_index`
     /// below), not by this predicate.
-    #[tokio::test]
-    #[ignore]
-    async fn not_exists_filter_excludes_siblings_of_in_progress_job() {
-        let pool = PgPool::connect(&app_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn not_exists_filter_excludes_siblings_of_in_progress_job(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
 
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
-        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
         let job_a = insert_job(&ing_pool, m_id, "metadata").await;
         let _job_b = insert_job(&ing_pool, m_id, "metadata").await;
         let _job_c = insert_job(&ing_pool, m_id, "metadata").await;
 
         sqlx::query("UPDATE writeback_jobs SET status = 'in_progress' WHERE id = $1")
             .bind(job_a)
-            .execute(&pool)
+            .execute(&app_pool)
             .await
             .unwrap();
 
@@ -500,15 +460,13 @@ mod tests {
                )",
         )
         .bind(m_id)
-        .fetch_one(&pool)
+        .fetch_one(&app_pool)
         .await
         .unwrap();
         assert_eq!(
             count_eligible_siblings, 0,
             "sibling pending jobs must not be eligible while one is in_progress"
         );
-
-        cleanup(&pool, &ing_pool, work_id, m_id).await;
     }
 
     /// The partial UNIQUE index
@@ -520,18 +478,17 @@ mod tests {
     /// commits.  Without this index, both would succeed under READ
     /// COMMITTED (the NOT EXISTS snapshot cannot see the peer's
     /// uncommitted UPDATE).
-    #[tokio::test]
-    #[ignore]
-    async fn concurrent_claims_on_same_manifestation_serialise_via_unique_index() {
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn concurrent_claims_on_same_manifestation_serialise_via_unique_index(pool: PgPool) {
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
         let job_a = insert_job(&ing_pool, m_id, "metadata").await;
         let job_b = insert_job(&ing_pool, m_id, "metadata").await;
 
         // Separate pools to force distinct connections (like real workers).
-        let pool_a = PgPool::connect(&app_url()).await.unwrap();
-        let pool_b = PgPool::connect(&app_url()).await.unwrap();
+        let pool_a = app_pool_for(&pool).await;
+        let pool_b = app_pool_for(&pool).await;
 
         let barrier = Arc::new(Barrier::new(2));
 
@@ -627,31 +584,27 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(in_progress_count, 1);
-
-        let cleanup_pool = PgPool::connect(&app_url()).await.unwrap();
-        cleanup(&cleanup_pool, &ing_pool, work_id, m_id).await;
     }
 
     /// Jobs on distinct manifestations can run in parallel — i.e. the
     /// manifestation-aware NOT EXISTS clause does NOT cross-block them.
     /// Verified by checking that neither row appears in the other's
     /// in_progress EXISTS check at the SQL level.  Parallel-test safe.
-    #[tokio::test]
-    #[ignore]
-    async fn two_workers_distinct_manifestations_parallelise() {
-        let pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn two_workers_distinct_manifestations_parallelise(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker_a = Uuid::new_v4().simple().to_string();
         let marker_b = Uuid::new_v4().simple().to_string();
-        let (work_a, m_a) = insert_fixture(&ing_pool, &marker_a).await;
-        let (work_b, m_b) = insert_fixture(&ing_pool, &marker_b).await;
+        let (_work_a, m_a) = insert_fixture(&ing_pool, &marker_a).await;
+        let (_work_b, m_b) = insert_fixture(&ing_pool, &marker_b).await;
         let _job_a = insert_job(&ing_pool, m_a, "metadata").await;
         let _job_b = insert_job(&ing_pool, m_b, "metadata").await;
 
         // Mark m_a's job in_progress directly — simulating an active worker.
         sqlx::query("UPDATE writeback_jobs SET status = 'in_progress' WHERE manifestation_id = $1")
             .bind(m_a)
-            .execute(&pool)
+            .execute(&app_pool)
             .await
             .unwrap();
 
@@ -665,28 +618,24 @@ mod tests {
              )",
         )
         .bind(m_b)
-        .fetch_one(&pool)
+        .fetch_one(&app_pool)
         .await
         .unwrap();
         assert!(
             m_b_eligible,
             "m_b's job must remain eligible when m_a's is in_progress"
         );
-
-        cleanup(&pool, &ing_pool, work_a, m_a).await;
-        cleanup(&pool, &ing_pool, work_b, m_b).await;
     }
 
     /// Retry-backoff: attempt_count=2 → 30 minute window.  Verified via
     /// a SELECT mirroring the CTE's eligibility predicate, so parallel
     /// tests do not steal the claim.
-    #[tokio::test]
-    #[ignore]
-    async fn retry_backoff_honoured() {
-        let pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn retry_backoff_honoured(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
 
         let job_id: Uuid = sqlx::query_scalar(
             "INSERT INTO writeback_jobs \
@@ -708,7 +657,7 @@ mod tests {
              FROM writeback_jobs WHERE id = $1",
         )
         .bind(job_id)
-        .fetch_one(&pool)
+        .fetch_one(&app_pool)
         .await
         .unwrap();
         assert!(
@@ -722,7 +671,7 @@ mod tests {
              SET last_attempted_at = now() - INTERVAL '35 minutes' WHERE id = $1",
         )
         .bind(job_id)
-        .execute(&pool)
+        .execute(&app_pool)
         .await
         .unwrap();
 
@@ -731,26 +680,22 @@ mod tests {
              FROM writeback_jobs WHERE id = $1",
         )
         .bind(job_id)
-        .fetch_one(&pool)
+        .fetch_one(&app_pool)
         .await
         .unwrap();
         assert!(
             eligible_outside,
             "row past backoff window must satisfy eligibility"
         );
-
-        cleanup(&pool, &ing_pool, work_id, m_id).await;
     }
 
     /// `revert_in_progress` flips every `in_progress` row back to `pending`.
-    #[tokio::test]
-    #[ignore]
-    async fn shutdown_reverts_in_progress() {
-        let pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
-        quiesce_writeback_jobs(&pool).await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn shutdown_reverts_in_progress(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
         let job_id: Uuid = sqlx::query_scalar(
             "INSERT INTO writeback_jobs (manifestation_id, reason, status) \
              VALUES ($1, 'metadata', 'in_progress') RETURNING id",
@@ -760,7 +705,7 @@ mod tests {
         .await
         .unwrap();
 
-        revert_in_progress(&pool).await.unwrap();
+        revert_in_progress(&app_pool).await.unwrap();
 
         let status: String =
             sqlx::query_scalar("SELECT status::text FROM writeback_jobs WHERE id = $1")
@@ -769,23 +714,19 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(status, "pending");
-
-        cleanup(&pool, &ing_pool, work_id, m_id).await;
     }
 
     /// At `max_attempts`, `mark_failed` transitions to `skipped`.
-    #[tokio::test]
-    #[ignore]
-    async fn max_attempts_transitions_to_skipped() {
-        let pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
-        quiesce_writeback_jobs(&pool).await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn max_attempts_transitions_to_skipped(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
         let job_id = insert_job(&ing_pool, m_id, "metadata").await;
 
         let config = test_config_with_max_attempts(3);
-        mark_failed(&pool, job_id, 3, &config, Some("final"))
+        mark_failed(&app_pool, job_id, 3, &config, Some("final"))
             .await
             .unwrap();
 
@@ -796,22 +737,17 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(status, "skipped");
-
-        cleanup(&pool, &ing_pool, work_id, m_id).await;
     }
 
     /// Crash recovery: a row left `in_progress` must be picked up as
     /// `pending` on worker startup.  Mirrors `shutdown_reverts_in_progress`
     /// but uses the full `spawn_worker` entry point.
-    #[tokio::test]
-    #[ignore]
-    async fn crash_recovery_reconciles_in_progress() {
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
-        let app_for_quiesce = PgPool::connect(&app_url()).await.unwrap();
-        quiesce_writeback_jobs(&app_for_quiesce).await;
-        drop(app_for_quiesce);
+    #[sqlx::test(migrations = "./migrations")]
+    async fn crash_recovery_reconciles_in_progress(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
         let job_id: Uuid = sqlx::query_scalar(
             "INSERT INTO writeback_jobs (manifestation_id, reason, status) \
              VALUES ($1, 'metadata', 'in_progress') RETURNING id",
@@ -821,8 +757,7 @@ mod tests {
         .await
         .unwrap();
 
-        let pool = PgPool::connect(&app_url()).await.unwrap();
-        let pool_for_spawn = pool.clone();
+        let pool_for_spawn = app_pool.clone();
         let cancel = CancellationToken::new();
         let cancel_for_spawn = cancel.clone();
         let cfg = test_config_with_max_attempts(3);
@@ -847,8 +782,6 @@ mod tests {
             status, "in_progress",
             "crash-recovery should have moved the row out of in_progress"
         );
-
-        cleanup(&pool, &ing_pool, work_id, m_id).await;
     }
 
     // ── finish() terminal-state coverage ────────────────────────────────
@@ -861,17 +794,16 @@ mod tests {
 
     /// `finish(Ok(Success))` transitions the row to `complete` and
     /// clears the `error` column.
-    #[tokio::test]
-    #[ignore]
-    async fn finish_marks_complete_on_success_outcome() {
-        let pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn finish_marks_complete_on_success_outcome(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
         let job_id = insert_job(&ing_pool, m_id, "metadata").await;
 
         finish(
-            &pool,
+            &app_pool,
             &test_config_with_max_attempts(3),
             job_id,
             1,
@@ -892,24 +824,21 @@ mod tests {
                 .unwrap();
         assert_eq!(status, "complete");
         assert_eq!(error, None);
-
-        cleanup(&pool, &ing_pool, work_id, m_id).await;
     }
 
     /// `finish(Ok(Skipped))` transitions to `skipped` and records the
     /// skip reason in `error`.  Skipped bypasses retry regardless of
     /// attempt_count.
-    #[tokio::test]
-    #[ignore]
-    async fn finish_marks_skipped_on_skipped_outcome() {
-        let pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn finish_marks_skipped_on_skipped_outcome(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
         let job_id = insert_job(&ing_pool, m_id, "metadata").await;
 
         finish(
-            &pool,
+            &app_pool,
             &test_config_with_max_attempts(3),
             job_id,
             1, // well below max — still terminal for Skipped
@@ -930,23 +859,20 @@ mod tests {
                 .unwrap();
         assert_eq!(status, "skipped");
         assert_eq!(error.as_deref(), Some("format_unsupported: pdf"));
-
-        cleanup(&pool, &ing_pool, work_id, m_id).await;
     }
 
     /// `finish(Ok(Failed))` with `attempt_count < max_attempts` leaves
     /// the row as `failed` for later retry, with the error recorded.
-    #[tokio::test]
-    #[ignore]
-    async fn finish_marks_failed_below_max_attempts() {
-        let pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn finish_marks_failed_below_max_attempts(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
         let job_id = insert_job(&ing_pool, m_id, "metadata").await;
 
         finish(
-            &pool,
+            &app_pool,
             &test_config_with_max_attempts(3),
             job_id,
             1, // below max=3 → stays failed for retry
@@ -967,8 +893,6 @@ mod tests {
                 .unwrap();
         assert_eq!(status, "failed");
         assert_eq!(error.as_deref(), Some("regression"));
-
-        cleanup(&pool, &ing_pool, work_id, m_id).await;
     }
 
     /// RLS system-context policy: with no user context set (NULL
@@ -976,19 +900,18 @@ mod tests {
     /// — the worker's operational pathway.  Matches how the real worker
     /// connects: it never calls `SET LOCAL app.current_user_id`, so the
     /// setting stays at its session default of NULL.
-    #[tokio::test]
-    #[ignore]
-    async fn rls_system_update_policy_allows_writeback_worker_without_user_context() {
-        let pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn rls_system_update_policy_allows_writeback_worker_without_user_context(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
 
         // No SET LOCAL — default is NULL, which matches the real worker.
         let res = sqlx::query("UPDATE manifestations SET current_file_hash = $1 WHERE id = $2")
             .bind("system-context-hash")
             .bind(m_id)
-            .execute(&pool)
+            .execute(&app_pool)
             .await
             .unwrap();
         assert_eq!(
@@ -996,7 +919,6 @@ mod tests {
             1,
             "system-context worker must be able to UPDATE manifestations"
         );
-        cleanup(&pool, &ing_pool, work_id, m_id).await;
     }
 
     /// RLS system-context policy: with a non-empty `app.current_user_id`
@@ -1005,18 +927,17 @@ mod tests {
     /// guards the worker's isolation: a misconfigured worker session
     /// that inherits a user context does NOT quietly succeed under the
     /// system policy.
-    #[tokio::test]
-    #[ignore]
-    async fn rls_system_update_policy_blocks_unknown_user_context() {
-        let pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn rls_system_update_policy_blocks_unknown_user_context(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
 
         // Random UUID that will not match any users row.
         let imposter = Uuid::new_v4();
 
-        let mut conn = pool.acquire().await.unwrap();
+        let mut conn = app_pool.acquire().await.unwrap();
         sqlx::query("BEGIN").execute(&mut *conn).await.unwrap();
         sqlx::query("SELECT set_config('app.current_user_id', $1, true)")
             .bind(imposter.to_string())
@@ -1036,24 +957,21 @@ mod tests {
             0,
             "a session with a bogus user context must NOT be able to update manifestations via the system policy"
         );
-        drop(conn);
-        cleanup(&pool, &ing_pool, work_id, m_id).await;
     }
 
     /// `finish(Err(WritebackError))` for a transient / retryable error
     /// routes through `mark_failed`.  `attempt_count < max_attempts`, so
     /// the row lands at `failed` for a later retry.
-    #[tokio::test]
-    #[ignore]
-    async fn finish_marks_failed_on_transient_run_once_error() {
-        let pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn finish_marks_failed_on_transient_run_once_error(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
         let job_id = insert_job(&ing_pool, m_id, "metadata").await;
 
         finish(
-            &pool,
+            &app_pool,
             &test_config_with_max_attempts(3),
             job_id,
             1,
@@ -1076,25 +994,22 @@ mod tests {
             err_text.contains("transient-disk-error"),
             "error should describe the Persist error: {err_text}"
         );
-
-        cleanup(&pool, &ing_pool, work_id, m_id).await;
     }
 
     /// `finish(Err(JobNotFound))` skips the retry budget and routes
     /// straight to `skipped`: the job row has vanished (CASCADE removed
     /// the manifestation, or the row was deleted manually), so retrying
     /// cannot succeed.
-    #[tokio::test]
-    #[ignore]
-    async fn finish_marks_skipped_on_job_not_found_error() {
-        let pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn finish_marks_skipped_on_job_not_found_error(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
+        let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
         let job_id = insert_job(&ing_pool, m_id, "metadata").await;
 
         finish(
-            &pool,
+            &app_pool,
             &test_config_with_max_attempts(3),
             job_id,
             1,
@@ -1118,7 +1033,5 @@ mod tests {
             err_text.contains("not found"),
             "error should describe the JobNotFound: {err_text}"
         );
-
-        cleanup(&pool, &ing_pool, work_id, m_id).await;
     }
 }

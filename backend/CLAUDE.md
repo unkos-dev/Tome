@@ -26,12 +26,15 @@ Run migrations as the schema owner:
   `backend/migrations/`.
 - **Testing:** Use `axum-test` for integration tests. Unit tests live alongside the
   code in `#[cfg(test)]` modules.
-- **DB-backed tests are `#[ignore]`d by convention.** Any `#[tokio::test]` that
-  opens a `PgPool` must be marked `#[ignore]` — it requires a running postgres at
-  `localhost:5433` with migrations applied. Default `cargo test` silently skips
-  these. Run the full suite with `cargo test -- --include-ignored`, and ensure
-  CI does the same. Migrating this pattern to `#[sqlx::test]` (per-test isolated
-  DBs, no manual `#[ignore]`) is tracked separately.
+- **DB-backed tests use `#[sqlx::test(migrations = "./migrations")]`.** The macro
+  provisions a fresh isolated database per test, runs every migration, and
+  injects a `PgPool` owned by the schema owner (`reverie` — bypasses RLS). Tests
+  that need the runtime roles (`reverie_app`, `reverie_ingestion`) build
+  secondary pools against the same per-test DB via
+  `crate::test_support::db::{app_pool_for, ingestion_pool_for}`. Tests run in
+  parallel thanks to database isolation; no manual fixture cleanup is required.
+  `DATABASE_URL` must point at the schema owner so `sqlx::test` can create
+  per-test databases (locally: `postgres://reverie:reverie@localhost:5433/reverie_dev`).
 - **Logging:** Use `tracing` with structured fields. Never `println!` or `eprintln!`.
 - **Formatting:** `cargo fmt` is enforced by CI. Do not fight the formatter.
 - **Linting:** `cargo clippy -- -D warnings` is enforced by CI. Fix warnings, don't

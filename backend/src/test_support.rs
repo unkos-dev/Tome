@@ -114,38 +114,53 @@ pub fn test_server() -> TestServer {
     TestServer::new(app)
 }
 
-/// Real-DB helpers for admin-authenticated route tests.  Requires running
-/// postgres + applied migrations; callers must mark their test `#[ignore]`.
+/// Real-DB helpers for tests that exercise the live schema + RLS policies.
+///
+/// Tests use `#[sqlx::test(migrations = "./migrations")]`, which provisions
+/// an isolated database per test and injects a `PgPool` owned by the
+/// schema owner (`reverie` — bypasses RLS). Tests that need to exercise
+/// the runtime roles (`reverie_app` / `reverie_ingestion`) build secondary
+/// pools against the same per-test DB via [`app_pool_for`] / [`ingestion_pool_for`].
 pub mod db {
     use sqlx::PgPool;
+    use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
     use uuid::Uuid;
 
-    /// `reverie_app` connection — what AppState.pool uses in production.
-    pub fn app_url() -> String {
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
-        })
+    /// Build a `reverie_app` pool against the same DB as the given pool.
+    /// Use this when a test needs RLS-enforced access (the runtime web role).
+    pub async fn app_pool_for(pool: &PgPool) -> PgPool {
+        pool_as_role(pool, "reverie_app", "reverie_app").await
     }
 
-    /// `reverie_ingestion` connection — what AppState.ingestion_pool uses in
-    /// production, and what tests use for fixture inserts that need the
-    /// `manifestations_ingestion_full_access` RLS bypass.
-    pub fn ingestion_url() -> String {
-        std::env::var("DATABASE_URL_INGESTION").unwrap_or_else(|_| {
-            "postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev".into()
-        })
+    /// Build a `reverie_ingestion` pool against the same DB as the given pool.
+    /// Use this for fixture inserts on pipeline tables (manifestations, works)
+    /// where the `*_ingestion_full_access` RLS policies apply.
+    pub async fn ingestion_pool_for(pool: &PgPool) -> PgPool {
+        pool_as_role(pool, "reverie_ingestion", "reverie_ingestion").await
     }
 
-    pub async fn app_pool() -> PgPool {
-        PgPool::connect(&app_url())
+    async fn pool_as_role(pool: &PgPool, username: &str, password: &str) -> PgPool {
+        let (host, port, database) = {
+            let opts = pool.connect_options();
+            (
+                opts.get_host().to_owned(),
+                opts.get_port(),
+                opts.get_database()
+                    .expect("injected pool has database name")
+                    .to_owned(),
+            )
+        };
+        let new_opts = PgConnectOptions::new()
+            .host(&host)
+            .port(port)
+            .database(&database)
+            .username(username)
+            .password(password);
+        PgPoolOptions::new()
+            .max_connections(5)
+            .connect_with(new_opts)
             .await
-            .expect("connect reverie_app")
-    }
-
-    pub async fn ingestion_pool() -> PgPool {
-        PgPool::connect(&ingestion_url())
-            .await
-            .expect("connect reverie_ingestion")
+            .unwrap_or_else(|e| panic!("connect as {username}: {e}"))
     }
 
     /// Insert an admin-role user via `reverie_app` (the only role with grants
@@ -174,17 +189,6 @@ pub mod db {
         let basic =
             base64ct::Base64::encode_string(format!("{}:{}", user.id, plaintext).as_bytes());
         (user.id, format!("Basic {basic}"))
-    }
-
-    pub async fn cleanup_user(app_pool: &PgPool, user_id: Uuid) {
-        let _ = sqlx::query("DELETE FROM device_tokens WHERE user_id = $1")
-            .bind(user_id)
-            .execute(app_pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM users WHERE id = $1")
-            .bind(user_id)
-            .execute(app_pool)
-            .await;
     }
 
     /// Build the full router with both pools wired through AppState.
@@ -237,23 +241,5 @@ pub mod db {
         .await
         .expect("insert manifestation");
         (work_id, m_id)
-    }
-
-    pub async fn cleanup_work(ingestion_pool: &PgPool, work_id: Uuid) {
-        let _ = sqlx::query(
-            "DELETE FROM metadata_versions WHERE manifestation_id IN \
-             (SELECT id FROM manifestations WHERE work_id = $1)",
-        )
-        .bind(work_id)
-        .execute(ingestion_pool)
-        .await;
-        let _ = sqlx::query("DELETE FROM manifestations WHERE work_id = $1")
-            .bind(work_id)
-            .execute(ingestion_pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM works WHERE id = $1")
-            .bind(work_id)
-            .execute(ingestion_pool)
-            .await;
     }
 }

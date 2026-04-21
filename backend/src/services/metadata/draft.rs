@@ -192,13 +192,8 @@ mod tests {
     use super::*;
     use crate::services::metadata::extractor::{ExtractedCreator, ExtractedMetadata, SeriesInfo};
     use crate::services::metadata::isbn::IsbnResult;
-    use sqlx::{Connection, PgConnection, PgPool};
-
-    fn db_url() -> String {
-        std::env::var("DATABASE_URL_INGESTION").unwrap_or_else(|_| {
-            "postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev".into()
-        })
-    }
+    use crate::test_support::db::ingestion_pool_for;
+    use sqlx::PgPool;
 
     async fn setup_manifestation(pool: &PgPool) -> (Uuid, Uuid) {
         let work_id: Uuid = sqlx::query_scalar(
@@ -224,21 +219,6 @@ mod tests {
         .unwrap();
 
         (work_id, manifestation_id)
-    }
-
-    async fn cleanup(pool: &PgPool, work_id: Uuid, manifestation_id: Uuid) {
-        let _ = sqlx::query("DELETE FROM metadata_versions WHERE manifestation_id = $1")
-            .bind(manifestation_id)
-            .execute(pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM manifestations WHERE id = $1")
-            .bind(manifestation_id)
-            .execute(pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM works WHERE id = $1")
-            .bind(work_id)
-            .execute(pool)
-            .await;
     }
 
     fn sample_metadata() -> ExtractedMetadata {
@@ -269,11 +249,10 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn write_drafts_creates_journal_rows_with_ids() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
-        let (work_id, manifestation_id) = setup_manifestation(&pool).await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn write_drafts_creates_journal_rows_with_ids(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
+        let (_work_id, manifestation_id) = setup_manifestation(&pool).await;
 
         let metadata = sample_metadata();
 
@@ -297,15 +276,12 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(isbn_match_type, "isbn");
-
-        cleanup(&pool, work_id, manifestation_id).await;
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn repeat_observation_bumps_count() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
-        let (work_id, manifestation_id) = setup_manifestation(&pool).await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn repeat_observation_bumps_count(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
+        let (_work_id, manifestation_id) = setup_manifestation(&pool).await;
 
         let metadata = sample_metadata();
 
@@ -329,19 +305,15 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(count, 2);
-
-        cleanup(&pool, work_id, manifestation_id).await;
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn tx_rollback_leaves_no_rows() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
-        let (work_id, manifestation_id) = setup_manifestation(&pool).await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn tx_rollback_leaves_no_rows(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
+        let (_work_id, manifestation_id) = setup_manifestation(&pool).await;
 
-        let mut conn = PgConnection::connect(&db_url()).await.unwrap();
-        let mut tx = conn.begin().await.unwrap();
-        write_drafts(&mut tx, manifestation_id, &sample_metadata())
+        let mut tx = pool.begin().await.unwrap();
+        write_drafts(&mut *tx, manifestation_id, &sample_metadata())
             .await
             .unwrap();
         tx.rollback().await.unwrap();
@@ -354,7 +326,5 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(n, 0);
-
-        cleanup(&pool, work_id, manifestation_id).await;
     }
 }

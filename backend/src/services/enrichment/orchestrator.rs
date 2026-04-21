@@ -876,18 +876,14 @@ mod tests {
         );
     }
 
-    /// Tests run against `reverie_ingestion`: that role holds the
-    /// `manifestations_ingestion_full_access` RLS policy which lets the
-    /// test fixture INSERT manifestations with `RETURNING id` without
-    /// setting up an `app.current_user_id` session variable. The companion
-    /// migration `20260417000002_grant_field_locks_select_ingestion` adds
-    /// the missing `SELECT` grant so the orchestrator's
-    /// `field_lock::is_locked_tx` call succeeds under this role.
-    fn db_url() -> String {
-        std::env::var("DATABASE_URL_INGESTION").unwrap_or_else(|_| {
-            "postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev".into()
-        })
-    }
+    // Tests run against `reverie_ingestion`: that role holds the
+    // `manifestations_ingestion_full_access` RLS policy which lets the
+    // test fixture INSERT manifestations with `RETURNING id` without
+    // setting up an `app.current_user_id` session variable. The companion
+    // migration `20260417000002_grant_field_locks_select_ingestion` adds
+    // the missing `SELECT` grant so the orchestrator's
+    // `field_lock::is_locked_tx` call succeeds under this role.
+    use crate::test_support::db::{app_pool_for, ingestion_pool_for};
 
     fn config_with_mock_sources(
         ol_uri: &str,
@@ -969,45 +965,6 @@ mod tests {
         (work_id, manifestation_id)
     }
 
-    async fn cleanup_enrich_fixture(pool: &PgPool, work_id: Uuid, isbn_13: &str) {
-        let _ = sqlx::query("DELETE FROM api_cache WHERE lookup_key = $1")
-            .bind(format!("isbn:{isbn_13}"))
-            .execute(pool)
-            .await;
-        let _ = sqlx::query(
-            "DELETE FROM metadata_versions \
-             WHERE manifestation_id IN (SELECT id FROM manifestations WHERE work_id = $1)",
-        )
-        .bind(work_id)
-        .execute(pool)
-        .await;
-        let _ = sqlx::query(
-            "DELETE FROM field_locks WHERE manifestation_id IN \
-             (SELECT id FROM manifestations WHERE work_id = $1)",
-        )
-        .bind(work_id)
-        .execute(pool)
-        .await;
-        let _ = sqlx::query("DELETE FROM manifestations WHERE work_id = $1")
-            .bind(work_id)
-            .execute(pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM works WHERE id = $1")
-            .bind(work_id)
-            .execute(pool)
-            .await;
-    }
-
-    /// Open a separate reverie_app pool for field_locks INSERTs.  The migration
-    /// grants reverie_ingestion only SELECT on that table — writes (lock/unlock)
-    /// remain a reverie_app surface.
-    async fn reverie_app_pool() -> PgPool {
-        let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
-        });
-        PgPool::connect(&url).await.unwrap()
-    }
-
     /// Build an `/api/books?bibkeys=ISBN:X&jscmd=data` mock response.
     ///
     /// Existing callers still pass the old `{title, publishers: [...]}`
@@ -1061,10 +1018,9 @@ mod tests {
 
     /// Three sources return the same title → Apply fires AND the applied
     /// row's confidence reflects the quorum=3 boost.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn orchestrator_multi_source_agreement_applies_with_quorum_boost() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn orchestrator_multi_source_agreement_applies_with_quorum_boost(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let (ol, gb, hc) = (
             MockServer::start().await,
             MockServer::start().await,
@@ -1086,7 +1042,7 @@ mod tests {
         .await;
         mock_hardcover(&hc, json!({"data":{"books":[{"title": canon_title}]}})).await;
 
-        let (work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
+        let (_work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
         let cfg = config_with_mock_sources(&ol.uri(), &gb.uri(), &hc.uri(), Some("test-token"));
 
         let outcome = run_once(&pool, &cfg, m_id).await.unwrap();
@@ -1123,16 +1079,13 @@ mod tests {
             max_score >= 0.90,
             "expected quorum-boosted confidence_score >= 0.90 on title, got {max_score}"
         );
-
-        cleanup_enrich_fixture(&pool, work_id, isbn).await;
     }
 
     /// Three sources disagree on title → Propose downgrade — all rows stage,
     /// canonical title remains empty.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn orchestrator_disagreement_stages_all_candidates() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn orchestrator_disagreement_stages_all_candidates(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let (ol, gb, hc) = (
             MockServer::start().await,
             MockServer::start().await,
@@ -1153,7 +1106,7 @@ mod tests {
         )
         .await;
 
-        let (work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
+        let (_work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
         let cfg = config_with_mock_sources(&ol.uri(), &gb.uri(), &hc.uri(), Some("test-token"));
 
         let _ = run_once(&pool, &cfg, m_id).await.unwrap();
@@ -1197,17 +1150,14 @@ mod tests {
             title_version_id.is_none(),
             "no Apply should have run, title_version_id should be NULL"
         );
-
-        cleanup_enrich_fixture(&pool, work_id, isbn).await;
     }
 
     /// One source returns `publisher` (AutoFill by default) on an empty
     /// canonical → Apply fires and `publisher` is written to the
     /// manifestation.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn orchestrator_autofill_applies_when_canonical_empty() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn orchestrator_autofill_applies_when_canonical_empty(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let (ol, gb, hc) = (
             MockServer::start().await,
             MockServer::start().await,
@@ -1222,7 +1172,7 @@ mod tests {
         mock_googlebooks_isbn(&gb, json!({"items": []})).await;
         mock_hardcover(&hc, json!({"data": {"books": []}})).await;
 
-        let (work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
+        let (_work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
         let cfg = config_with_mock_sources(&ol.uri(), &gb.uri(), &hc.uri(), Some("test-token"));
 
         let _ = run_once(&pool, &cfg, m_id).await.unwrap();
@@ -1255,17 +1205,15 @@ mod tests {
             job_count, 1,
             "enrichment Apply must emit exactly one writeback_jobs row; got {job_count}"
         );
-
-        cleanup_enrich_fixture(&pool, work_id, isbn).await;
     }
 
     /// When the `title` field is locked, the journal row is still written
     /// (so admins can see what the source proposed) but canonical and
     /// title_version_id are NOT updated.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn orchestrator_locked_field_writes_journal_but_not_canonical() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn orchestrator_locked_field_writes_journal_but_not_canonical(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let pool = ingestion_pool_for(&pool).await;
         let (ol, gb, hc) = (
             MockServer::start().await,
             MockServer::start().await,
@@ -1279,20 +1227,17 @@ mod tests {
         mock_googlebooks_isbn(&gb, json!({"items": []})).await;
         mock_hardcover(&hc, json!({"data": {"books": []}})).await;
 
-        let (work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
+        let (_work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
         // Lock the title field on the work side.  field_locks writes require
         // reverie_app (reverie_ingestion has SELECT only) — use a separate pool.
-        {
-            let app_pool = reverie_app_pool().await;
-            sqlx::query(
-                "INSERT INTO field_locks (manifestation_id, entity_type, field_name) \
-                 VALUES ($1, 'work', 'title')",
-            )
-            .bind(m_id)
-            .execute(&app_pool)
-            .await
-            .unwrap();
-        }
+        sqlx::query(
+            "INSERT INTO field_locks (manifestation_id, entity_type, field_name) \
+             VALUES ($1, 'work', 'title')",
+        )
+        .bind(m_id)
+        .execute(&app_pool)
+        .await
+        .unwrap();
 
         let cfg = config_with_mock_sources(&ol.uri(), &gb.uri(), &hc.uri(), Some("test-token"));
         let _ = run_once(&pool, &cfg, m_id).await.unwrap();
@@ -1333,18 +1278,15 @@ mod tests {
         .await
         .unwrap();
         assert!(canon_title.is_empty(), "canonical title must stay empty");
-
-        cleanup_enrich_fixture(&pool, work_id, isbn).await;
     }
 
     /// `dry_run::preview` fans out + fills `api_cache` but never writes to
     /// `metadata_versions`.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn orchestrator_dry_run_leaves_journal_unchanged_writes_api_cache() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn orchestrator_dry_run_leaves_journal_unchanged_writes_api_cache(pool: PgPool) {
         use crate::services::enrichment::dry_run;
 
-        let pool = PgPool::connect(&db_url()).await.unwrap();
+        let pool = ingestion_pool_for(&pool).await;
         let (ol, gb, hc) = (
             MockServer::start().await,
             MockServer::start().await,
@@ -1362,15 +1304,8 @@ mod tests {
         .await;
         mock_hardcover(&hc, json!({"data":{"books":[{"title": canon_title}]}})).await;
 
-        let (work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
+        let (_work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
         let cfg = config_with_mock_sources(&ol.uri(), &gb.uri(), &hc.uri(), Some("test-token"));
-
-        // Clear any lingering cache rows for this ISBN so the before/after
-        // assertion doesn't hinge on upsert-vs-insert counts.
-        let _ = sqlx::query("DELETE FROM api_cache WHERE lookup_key = $1")
-            .bind(format!("isbn:{isbn}"))
-            .execute(&pool)
-            .await;
 
         // Baseline counts — scoped by manifestation / lookup_key so other
         // tests' rows don't pollute.
@@ -1418,7 +1353,5 @@ mod tests {
             cache_after > cache_before,
             "dry_run must populate api_cache (before={cache_before}, after={cache_after})"
         );
-
-        cleanup_enrich_fixture(&pool, work_id, isbn).await;
     }
 }

@@ -149,14 +149,8 @@ pub async fn upsert_from_oidc_and_maybe_promote(
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    #[ignore] // Requires running postgres
-    async fn upsert_creates_and_updates_user() {
-        let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
-        });
-        let pool = sqlx::PgPool::connect(&url).await.expect("connect");
-
+    #[sqlx::test(migrations = "./migrations")]
+    async fn upsert_creates_and_updates_user(pool: PgPool) {
         let subject = format!("test-subject-{}", Uuid::new_v4());
         let user =
             upsert_from_oidc_and_maybe_promote(&pool, &subject, "Alice", Some("alice@example.com"))
@@ -164,16 +158,11 @@ mod tests {
                 .expect("upsert");
         assert_eq!(user.display_name, "Alice");
         assert_eq!(user.email.as_deref(), Some("alice@example.com"));
-        // First user in the database is auto-promoted to admin; otherwise "adult"
-        assert!(
-            user.role == "admin" || user.role == "adult",
-            "expected admin or adult, got {:?}",
-            user.role
-        );
+        // First user in a fresh DB is auto-promoted to admin.
+        assert_eq!(user.role, "admin");
         assert_eq!(user.session_version, 0);
         assert_eq!(user.session_version_bytes, 0_i32.to_le_bytes());
 
-        // Update display_name
         let updated = upsert_from_oidc_and_maybe_promote(
             &pool,
             &subject,
@@ -185,22 +174,13 @@ mod tests {
         assert_eq!(updated.id, user.id);
         assert_eq!(updated.display_name, "Alice B");
 
-        // find_by_id
         let found = find_by_id(&pool, user.id).await.expect("find").unwrap();
         assert_eq!(found.oidc_subject, subject);
 
-        // find_by_oidc_subject
         let found = find_by_oidc_subject(&pool, &subject)
             .await
             .expect("find by subject")
             .unwrap();
         assert_eq!(found.id, user.id);
-
-        // Cleanup
-        sqlx::query("DELETE FROM users WHERE id = $1")
-            .bind(user.id)
-            .execute(&pool)
-            .await
-            .expect("cleanup");
     }
 }

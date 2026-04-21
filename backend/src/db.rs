@@ -30,21 +30,8 @@ pub async fn acquire_with_rls(
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    #[ignore] // Requires running postgres: cargo test -- --ignored
-    async fn acquire_with_rls_sets_session_variable() {
-        // config::tests mutate DATABASE_URL (setting it to a non-existent
-        // "test" host), so serialize the env read against them via ENV_LOCK.
-        // Scope the guard so it drops before the first await — once the URL
-        // is captured, env mutations can't affect this test.
-        let url = {
-            let _env_guard = crate::test_support::ENV_LOCK.lock().unwrap();
-            std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-                "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
-            })
-        };
-        let pool = init_pool(&url, 2).await.expect("failed to connect");
-
+    #[sqlx::test(migrations = "./migrations")]
+    async fn acquire_with_rls_sets_session_variable(pool: PgPool) {
         let user_id = uuid::Uuid::new_v4();
         let mut tx = acquire_with_rls(&pool, user_id).await.unwrap();
 

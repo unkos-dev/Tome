@@ -176,15 +176,14 @@ mod tests {
     /// X3: admin POST /trigger must reset enrichment_status / attempt_count
     /// on a real manifestation row.  Pre-C2 this 404'd in production
     /// because state.pool had no app.current_user_id session var.
-    #[tokio::test]
-    #[ignore] // requires running postgres + applied migrations
-    async fn trigger_admin_resets_enrichment_state() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn trigger_admin_resets_enrichment_state(pool: sqlx::PgPool) {
         use axum::http::header::AUTHORIZATION;
-        let app_pool = test_support::db::app_pool().await;
-        let ing_pool = test_support::db::ingestion_pool().await;
-        let (admin_id, basic) = test_support::db::create_admin_and_basic_auth(&app_pool).await;
+        let app_pool = test_support::db::app_pool_for(&pool).await;
+        let ing_pool = test_support::db::ingestion_pool_for(&pool).await;
+        let (_admin_id, basic) = test_support::db::create_admin_and_basic_auth(&app_pool).await;
         let marker = Uuid::new_v4().simple().to_string();
-        let (work_id, m_id) =
+        let (_work_id, m_id) =
             test_support::db::insert_work_and_manifestation(&ing_pool, &marker).await;
 
         // Pre-set the manifestation to a "failed" state with retries logged.
@@ -226,8 +225,5 @@ mod tests {
         assert_eq!(row.0, "pending", "enrichment_status not reset");
         assert_eq!(row.1, 0, "attempt_count not reset");
         assert_eq!(row.2, None, "enrichment_error not cleared");
-
-        test_support::db::cleanup_work(&ing_pool, work_id).await;
-        test_support::db::cleanup_user(&app_pool, admin_id).await;
     }
 }
