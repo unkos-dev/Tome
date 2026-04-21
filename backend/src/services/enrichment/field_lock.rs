@@ -107,25 +107,7 @@ pub async fn unlock(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// reverie_ingestion URL for fixture INSERTs.  The role holds the
-    /// `manifestations_ingestion_full_access` RLS policy, so it can insert
-    /// manifestations without setting an `app.current_user_id` session var.
-    /// The companion migration 20260417000002 grants it SELECT on
-    /// `field_locks` for read-side assertions.
-    fn ingestion_db_url() -> String {
-        std::env::var("DATABASE_URL_INGESTION").unwrap_or_else(|_| {
-            "postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev".into()
-        })
-    }
-
-    /// reverie_app URL for `field_locks` writes.  The migration deliberately
-    /// restricts lock/unlock to this role — reverie_ingestion only has SELECT.
-    fn app_db_url() -> String {
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
-        })
-    }
+    use crate::test_support::db::{app_pool_for, ingestion_pool_for};
 
     async fn setup_fixture(pool: &PgPool) -> (Uuid, Uuid) {
         let work_id: Uuid = sqlx::query_scalar(
@@ -151,21 +133,6 @@ mod tests {
         (work_id, m_id)
     }
 
-    async fn cleanup(pool: &PgPool, work_id: Uuid, m_id: Uuid) {
-        let _ = sqlx::query("DELETE FROM field_locks WHERE manifestation_id = $1")
-            .bind(m_id)
-            .execute(pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM manifestations WHERE id = $1")
-            .bind(m_id)
-            .execute(pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM works WHERE id = $1")
-            .bind(work_id)
-            .execute(pool)
-            .await;
-    }
-
     async fn a_user(pool: &PgPool) -> Uuid {
         sqlx::query_scalar(
             "INSERT INTO users (oidc_subject, email, display_name, role, is_child) \
@@ -179,17 +146,12 @@ mod tests {
         .unwrap()
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn lock_unlock_roundtrip() {
-        // reverie_ingestion: fixture INSERTs on manifestations/works/users
-        // (bypasses app.current_user_id RLS check).
-        let ingestion = PgPool::connect(&ingestion_db_url()).await.unwrap();
-        // reverie_app: field_locks writes (reverie_ingestion only has SELECT).
-        let app = PgPool::connect(&app_db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn lock_unlock_roundtrip(pool: PgPool) {
+        let ingestion = ingestion_pool_for(&pool).await;
+        let app = app_pool_for(&pool).await;
 
-        let (work_id, m_id) = setup_fixture(&ingestion).await;
-        // reverie_ingestion has no grants on `users`; insert via reverie_app.
+        let (_work_id, m_id) = setup_fixture(&ingestion).await;
         let user_id = a_user(&app).await;
 
         assert!(
@@ -207,7 +169,6 @@ mod tests {
                 .unwrap()
         );
 
-        // Idempotent: second lock() is a no-op.
         lock(&app, m_id, EntityType::Work, "title", user_id)
             .await
             .unwrap();
@@ -222,12 +183,5 @@ mod tests {
 
         let removed = unlock(&app, m_id, EntityType::Work, "title").await.unwrap();
         assert!(!removed, "second unlock should report no-op");
-
-        cleanup(&ingestion, work_id, m_id).await;
-        sqlx::query("DELETE FROM users WHERE id = $1")
-            .bind(user_id)
-            .execute(&app)
-            .await
-            .unwrap();
     }
 }

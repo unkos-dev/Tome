@@ -96,15 +96,11 @@ pub async fn find_by_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::db::ingestion_pool_for;
 
-    #[tokio::test]
-    #[ignore] // Requires running postgres
-    async fn job_lifecycle() {
-        let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev".into()
-        });
-        let pool = sqlx::PgPool::connect(&url).await.expect("connect");
-
+    #[sqlx::test(migrations = "./migrations")]
+    async fn job_lifecycle(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let batch_id = Uuid::new_v4();
         let job = create(&pool, batch_id, "/tmp/test.epub")
             .await
@@ -122,23 +118,11 @@ mod tests {
         let jobs = find_by_batch(&pool, batch_id).await.expect("find");
         assert_eq!(jobs[0].status, "complete");
         assert!(jobs[0].completed_at.is_some());
-
-        // Cleanup
-        sqlx::query("DELETE FROM ingestion_jobs WHERE batch_id = $1")
-            .bind(batch_id)
-            .execute(&pool)
-            .await
-            .expect("cleanup");
     }
 
-    #[tokio::test]
-    #[ignore] // Requires running postgres
-    async fn job_skipped_and_failed() {
-        let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev".into()
-        });
-        let pool = sqlx::PgPool::connect(&url).await.expect("connect");
-
+    #[sqlx::test(migrations = "./migrations")]
+    async fn job_skipped_and_failed(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let batch_id = Uuid::new_v4();
 
         let job1 = create(&pool, batch_id, "/tmp/dup.epub")
@@ -158,12 +142,5 @@ mod tests {
         let failed = jobs.iter().find(|j| j.id == job2.id).unwrap();
         assert_eq!(failed.status, "failed");
         assert_eq!(failed.error_message.as_deref(), Some("hash mismatch"));
-
-        // Cleanup
-        sqlx::query("DELETE FROM ingestion_jobs WHERE batch_id = $1")
-            .bind(batch_id)
-            .execute(&pool)
-            .await
-            .expect("cleanup");
     }
 }

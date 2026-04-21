@@ -145,14 +145,9 @@ pub async fn write(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::db::ingestion_pool_for;
     use serde_json::json;
     use time::Duration;
-
-    fn db_url() -> String {
-        std::env::var("DATABASE_URL_INGESTION").unwrap_or_else(|_| {
-            "postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev".into()
-        })
-    }
 
     fn ttls_standard() -> CacheTtls {
         CacheTtls {
@@ -162,20 +157,10 @@ mod tests {
         }
     }
 
-    async fn cleanup(pool: &PgPool, source: &str) {
-        let _ = sqlx::query("DELETE FROM api_cache WHERE source = $1 AND lookup_key LIKE 'test-%'")
-            .bind(source)
-            .execute(pool)
-            .await;
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn write_then_read_roundtrip() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn write_then_read_roundtrip(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let source = "test-cache-roundtrip";
-        let pool = PgPool::connect(&db_url()).await.unwrap();
-        cleanup(&pool, source).await;
-
         let key = "test-roundtrip";
         let payload = json!({"title": "Dune", "author": "Frank Herbert"});
 
@@ -197,17 +182,12 @@ mod tests {
         assert_eq!(cached.response, payload);
         assert_eq!(cached.kind, ApiCacheKind::Hit);
         assert_eq!(cached.http_status, Some(200));
-
-        cleanup(&pool, source).await;
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn expired_entry_returns_none() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn expired_entry_returns_none(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let source = "test-cache-expired";
-        let pool = PgPool::connect(&db_url()).await.unwrap();
-        cleanup(&pool, source).await;
-
         let key = "test-expired";
         let ttls = CacheTtls {
             hit: Duration::ZERO,
@@ -229,17 +209,12 @@ mod tests {
 
         let cached = read(&pool, source, key).await.unwrap();
         assert!(cached.is_none(), "expired entry should return None");
-
-        cleanup(&pool, source).await;
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn distinct_kinds_get_distinct_expirations() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn distinct_kinds_get_distinct_expirations(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let source = "test-cache-ttl";
-        let pool = PgPool::connect(&db_url()).await.unwrap();
-        cleanup(&pool, source).await;
-
         let key_hit = "test-ttl-hit";
         let key_miss = "test-ttl-miss";
 
@@ -300,21 +275,17 @@ mod tests {
             hit_gap > miss_gap,
             "hit TTL {hit_gap} should exceed miss TTL {miss_gap}"
         );
-
-        cleanup(&pool, source).await;
     }
 
     /// ISBN-10 and ISBN-13 of the same book resolve to one cache row via
     /// `lookup_key::isbn_key` — the cache sees a single canonical key, so a
     /// write via one form is visible via the other.
-    #[tokio::test]
-    #[ignore]
-    async fn isbn10_and_isbn13_dedupe_via_lookup_key() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn isbn10_and_isbn13_dedupe_via_lookup_key(pool: PgPool) {
         use crate::services::enrichment::lookup_key;
 
+        let pool = ingestion_pool_for(&pool).await;
         let source = "test-cache-isbn-dedupe";
-        let pool = PgPool::connect(&db_url()).await.unwrap();
-        cleanup(&pool, source).await;
 
         let key_from_isbn10 = lookup_key::isbn_key("0306406152").expect("valid ISBN-10");
         let key_from_isbn13 = lookup_key::isbn_key("9780306406157").expect("valid ISBN-13");
@@ -349,17 +320,12 @@ mod tests {
             .unwrap()
             .expect("ISBN-13 key should hit the ISBN-10-written row");
         assert_eq!(cached.response, payload);
-
-        cleanup(&pool, source).await;
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn upsert_overwrites_previous_value() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn upsert_overwrites_previous_value(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let source = "test-cache-upsert";
-        let pool = PgPool::connect(&db_url()).await.unwrap();
-        cleanup(&pool, source).await;
-
         let key = "test-upsert";
 
         write(
@@ -390,7 +356,5 @@ mod tests {
         assert_eq!(cached.response, json!({"v": 2}));
         assert_eq!(cached.kind, ApiCacheKind::Miss);
         assert_eq!(cached.http_status, Some(404));
-
-        cleanup(&pool, source).await;
     }
 }

@@ -121,51 +121,32 @@ pub async fn update_last_used(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    #[ignore] // Requires running postgres
-    async fn create_list_revoke_lifecycle() {
-        let url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
-        });
-        let pool = sqlx::PgPool::connect(&url).await.expect("connect");
-
-        // Create a test user first
-        let user: (Uuid,) = sqlx::query_as(
+    #[sqlx::test(migrations = "./migrations")]
+    async fn create_list_revoke_lifecycle(pool: PgPool) {
+        let user_id: Uuid = sqlx::query_scalar(
             "INSERT INTO users (oidc_subject, display_name) VALUES ($1, 'Token Test') RETURNING id",
         )
         .bind(format!("token-test-{}", Uuid::new_v4()))
         .fetch_one(&pool)
         .await
         .expect("create user");
-        let user_id = user.0;
 
-        // Create token
         let token = create(&pool, user_id, "My Kindle", "fake-hash")
             .await
             .expect("create token");
         assert_eq!(token.name, "My Kindle");
         assert!(token.revoked_at.is_none());
 
-        // List shows the token
         let tokens = list_for_user(&pool, user_id).await.expect("list");
         assert_eq!(tokens.len(), 1);
         assert_eq!(tokens[0].id, token.id);
 
-        // Revoke
         let revoked = revoke(&pool, token.id, user_id).await.expect("revoke");
         assert!(revoked);
 
-        // List no longer shows revoked token
         let tokens = list_for_user(&pool, user_id)
             .await
             .expect("list after revoke");
         assert!(tokens.is_empty());
-
-        // Cleanup
-        sqlx::query("DELETE FROM users WHERE id = $1")
-            .bind(user_id)
-            .execute(&pool)
-            .await
-            .expect("cleanup");
     }
 }

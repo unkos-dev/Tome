@@ -639,16 +639,7 @@ mod tests {
     use zip::ZipWriter;
     use zip::write::{ExtendedFileOptions, FileOptions};
 
-    fn app_url() -> String {
-        std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://reverie_app:reverie_app@localhost:5433/reverie_dev".into()
-        })
-    }
-    fn ing_url() -> String {
-        std::env::var("DATABASE_URL_INGESTION").unwrap_or_else(|_| {
-            "postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev".into()
-        })
-    }
+    use crate::test_support::db::{app_pool_for, ingestion_pool_for};
 
     fn test_config() -> Config {
         Config {
@@ -791,32 +782,16 @@ mod tests {
         (work_id, m_id)
     }
 
-    async fn cleanup_fixture(app_pool: &PgPool, ing_pool: &PgPool, work_id: Uuid, m_id: Uuid) {
-        let _ = sqlx::query("DELETE FROM writeback_jobs WHERE manifestation_id = $1")
-            .bind(m_id)
-            .execute(app_pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM manifestations WHERE id = $1")
-            .bind(m_id)
-            .execute(ing_pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM works WHERE id = $1")
-            .bind(work_id)
-            .execute(ing_pool)
-            .await;
-    }
-
     /// Task 16 + Task 24: full run_once on a fixture EPUB whose OPF lives
     /// at `OEBPS/package.opf` (not the default `content.opf`).  Verifies:
     /// - the non-default OPF is discovered via `META-INF/container.xml`
     /// - the rewritten OPF carries the new title
     /// - `current_file_hash` changes after writeback
     /// - `ingestion_file_hash` is immutable across the writeback
-    #[tokio::test]
-    #[ignore]
-    async fn run_once_finds_non_default_opf_and_updates_hash() {
-        let app_pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&ing_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn run_once_finds_non_default_opf_and_updates_hash(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
 
         let (_dir, path) = make_fixture_epub("Old Title");
@@ -875,18 +850,15 @@ mod tests {
             ingestion, original_hash,
             "ingestion_file_hash must NOT change"
         );
-
-        cleanup_fixture(&app_pool, &ing_pool, work_id, m_id).await;
     }
 
     /// Task 24 continuation: two successive writebacks on the same
     /// manifestation.  `ingestion_file_hash` must be constant across
     /// both; `current_file_hash` must change each time.
-    #[tokio::test]
-    #[ignore]
-    async fn ingestion_file_hash_immutable_across_writeback_chain() {
-        let app_pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&ing_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn ingestion_file_hash_immutable_across_writeback_chain(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
 
         let (_dir, path) = make_fixture_epub("Initial");
@@ -951,18 +923,15 @@ mod tests {
             ingestion, original_hash,
             "ingestion_file_hash must NEVER change"
         );
-
-        cleanup_fixture(&app_pool, &ing_pool, work_id, m_id).await;
     }
 
     /// Path-rename E2E (Step 8 acceptance criterion): when the rendered
     /// path differs from the on-disk file, run_once must move the file
     /// AND update `manifestations.file_path`.
-    #[tokio::test]
-    #[ignore]
-    async fn run_once_renames_file_to_template_path() {
-        let app_pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&ing_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn run_once_renames_file_to_template_path(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
 
         // Build the fixture inside a tempdir that doubles as library_root.
@@ -1052,17 +1021,6 @@ mod tests {
                 .unwrap();
         assert_eq!(db_path, expected_new.to_str().unwrap());
         assert_ne!(current_hash, original_hash);
-
-        // Cleanup author rows alongside the standard fixture cleanup.
-        let _ = sqlx::query("DELETE FROM work_authors WHERE work_id = $1")
-            .bind(work_id)
-            .execute(&ing_pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM authors WHERE id = $1")
-            .bind(author_id)
-            .execute(&ing_pool)
-            .await;
-        cleanup_fixture(&app_pool, &ing_pool, work_id, m_id).await;
     }
 
     /// Build a fixture EPUB that already carries an EPUB 3
@@ -1126,9 +1084,8 @@ mod tests {
     /// `_covers/accepted/` after `run_once`.  Guards the one pipeline
     /// branch that was E2E-untested in the prior review (cover-reason
     /// path through `plan_embed` + sidecar move).
-    #[tokio::test]
-    #[ignore]
-    async fn run_once_cover_embeds_and_moves_sidecar() {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn run_once_cover_embeds_and_moves_sidecar(pool: PgPool) {
         // Tiny valid PNG: 1x1 black pixel.  Two variants so we can tell
         // the original from the replacement when inspecting the ZIP.
         const PNG_ORIGINAL: &[u8] = &[
@@ -1148,8 +1105,8 @@ mod tests {
             0xE7, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
         ];
 
-        let app_pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&ing_url()).await.unwrap();
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
 
         // Fixture EPUB that already has a cover-image manifest entry so
@@ -1167,7 +1124,7 @@ mod tests {
         let pending_path = pending_dir.join(&cover_filename);
         std::fs::write(&pending_path, PNG_REPLACEMENT).unwrap();
 
-        let (work_id, m_id) = insert_fixture(
+        let (_work_id, m_id) = insert_fixture(
             &ing_pool,
             &marker,
             src_path.to_str().unwrap(),
@@ -1239,19 +1196,16 @@ mod tests {
         .unwrap();
         assert_ne!(current, original_hash);
         assert_eq!(ingestion, original_hash);
-
-        cleanup_fixture(&app_pool, &ing_pool, work_id, m_id).await;
     }
 
     /// Collision branch of `resolve_collision`: if the rendered target
     /// already exists, the writeback lands at `<stem> (2).<ext>` instead.
     /// Guards against regressions where the suffix logic silently
     /// overwrites an unrelated pre-existing file at the rendered path.
-    #[tokio::test]
-    #[ignore]
-    async fn run_once_rename_resolves_collision_with_suffix() {
-        let app_pool = PgPool::connect(&app_url()).await.unwrap();
-        let ing_pool = PgPool::connect(&ing_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn run_once_rename_resolves_collision_with_suffix(pool: PgPool) {
+        let app_pool = app_pool_for(&pool).await;
+        let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
 
         let (lib_dir, src_path) = make_fixture_epub(&format!("Initial-{marker}"));
@@ -1349,16 +1303,6 @@ mod tests {
             expected_collision_path.to_str().unwrap(),
             "DB file_path must record the collision-suffixed path"
         );
-
-        let _ = sqlx::query("DELETE FROM work_authors WHERE work_id = $1")
-            .bind(work_id)
-            .execute(&ing_pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM authors WHERE id = $1")
-            .bind(author_id)
-            .execute(&ing_pool)
-            .await;
-        cleanup_fixture(&app_pool, &ing_pool, work_id, m_id).await;
     }
 
     // ── Rollback + post-validation decision tests ───────────────────────

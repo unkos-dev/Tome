@@ -255,30 +255,14 @@ async fn revert_in_progress(pool: &PgPool) -> sqlx::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::db::ingestion_pool_for;
 
     // ── Task 35: queue integration tests ──────────────────────────────────
-
-    /// Tests run against `reverie_ingestion` — the role with the
-    /// `manifestations_ingestion_full_access` RLS policy, which lets the
-    /// fixture INSERT queue rows with `RETURNING id`.  See the orchestrator
-    /// tests for the companion grant migration on `field_locks`.
-    fn db_url() -> String {
-        std::env::var("DATABASE_URL_INGESTION").unwrap_or_else(|_| {
-            "postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev".into()
-        })
-    }
-
-    /// Defuse any stale eligible rows left behind by prior tests (panics,
-    /// unexpected errors).  Leaves only rows this test created as claim
-    /// candidates.
-    async fn quiesce_queue(pool: &PgPool) {
-        let _ = sqlx::query(
-            "UPDATE manifestations SET enrichment_status = 'complete' \
-             WHERE enrichment_status IN ('pending', 'failed', 'in_progress')",
-        )
-        .execute(pool)
-        .await;
-    }
+    //
+    // Tests run against `reverie_ingestion` — the role with the
+    // `manifestations_ingestion_full_access` RLS policy, which lets the
+    // fixture INSERT queue rows with `RETURNING id`.  See the orchestrator
+    // tests for the companion grant migration on `field_locks`.
 
     fn test_config_with_max_attempts(max_attempts: u32) -> Config {
         use crate::config::{CleanupMode, CoverConfig, EnrichmentConfig};
@@ -373,25 +357,12 @@ mod tests {
         (work_id, manifestation_id, path)
     }
 
-    async fn cleanup_queue_fixture(pool: &PgPool, work_id: Uuid) {
-        let _ = sqlx::query("DELETE FROM manifestations WHERE work_id = $1")
-            .bind(work_id)
-            .execute(pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM works WHERE id = $1")
-            .bind(work_id)
-            .execute(pool)
-            .await;
-    }
-
     /// Two concurrent `claim_next` calls on the same eligible row — exactly
     /// one claims it (FOR UPDATE SKIP LOCKED serialises the claim path).
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn two_workers_race_exactly_one_claims() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
-        quiesce_queue(&pool).await;
-        let (work_id, m_id, _path) = insert_queue_fixture(&pool, "pending", 0, None).await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn two_workers_race_exactly_one_claims(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
+        let (_work_id, m_id, _path) = insert_queue_fixture(&pool, "pending", 0, None).await;
 
         // Race two claims.  Each call acquires its own connection from the pool.
         let (a, b) = tokio::join!(claim_next(&pool), claim_next(&pool));
@@ -405,21 +376,17 @@ mod tests {
             claimed.len()
         );
         assert_eq!(claimed[0].0, m_id);
-
-        cleanup_queue_fixture(&pool, work_id).await;
     }
 
     /// A failed row within the backoff window is NOT claimable; once the
     /// window elapses, the next claim picks it up.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn retry_backoff_window_blocks_then_releases() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
-        quiesce_queue(&pool).await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn retry_backoff_window_blocks_then_releases(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
 
         // attempt_count=1 → 5-minute backoff.  Set attempted_at to 60 seconds
         // ago (still inside the window).
-        let (work_id, m_id, _) = insert_queue_fixture(&pool, "failed", 1, Some(60)).await;
+        let (_work_id, m_id, _) = insert_queue_fixture(&pool, "failed", 1, Some(60)).await;
         let claim_inside = claim_next(&pool).await.unwrap();
         assert!(
             claim_inside.is_none(),
@@ -441,22 +408,18 @@ mod tests {
             claim_outside.expect("row past backoff window should be claimable");
         assert_eq!(claimed_id, m_id);
         assert_eq!(new_attempt, 2, "attempt_count should increment on claim");
-
-        cleanup_queue_fixture(&pool, work_id).await;
     }
 
     /// After `max_attempts` failures the row transitions to `skipped` so the
     /// queue stops retrying it.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn max_attempts_transitions_to_skipped() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
-        quiesce_queue(&pool).await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn max_attempts_transitions_to_skipped(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let max_attempts: u32 = 3;
         let config = test_config_with_max_attempts(max_attempts);
 
         // Row is `in_progress` at the Nth attempt (as if just claimed).
-        let (work_id, m_id, _) =
+        let (_work_id, m_id, _) =
             insert_queue_fixture(&pool, "in_progress", max_attempts as i32, Some(10)).await;
 
         // Simulate a failed run — final attempt, no retry_after.
@@ -481,22 +444,18 @@ mod tests {
             status, "skipped",
             "row should be marked skipped at max_attempts"
         );
-
-        cleanup_queue_fixture(&pool, work_id).await;
     }
 
     /// `revert_in_progress` flips every `in_progress` row back to `pending`
     /// so the next worker can re-claim them after a shutdown.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn shutdown_reverts_in_progress_to_pending() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
-        quiesce_queue(&pool).await;
+    #[sqlx::test(migrations = "./migrations")]
+    async fn shutdown_reverts_in_progress_to_pending(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
 
-        let (work_id_a, m_a, _) = insert_queue_fixture(&pool, "in_progress", 1, Some(5)).await;
-        let (work_id_b, m_b, _) = insert_queue_fixture(&pool, "in_progress", 2, Some(5)).await;
+        let (_work_id_a, m_a, _) = insert_queue_fixture(&pool, "in_progress", 1, Some(5)).await;
+        let (_work_id_b, m_b, _) = insert_queue_fixture(&pool, "in_progress", 2, Some(5)).await;
         // A `pending` row shouldn't be changed (already pending).
-        let (work_id_c, m_c, _) = insert_queue_fixture(&pool, "pending", 0, None).await;
+        let (_work_id_c, m_c, _) = insert_queue_fixture(&pool, "pending", 0, None).await;
 
         revert_in_progress(&pool).await.unwrap();
 
@@ -513,9 +472,5 @@ mod tests {
                 "manifestation {id} status mismatch (expected {expected}, got {s})"
             );
         }
-
-        cleanup_queue_fixture(&pool, work_id_a).await;
-        cleanup_queue_fixture(&pool, work_id_b).await;
-        cleanup_queue_fixture(&pool, work_id_c).await;
     }
 }

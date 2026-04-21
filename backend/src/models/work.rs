@@ -334,12 +334,7 @@ mod tests {
     use super::*;
     use crate::services::metadata::extractor::{ExtractedCreator, SeriesInfo};
     use crate::services::metadata::isbn::IsbnResult;
-
-    fn db_url() -> String {
-        std::env::var("DATABASE_URL_INGESTION").unwrap_or_else(|_| {
-            "postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev".into()
-        })
-    }
+    use crate::test_support::db::ingestion_pool_for;
 
     fn test_metadata(title: &str, author: &str) -> ExtractedMetadata {
         ExtractedMetadata {
@@ -362,45 +357,9 @@ mod tests {
         }
     }
 
-    async fn cleanup_work(pool: &PgPool, work_id: Uuid) {
-        let author_ids: Vec<Uuid> =
-            sqlx::query_scalar("SELECT author_id FROM work_authors WHERE work_id = $1")
-                .bind(work_id)
-                .fetch_all(pool)
-                .await
-                .unwrap_or_default();
-        let series_ids: Vec<Uuid> =
-            sqlx::query_scalar("SELECT series_id FROM series_works WHERE work_id = $1")
-                .bind(work_id)
-                .fetch_all(pool)
-                .await
-                .unwrap_or_default();
-        let _ = sqlx::query("DELETE FROM manifestations WHERE work_id = $1")
-            .bind(work_id)
-            .execute(pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM works WHERE id = $1")
-            .bind(work_id)
-            .execute(pool)
-            .await;
-        for aid in author_ids {
-            let _ = sqlx::query("DELETE FROM authors WHERE id = $1")
-                .bind(aid)
-                .execute(pool)
-                .await;
-        }
-        for sid in series_ids {
-            let _ = sqlx::query("DELETE FROM series WHERE id = $1")
-                .bind(sid)
-                .execute(pool)
-                .await;
-        }
-    }
-
-    #[tokio::test]
-    #[ignore]
-    async fn find_or_create_new_work() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn find_or_create_new_work(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let meta = test_metadata("Test Book Alpha", "Test Author Alpha");
         let work_id = find_or_create(&pool, &meta).await.unwrap();
 
@@ -421,14 +380,11 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(author_name, "Test Author Alpha");
-
-        cleanup_work(&pool, work_id).await;
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn find_or_create_deduplicates_authors() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn find_or_create_deduplicates_authors(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
 
         let meta1 = test_metadata("Astronomy Fundamentals", "Shared Author Name");
         let meta2 = test_metadata("Renaissance Cooking Guide", "Shared Author Name");
@@ -457,15 +413,11 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(count, 1);
-
-        cleanup_work(&pool, work_id1).await;
-        cleanup_work(&pool, work_id2).await;
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn find_or_create_deduplicates_series() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn find_or_create_deduplicates_series(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
 
         let mut meta1 = test_metadata("Series Book 1", "Series Author");
         meta1.series = Some(SeriesInfo {
@@ -478,8 +430,8 @@ mod tests {
             position: Some(2.0),
         });
 
-        let work_id1 = find_or_create(&pool, &meta1).await.unwrap();
-        let work_id2 = find_or_create(&pool, &meta2).await.unwrap();
+        let _work_id1 = find_or_create(&pool, &meta1).await.unwrap();
+        let _work_id2 = find_or_create(&pool, &meta2).await.unwrap();
 
         let count: i64 =
             sqlx::query_scalar("SELECT COUNT(*) FROM series WHERE name = 'Test Series Dedup'")
@@ -487,15 +439,11 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(count, 1);
-
-        cleanup_work(&pool, work_id1).await;
-        cleanup_work(&pool, work_id2).await;
     }
 
-    #[tokio::test]
-    #[ignore]
-    async fn find_or_create_matches_by_isbn() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn find_or_create_matches_by_isbn(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
 
         let mut meta1 = test_metadata("ISBN Match Test", "ISBN Author");
         meta1.isbn = Some(IsbnResult {
@@ -527,8 +475,6 @@ mod tests {
         });
         let work_id2 = find_or_create(&pool, &meta2).await.unwrap();
         assert_eq!(work_id1, work_id2, "ISBN match should return existing work");
-
-        cleanup_work(&pool, work_id1).await;
     }
 
     // ── Task 34: rematch_on_isbn_change integration tests ─────────────────
@@ -543,36 +489,6 @@ mod tests {
         .fetch_one(pool)
         .await
         .unwrap()
-    }
-
-    /// Defuse state from a prior failed test: delete any work whose
-    /// manifestations carry `isbn`.  Without this, two sequential runs of
-    /// the same rematch test see ghost matches from the previous run's
-    /// panic-skipped cleanup.
-    async fn preclean_rematch_isbn(pool: &PgPool, isbn: &str) {
-        let work_ids: Vec<Uuid> =
-            sqlx::query_scalar("SELECT DISTINCT work_id FROM manifestations WHERE isbn_13 = $1")
-                .bind(isbn)
-                .fetch_all(pool)
-                .await
-                .unwrap_or_default();
-        for wid in work_ids {
-            let _ = sqlx::query(
-                "DELETE FROM metadata_versions WHERE manifestation_id IN \
-                 (SELECT id FROM manifestations WHERE work_id = $1)",
-            )
-            .bind(wid)
-            .execute(pool)
-            .await;
-            let _ = sqlx::query("DELETE FROM manifestations WHERE work_id = $1")
-                .bind(wid)
-                .execute(pool)
-                .await;
-            let _ = sqlx::query("DELETE FROM works WHERE id = $1")
-                .bind(wid)
-                .execute(pool)
-                .await;
-        }
     }
 
     /// Helper: insert a manifestation row for a given work/ISBN combo.
@@ -603,13 +519,11 @@ mod tests {
 
     /// Stub work (no other manifestations, no manual drafts) with ISBN
     /// matching another work → auto-merge: manifestation moves, stub deleted.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn rematch_auto_merge() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn rematch_auto_merge(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
         let isbn = "9780000000001";
-        preclean_rematch_isbn(&pool, isbn).await;
 
         // Seed "real" work + manifestation with the target ISBN.
         let real_work_id = insert_work(&pool, &format!("Real-{marker}")).await;
@@ -654,18 +568,14 @@ mod tests {
                 .await
                 .unwrap();
         assert_eq!(new_work_id, real_work_id);
-
-        cleanup_work(&pool, real_work_id).await;
     }
 
     /// Stub work has 2 manifestations → suspected, not auto-merged.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn rematch_suspected_when_multiple_manifestations() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn rematch_suspected_when_multiple_manifestations(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
         let isbn = "9780000000002";
-        preclean_rematch_isbn(&pool, isbn).await;
 
         let real_meta = test_metadata(&format!("Real MultiMani {marker}"), "RM Author");
         let real_work_id = find_or_create(&pool, &real_meta).await.unwrap();
@@ -708,19 +618,14 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(dup, Some(real_work_id));
-
-        cleanup_work(&pool, real_work_id).await;
-        cleanup_work(&pool, stub_work_id).await;
     }
 
     /// Stub work has a manual-source draft → suspected, not auto-merged.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn rematch_suspected_when_manual_draft_exists() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn rematch_suspected_when_manual_draft_exists(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
         let isbn = "9780000000003";
-        preclean_rematch_isbn(&pool, isbn).await;
 
         let real_work_id = insert_work(&pool, &format!("Real-MD-{marker}")).await;
         let _ = insert_manifestation(&pool, real_work_id, Some(isbn), &format!("{marker}-a")).await;
@@ -768,19 +673,14 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(dup, Some(real_work_id));
-
-        cleanup_work(&pool, real_work_id).await;
-        cleanup_work(&pool, stub_work_id).await;
     }
 
     /// No other work has the ISBN → NoOp.
-    #[tokio::test]
-    #[ignore] // Requires running postgres with applied migrations
-    async fn rematch_noop_when_isbn_unique() {
-        let pool = PgPool::connect(&db_url()).await.unwrap();
+    #[sqlx::test(migrations = "./migrations")]
+    async fn rematch_noop_when_isbn_unique(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
         let isbn = "9780000000004";
-        preclean_rematch_isbn(&pool, isbn).await;
 
         let work_id = insert_work(&pool, &format!("Solo-{marker}")).await;
         let m = insert_manifestation(&pool, work_id, Some(isbn), &format!("{marker}-solo")).await;
@@ -799,7 +699,5 @@ mod tests {
         .await
         .unwrap();
         assert!(dup.is_none(), "no suspected pointer should be set");
-
-        cleanup_work(&pool, work_id).await;
     }
 }
