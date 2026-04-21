@@ -90,7 +90,13 @@ pub(crate) async fn verify_basic(
     let token_id = matched_token_id.ok_or(AppError::Unauthorized)?;
     let pool = state.pool.clone();
     tokio::spawn(async move {
-        let _ = device_token::update_last_used(&pool, token_id).await;
+        if let Err(e) = device_token::update_last_used(&pool, token_id).await {
+            tracing::warn!(
+                error = %e,
+                %token_id,
+                "device_token: update_last_used failed (non-fatal)"
+            );
+        }
     });
 
     Ok(Some(CurrentUser {
