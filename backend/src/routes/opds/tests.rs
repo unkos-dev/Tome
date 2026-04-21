@@ -536,6 +536,89 @@ async fn cover_cache_populates_and_serves(pool: PgPool) {
     assert_eq!(response.status_code(), StatusCode::OK);
 }
 
+// ── Regression: series feed renders every manifestation in one page ─────
+
+#[sqlx::test(migrations = "./migrations")]
+async fn series_feed_renders_all_manifestations(pool: PgPool) {
+    let app_pool = test_support::db::app_pool_for(&pool).await;
+    let ingestion_pool = test_support::db::ingestion_pool_for(&pool).await;
+    let (_admin, basic) = test_support::db::create_admin_and_basic_auth(&app_pool).await;
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    let series_id: Uuid = sqlx::query_scalar(
+        "INSERT INTO series (name, sort_name) VALUES ('Long Saga', 'Long Saga') RETURNING id",
+    )
+    .fetch_one(&ingestion_pool)
+    .await
+    .expect("insert series");
+
+    // 51 books (> page_size=50). Positions are monotonic with `i`; created_at
+    // is 2020 for all except the last, which is 2023 — so on the buggy
+    // `(created_at, id) < cursor` page 2, the last position's row is
+    // filtered out. Fix: no cursor on series, whole series on one page.
+    let mut expected: Vec<Uuid> = Vec::with_capacity(51);
+    for i in 0..51u32 {
+        let work_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO works (title, sort_title) VALUES ($1, $1) RETURNING id",
+        )
+        .bind(format!("Volume {i:03}"))
+        .fetch_one(&ingestion_pool)
+        .await
+        .expect("insert work");
+        let created_at = if i == 50 {
+            "2023-01-01T00:00:00Z"
+        } else {
+            "2020-01-01T00:00:00Z"
+        };
+        let m_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO manifestations \
+                (work_id, format, file_path, ingestion_file_hash, current_file_hash, \
+                 file_size_bytes, ingestion_status, validation_status, created_at) \
+             VALUES ($1, 'epub'::manifestation_format, $2, $3, $3, 1000, \
+                     'complete'::ingestion_status, 'valid'::validation_status, $4::timestamptz) \
+             RETURNING id",
+        )
+        .bind(work_id)
+        .bind(format!("/tmp/series-{i}.epub"))
+        .bind(format!("series-hash-{i}"))
+        .bind(created_at)
+        .fetch_one(&ingestion_pool)
+        .await
+        .expect("insert manifestation");
+        sqlx::query(
+            "INSERT INTO series_works (series_id, work_id, position) VALUES ($1, $2, $3)",
+        )
+        .bind(series_id)
+        .bind(work_id)
+        .bind(i as i32 + 1)
+        .execute(&ingestion_pool)
+        .await
+        .expect("insert series_works");
+        expected.push(m_id);
+    }
+
+    let server = test_support::db::server_with_opds_enabled(&app_pool, &ingestion_pool, tmp.path());
+    let response = server
+        .get(&format!("/opds/library/series/{series_id}"))
+        .add_header(AUTHORIZATION, basic)
+        .await;
+    assert_eq!(response.status_code(), StatusCode::OK);
+    let body = std::str::from_utf8(response.as_bytes()).unwrap();
+
+    for m_id in &expected {
+        let urn = format!("urn:reverie:manifestation:{m_id}");
+        assert!(
+            body.contains(&urn),
+            "missing {urn} — buggy cursor pagination would drop the last-position row"
+        );
+    }
+    // Single-page contract: no rel="next" on series feed.
+    assert!(
+        !body.contains(r#"rel="next""#),
+        "series feed must emit the whole series on one page — no next link"
+    );
+}
+
 // ── Test 28: pagination walk of 125 manifestations ───────────────────────
 
 fn extract_manifestation_ids(body: &str) -> Vec<Uuid> {

@@ -522,25 +522,19 @@ pub(super) async fn emit_series_books(
     self_parent: &str,
     base: &Url,
     series_id: Uuid,
-    cursor: Option<String>,
+    _cursor: Option<String>,
 ) -> Result<Vec<u8>, AppError> {
     let self_path = format!("{self_parent}/series/{series_id}");
-    let page_size = state.config.opds.page_size as i64;
+    // Cap at 10× the configured page size — a series of this size is
+    // pathological, and a single oversized feed beats silently dropping
+    // high-position entries under cursor pagination whose (created_at, id)
+    // key doesn't match the series ORDER BY.
+    let series_limit = (state.config.opds.page_size as i64) * 10;
 
     let mut tx = db::acquire_with_rls(&state.pool, user_id)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-    let cursor = cursor
-        .as_deref()
-        .map(super::cursor::Cursor::parse)
-        .transpose()
-        .map_err(|_| AppError::Validation("invalid cursor".into()))?;
-
-    // Series ordering: position ASC NULLS LAST, then created_at DESC / id DESC.
-    // Use a derived column `pos_key` = (position IS NULL, position) for stable
-    // NULLS LAST. Cursor encodes (created_at, id) only; position serves as a
-    // primary sort but cursor pagination still linearises on (created_at, id).
     let mut qb: QueryBuilder<'_, Postgres> = QueryBuilder::new(
         "SELECT m.id, m.created_at, m.updated_at, m.isbn_13, m.isbn_10, \
                 w.id AS work_id, w.title, w.description, w.language, sw.position \
@@ -554,15 +548,8 @@ pub(super) async fn emit_series_books(
         qb.push(" AND ");
         push_scope(&mut qb, scope, "m");
     }
-    if let Some(c) = &cursor {
-        qb.push(" AND (m.created_at, m.id) < (");
-        qb.push_bind(c.created_at);
-        qb.push(", ");
-        qb.push_bind(c.id);
-        qb.push(")");
-    }
     qb.push(" ORDER BY sw.position ASC NULLS LAST, m.created_at DESC, m.id DESC LIMIT ");
-    qb.push_bind(page_size + 1);
+    qb.push_bind(series_limit);
 
     let rows = qb
         .build()
@@ -570,19 +557,9 @@ pub(super) async fn emit_series_books(
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-    let has_more = rows.len() as i64 > page_size;
-    let page_rows = if has_more {
-        &rows[..page_size as usize]
-    } else {
-        &rows[..]
-    };
-
-    let work_ids: Vec<Uuid> = page_rows
-        .iter()
-        .map(|r| r.get::<Uuid, _>("work_id"))
-        .collect();
+    let work_ids: Vec<Uuid> = rows.iter().map(|r| r.get::<Uuid, _>("work_id")).collect();
     let creators = load_creators(&mut tx, &work_ids).await?;
-    let m_ids: Vec<Uuid> = page_rows.iter().map(|r| r.get::<Uuid, _>("id")).collect();
+    let m_ids: Vec<Uuid> = rows.iter().map(|r| r.get::<Uuid, _>("id")).collect();
     let tags = load_tags(&mut tx, &m_ids).await?;
 
     let mut fb = FeedBuilder::new(
@@ -592,7 +569,7 @@ pub(super) async fn emit_series_books(
         "Series",
         OffsetDateTime::now_utc(),
     );
-    for r in page_rows {
+    for r in &rows {
         let m_id: Uuid = r.get("id");
         let work_id: Uuid = r.get("work_id");
         let updated_at: OffsetDateTime = r.get("updated_at");
@@ -606,15 +583,6 @@ pub(super) async fn emit_series_books(
             isbn: r.get::<Option<String>, _>("isbn_13").or(r.get("isbn_10")),
             updated_at,
         });
-    }
-    if has_more {
-        let last = page_rows.last().expect("has_more implies non-empty");
-        let next = super::cursor::Cursor {
-            created_at: last.get("created_at"),
-            id: last.get("id"),
-        }
-        .encode();
-        fb.add_next_link(&format!("{self_path}?cursor={next}"));
     }
     Ok(fb.finish())
 }
