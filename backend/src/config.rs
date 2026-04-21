@@ -661,6 +661,100 @@ mod tests {
     }
 
     #[test]
+    fn opds_enabled_without_public_url_errors() {
+        with_env(
+            &[
+                ("DATABASE_URL", "postgres://test@localhost/reverie_dev"),
+                ("OIDC_ISSUER_URL", "https://auth.example.com"),
+                ("OIDC_CLIENT_ID", "test"),
+                ("OIDC_CLIENT_SECRET", "secret"),
+                ("OIDC_REDIRECT_URI", "http://localhost:3000/auth/callback"),
+                ("REVERIE_OPDS_ENABLED", "true"),
+            ],
+            &["REVERIE_PUBLIC_URL"],
+            || {
+                let err = Config::from_env().unwrap_err();
+                let msg = err.to_string();
+                assert!(msg.contains("REVERIE_PUBLIC_URL"), "unexpected error: {msg}");
+            },
+        );
+    }
+
+    #[test]
+    fn opds_page_size_out_of_range_errors() {
+        for bad in ["0", "501"] {
+            with_env(
+                &[
+                    ("DATABASE_URL", "postgres://test@localhost/reverie_dev"),
+                    ("OIDC_ISSUER_URL", "https://auth.example.com"),
+                    ("OIDC_CLIENT_ID", "test"),
+                    ("OIDC_CLIENT_SECRET", "secret"),
+                    ("OIDC_REDIRECT_URI", "http://localhost:3000/auth/callback"),
+                    ("REVERIE_OPDS_ENABLED", "false"),
+                    ("REVERIE_OPDS_PAGE_SIZE", bad),
+                ],
+                &[],
+                || {
+                    let err = Config::from_env().unwrap_err();
+                    let msg = err.to_string();
+                    assert!(
+                        msg.contains("REVERIE_OPDS_PAGE_SIZE"),
+                        "page_size={bad} did not surface var name: {msg}"
+                    );
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn opds_realm_with_double_quote_errors() {
+        with_env(
+            &[
+                ("DATABASE_URL", "postgres://test@localhost/reverie_dev"),
+                ("OIDC_ISSUER_URL", "https://auth.example.com"),
+                ("OIDC_CLIENT_ID", "test"),
+                ("OIDC_CLIENT_SECRET", "secret"),
+                ("OIDC_REDIRECT_URI", "http://localhost:3000/auth/callback"),
+                ("REVERIE_OPDS_ENABLED", "false"),
+                ("REVERIE_OPDS_REALM", "bad\"quote"),
+            ],
+            &[],
+            || {
+                let err = Config::from_env().unwrap_err();
+                let msg = err.to_string();
+                assert!(
+                    msg.contains("REVERIE_OPDS_REALM"),
+                    "expected realm error: {msg}"
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn opds_enabled_with_valid_public_url_parses() {
+        with_env(
+            &[
+                ("DATABASE_URL", "postgres://test@localhost/reverie_dev"),
+                ("OIDC_ISSUER_URL", "https://auth.example.com"),
+                ("OIDC_CLIENT_ID", "test"),
+                ("OIDC_CLIENT_SECRET", "secret"),
+                ("OIDC_REDIRECT_URI", "http://localhost:3000/auth/callback"),
+                ("REVERIE_OPDS_ENABLED", "true"),
+                ("REVERIE_PUBLIC_URL", "https://reverie.example.com/"),
+            ],
+            &[],
+            || {
+                let config = Config::from_env().unwrap();
+                assert!(config.opds.enabled);
+                assert_eq!(
+                    config.opds.public_url.as_ref().map(|u| u.as_str()),
+                    Some("https://reverie.example.com/")
+                );
+            },
+        );
+    }
+
+    #[test]
     fn from_env_invalid_port() {
         with_env(
             &[
