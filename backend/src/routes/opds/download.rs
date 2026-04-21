@@ -5,7 +5,7 @@
 //! `NotFound` via RLS. A subsequent canonicalisation guard prevents any
 //! on-disk `file_path` from escaping `library_path`.
 
-use std::path::{Path as StdPath, PathBuf};
+use std::path::PathBuf;
 
 use axum::Router;
 use axum::body::Body;
@@ -170,11 +170,6 @@ const RFC5987_NON_ATTR_CHAR: &AsciiSet = &CONTROLS
 fn rfc5987_encode(s: &str) -> String {
     utf8_percent_encode(s, RFC5987_NON_ATTR_CHAR).to_string()
 }
-
-// Module marker to prevent the unused `StdPath` warning if no code references
-// it; StdPath is retained for future signature additions.
-#[allow(dead_code)]
-fn _path_marker(_: &StdPath) {}
 
 #[cfg(test)]
 mod tests {

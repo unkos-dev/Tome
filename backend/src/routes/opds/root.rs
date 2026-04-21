@@ -14,9 +14,7 @@ use crate::db;
 use crate::error::AppError;
 use crate::state::AppState;
 
-use super::feed::{
-    FeedBuilder, FeedKind, OPENSEARCH_DESCRIPTION_MIME, REL_SEARCH, feed_urn, shelf_urn,
-};
+use super::feed::{FeedBuilder, FeedKind, feed_urn, shelf_urn};
 
 pub fn router() -> Router<AppState> {
     Router::new().route("/opds", get(opds_root))
@@ -74,9 +72,6 @@ async fn opds_root(
             true,
         );
     }
-    // Bare `rel="search"` link for clients that don't walk entry hrefs.
-    let _ = (REL_SEARCH, OPENSEARCH_DESCRIPTION_MIME);
-
     Ok(atom_response(
         fb.finish(),
         FeedKind::Navigation.content_type(),

@@ -5,6 +5,7 @@
 //! also build a per-test `TempDir` for the `library_path` root and write
 //! real EPUB bytes to the path that `manifestations.file_path` points at.
 
+use std::collections::HashSet;
 use std::path::Path as StdPath;
 
 use axum::http::{StatusCode, header::AUTHORIZATION};
@@ -506,4 +507,94 @@ async fn cover_cache_populates_and_serves(pool: PgPool) {
         .add_header(AUTHORIZATION, basic.clone())
         .await;
     assert_eq!(response.status_code(), StatusCode::OK);
+}
+
+// ── Test 28: pagination walk of 125 manifestations ───────────────────────
+
+fn extract_manifestation_ids(body: &str) -> Vec<Uuid> {
+    let mut out = Vec::new();
+    let marker = "<id>urn:reverie:manifestation:";
+    let mut rest = body;
+    while let Some(start) = rest.find(marker) {
+        let tail = &rest[start + marker.len()..];
+        if let Some(end) = tail.find("</id>") {
+            if let Ok(id) = Uuid::parse_str(&tail[..end]) {
+                out.push(id);
+            }
+            rest = &tail[end..];
+        } else {
+            break;
+        }
+    }
+    out
+}
+
+fn extract_next_href(body: &str) -> Option<String> {
+    // Search for a <link rel="next" ... href="..." /> element. The rel and
+    // href attribute order is writer-dependent; grep for `rel="next"` then
+    // walk back/forward to find the nearest `href="..."` within the same
+    // `<link .../>` tag.
+    let rel_idx = body.find(r#"rel="next""#)?;
+    let link_start = body[..rel_idx].rfind("<link").unwrap_or(0);
+    let link_end = body[rel_idx..].find("/>").map(|i| rel_idx + i)?;
+    let tag = &body[link_start..link_end];
+    let href_start = tag.find(r#"href=""#).map(|i| i + 6)?;
+    let href_end = tag[href_start..].find('"')?;
+    Some(tag[href_start..href_start + href_end].to_string())
+}
+
+#[sqlx::test(migrations = "./migrations")]
+async fn pagination_walk_125(pool: PgPool) {
+    let app_pool = test_support::db::app_pool_for(&pool).await;
+    let ingestion_pool = test_support::db::ingestion_pool_for(&pool).await;
+    let (_admin, basic) = test_support::db::create_admin_and_basic_auth(&app_pool).await;
+    let tmp = tempfile::TempDir::new().unwrap();
+
+    for i in 0..125u32 {
+        let marker = format!("p-{i:03}");
+        let title = format!("Book {i:03}");
+        insert_epub_manifestation(&ingestion_pool, tmp.path(), &marker, &title).await;
+    }
+
+    let server = test_support::db::server_with_opds_enabled(&app_pool, &ingestion_pool, tmp.path());
+
+    let mut seen: HashSet<Uuid> = HashSet::new();
+    let mut url = "/opds/library/new".to_string();
+    let mut walked_pages = 0u32;
+    loop {
+        // `url` may be an absolute http://host.example/... or a path;
+        // TestServer.get takes a path, so strip the origin if present.
+        let path = if let Some(idx) = url.find("/opds") {
+            &url[idx..]
+        } else {
+            &url
+        };
+        let response = server
+            .get(path)
+            .add_header(AUTHORIZATION, basic.clone())
+            .await;
+        assert_eq!(response.status_code(), StatusCode::OK);
+        let body = std::str::from_utf8(response.as_bytes()).unwrap();
+
+        for id in extract_manifestation_ids(body) {
+            assert!(
+                seen.insert(id),
+                "duplicate manifestation id {id} on page {walked_pages} at {path}"
+            );
+        }
+        walked_pages += 1;
+        assert!(walked_pages < 20, "runaway pagination");
+
+        match extract_next_href(body) {
+            Some(next) => url = next,
+            None => break,
+        }
+    }
+
+    assert_eq!(
+        seen.len(),
+        125,
+        "expected every manifestation visited exactly once, saw {} over {walked_pages} pages",
+        seen.len()
+    );
 }
