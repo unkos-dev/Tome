@@ -11,6 +11,10 @@ pub enum CoverError {
     /// can read.
     #[error("decode: {0}")]
     Decode(String),
+    /// Database error while looking up the manifestation row or acquiring
+    /// the RLS-scoped transaction.
+    #[error("db: {0}")]
+    Db(String),
     /// Format detected successfully but not one we serve (GIF, BMP, …).
     #[error("unsupported format: {0}")]
     UnsupportedFormat(String),

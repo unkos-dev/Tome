@@ -52,14 +52,14 @@ pub async fn get_or_create(
 ) -> Result<PathBuf, CoverError> {
     let mut tx = db::acquire_with_rls(&state.pool, user_id)
         .await
-        .map_err(|e| CoverError::Decode(e.to_string()))?;
+        .map_err(|e| CoverError::Db(format!("covers: {e}")))?;
 
     let row: Option<(String, String)> =
         sqlx::query_as("SELECT file_path, current_file_hash FROM manifestations WHERE id = $1")
             .bind(manifestation_id)
             .fetch_optional(&mut *tx)
             .await
-            .map_err(|e| CoverError::Decode(e.to_string()))?;
+            .map_err(|e| CoverError::Db(format!("covers: {e}")))?;
     drop(tx);
 
     let (file_path, current_file_hash) = row.ok_or(CoverError::NoCover)?;
