@@ -348,7 +348,7 @@ mod tests {
     fn from_env_with_defaults() {
         with_env(
             &[
-                ("DATABASE_URL", "postgres://test@localhost/test"),
+                ("DATABASE_URL", "postgres://test@localhost/reverie_dev"),
                 ("OIDC_ISSUER_URL", "https://auth.example.com"),
                 ("OIDC_CLIENT_ID", "test"),
                 ("OIDC_CLIENT_SECRET", "secret"),
@@ -389,14 +389,14 @@ mod tests {
             || {
                 let config = Config::from_env().unwrap();
                 assert_eq!(config.port, 3000);
-                assert_eq!(config.database_url, "postgres://test@localhost/test");
+                assert_eq!(config.database_url, "postgres://test@localhost/reverie_dev");
                 assert_eq!(config.library_path, "./library");
                 assert_eq!(config.ingestion_path, "./ingestion");
                 assert_eq!(config.quarantine_path, "./quarantine");
                 // Falls back to DATABASE_URL when DATABASE_URL_INGESTION is unset
                 assert_eq!(
                     config.ingestion_database_url,
-                    "postgres://test@localhost/test"
+                    "postgres://test@localhost/reverie_dev"
                 );
                 assert_eq!(
                     config.format_priority,
@@ -427,7 +427,7 @@ mod tests {
     fn user_agent_without_contact_reports_unidentified() {
         with_env(
             &[
-                ("DATABASE_URL", "postgres://test@localhost/test"),
+                ("DATABASE_URL", "postgres://test@localhost/reverie_dev"),
                 ("OIDC_ISSUER_URL", "https://auth.example.com"),
                 ("OIDC_CLIENT_ID", "test"),
                 ("OIDC_CLIENT_SECRET", "secret"),
@@ -447,7 +447,7 @@ mod tests {
     fn user_agent_with_contact_embeds_identifier() {
         with_env(
             &[
-                ("DATABASE_URL", "postgres://test@localhost/test"),
+                ("DATABASE_URL", "postgres://test@localhost/reverie_dev"),
                 ("OIDC_ISSUER_URL", "https://auth.example.com"),
                 ("OIDC_CLIENT_ID", "test"),
                 ("OIDC_CLIENT_SECRET", "secret"),
@@ -469,7 +469,7 @@ mod tests {
     fn from_env_rejects_concurrency_out_of_range() {
         with_env(
             &[
-                ("DATABASE_URL", "postgres://x@localhost/x"),
+                ("DATABASE_URL", "postgres://x@localhost/reverie_dev"),
                 ("OIDC_ISSUER_URL", "https://auth.example.com"),
                 ("OIDC_CLIENT_ID", "test"),
                 ("OIDC_CLIENT_SECRET", "secret"),
@@ -488,7 +488,7 @@ mod tests {
     fn from_env_all_vars() {
         with_env(
             &[
-                ("DATABASE_URL", "postgres://custom@localhost/db"),
+                ("DATABASE_URL", "postgres://custom@localhost/reverie_dev"),
                 ("REVERIE_PORT", "8080"),
                 ("REVERIE_LIBRARY_PATH", "/data/library"),
                 ("REVERIE_INGESTION_PATH", "/data/ingestion"),
@@ -503,7 +503,10 @@ mod tests {
             || {
                 let config = Config::from_env().unwrap();
                 assert_eq!(config.port, 8080);
-                assert_eq!(config.database_url, "postgres://custom@localhost/db");
+                assert_eq!(
+                    config.database_url,
+                    "postgres://custom@localhost/reverie_dev"
+                );
                 assert_eq!(config.library_path, "/data/library");
                 assert_eq!(config.log_level, "debug");
             },
@@ -531,10 +534,10 @@ mod tests {
     fn from_env_custom_ingestion_url_and_format_priority() {
         with_env(
             &[
-                ("DATABASE_URL", "postgres://test@localhost/test"),
+                ("DATABASE_URL", "postgres://test@localhost/reverie_dev"),
                 (
                     "DATABASE_URL_INGESTION",
-                    "postgres://ingestion@localhost/test",
+                    "postgres://ingestion@localhost/reverie_dev",
                 ),
                 ("REVERIE_FORMAT_PRIORITY", "pdf, EPUB , mobi"),
                 ("OIDC_ISSUER_URL", "https://auth.example.com"),
@@ -547,7 +550,7 @@ mod tests {
                 let config = Config::from_env().unwrap();
                 assert_eq!(
                     config.ingestion_database_url,
-                    "postgres://ingestion@localhost/test"
+                    "postgres://ingestion@localhost/reverie_dev"
                 );
                 assert_eq!(config.format_priority, vec!["pdf", "epub", "mobi"]);
             },
@@ -558,7 +561,7 @@ mod tests {
     fn from_env_rejects_unsupported_format_priority() {
         with_env(
             &[
-                ("DATABASE_URL", "postgres://test@localhost/test"),
+                ("DATABASE_URL", "postgres://test@localhost/reverie_dev"),
                 ("REVERIE_FORMAT_PRIORITY", "epub,djvu"),
                 ("OIDC_ISSUER_URL", "https://auth.example.com"),
                 ("OIDC_CLIENT_ID", "test"),
@@ -582,7 +585,7 @@ mod tests {
     fn from_env_invalid_port() {
         with_env(
             &[
-                ("DATABASE_URL", "postgres://x@localhost/x"),
+                ("DATABASE_URL", "postgres://x@localhost/reverie_dev"),
                 ("REVERIE_PORT", "not_a_number"),
                 ("OIDC_ISSUER_URL", "https://auth.example.com"),
                 ("OIDC_CLIENT_ID", "test"),
