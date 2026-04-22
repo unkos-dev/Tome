@@ -53,7 +53,7 @@ backend/
 │   │   ├── basic_only.rs # BasicOnly extractor (OPDS Basic-only auth)
 │   │   ├── middleware.rs # CurrentUser extractor (session + Basic auth)
 │   │   ├── oidc.rs      # OIDC client init and discovery
-│   │   └── token.rs     # Device token generation and argon2 verification
+│   │   └── token.rs     # Device token generation and sha256 constant-time verification
 │   ├── routes/          # Axum route handlers, grouped by domain
 │   ├── models/          # Database models and queries
 │   ├── services/        # Business logic
