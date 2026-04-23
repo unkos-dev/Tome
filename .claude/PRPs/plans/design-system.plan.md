@@ -6,46 +6,23 @@
 >
 > Surfaced 2026-04-23 during adversarial review of this plan (finding C5): the
 > FOUC inline-script pattern (Task D3.13) requires CSP nonce treatment, which
-> in turn requires backend templating of `index.html`. Multiple resolutions
-> from the review also assume CSP-aware infrastructure. Implementing the
+> in turn requires backend templating of `index.html`. Implementing the
 > design-system before CSP would mean re-architecting the FOUC pattern after
 > it ships and discovering shadcn/Radix/Tailwind/CSP conflicts retroactively.
 >
 > **Sequence:** complete UNK-106 (CSP brainstorm → plan → implementation) →
-> resume this plan → apply 17 resolutions from the 2026-04-23 adversarial
-> review → revise affected sections → re-run adversarial review → implement.
+> resume this plan → run a fresh adversarial review (catches CSP-induced
+> deltas to FOUC pattern, Vite proxy, and bundle structure) → implement.
 >
-> **Resolutions are not yet applied to the plan body.** They live in the
-> 2026-04-23 adversarial-review session. Applying them now is deferred because
-> (a) some will be re-informed by CSP outputs, (b) revising now risks wasted
-> work if CSP design changes further surfaces (e.g., backend serving
-> `index.html` changes Vite proxy behaviour, dev-mode CSP affects Vitest jsdom
-> setup, etc.).
+> The plan body has been updated to incorporate the 17 resolutions from the
+> 2026-04-23 adversarial review. Sections affected by CSP integration (FOUC
+> inline script, Vite proxy, backend topology) will need another pass once
+> UNK-106 nails down the specifics.
 >
-> **Resolution summary** (full context in the adversarial-review thread):
->
-> | # | Resolution |
-> |---|------------|
-> | D1 | `axum-extra::CookieJar` (not `tower-cookies`) — composes with `Redirect` via tuple return |
-> | D2 | Vite `manualChunks` structural gate (not substring grep) — assert no `design-*` chunk in production manifest |
-> | D3 | Rust `const THEME_COOKIE_NAME` + unit-test assertion + doc note. Long-term tracked in [UNK-105](https://linear.app/unkos/issue/UNK-105) |
-> | D4 | Pre-write `components.json` (style: `new-york`, baseColor: `neutral`, cssVariables: `true`, rsc: `false`, iconLibrary: `lucide`, aliases per `frontend/CLAUDE.md`) |
-> | D5 | Stylelint built-in `at-rule-no-unknown` ignore list (not third-party config) |
-> | S1 | Use `AppError::Validation` (422), not non-existent `BadRequest` (400) |
-> | S2 | Rewrite test example with correct `create_adult_and_basic_auth(pool, name)` and `server_with_real_pools(app_pool, ingestion_pool)` signatures |
-> | S3 | Closed — resolved by D1's `(jar, Redirect)` tuple-return pattern |
-> | S4 | Replace JS-disabled assertion with malformed-cookie validation step |
-> | S5 | ESLint `RuleTester` (in-process), not subprocess fixture spawn |
-> | S6 | Add note: migration timestamps are placeholders; use `date +%Y%m%d000001` at write-time |
-> | S7 | Correct risks-table mitigation wording — actual protection is committed `package-lock.json` + `npm ci` + Renovate-generated PRs (Tailwind caret pin is cosmetic) |
-> | C1 | D0.11 verifies `CookieJar` extractor + return path for both OK and Redirect responses |
-> | C2 | Helper unit test for `set_theme_cookie`. Proper OIDC e2e test tracked in [UNK-104](https://linear.app/unkos/issue/UNK-104) |
-> | C3 | `BroadcastChannel('reverie-theme')` cross-tab sync inside `ThemeProvider` (D3.10), not deferred |
-> | C4 | Enumerate all four edit points for `theme_preference` field: `USER_COLUMNS`, `UserRow`, `User`, `From<UserRow> for User` impl |
-> | C5 | Park plan pending UNK-106 (this notice) |
->
-> **Related Linear issues:** UNK-104 (OIDC e2e test), UNK-105 (shared-constants
-> pipeline), UNK-106 (CSP — blocks this plan).
+> **Related Linear issues:** [UNK-104](https://linear.app/unkos/issue/UNK-104)
+> (OIDC e2e test), [UNK-105](https://linear.app/unkos/issue/UNK-105)
+> (shared-constants pipeline), [UNK-106](https://linear.app/unkos/issue/UNK-106)
+> (CSP — blocks this plan).
 
 ## Summary
 
@@ -204,7 +181,7 @@ Implementation agent MUST read these before starting any task.
 | P0 | `backend/src/auth/middleware.rs` | 109–135 | `CurrentUser` extractor reused by new PATCH handler |
 | P1 | `backend/src/db.rs` | 44–72 | `acquire_with_rls` — **NOT** used for theme handler (users has no RLS) but referenced as the codebase test harness pattern |
 | P1 | `backend/src/test_support.rs` | all | `create_admin_and_basic_auth`, `server_with_real_pools`, integration test scaffolding |
-| P1 | `backend/Cargo.toml` | 1–45 | `tower-http` has `cors` feature enabled but `CorsLayer` is never instantiated — same-origin via Vite proxy avoids CORS entirely |
+| P1 | `backend/Cargo.toml` | 1–45 | `tower-http` has `cors` feature enabled but `CorsLayer` is never instantiated — same-origin via Vite proxy avoids CORS entirely. `axum-extra` is NOT currently a dep; must be added with the `cookie` feature for the `CookieJar` extractor/response pattern used by the theme cookie. |
 | P1 | `.github/workflows/ci.yml` | 87–110 | Frontend CI job; adds `npm test`, stylelint, bundle-leak gate |
 | P1 | `docs/astro.config.mjs` | 18–29 | Manual sidebar — new `Design` group needed to surface PHILOSOPHY + VISUAL_IDENTITY |
 | P1 | `docs/src/content/docs/getting-started/introduction.md` | all | Starlight markdown pattern (frontmatter `title:`) |
@@ -259,19 +236,50 @@ ALTER TABLE users DROP COLUMN theme_preference;
 Notes: no `CHECK` constraint — application-layer validation against the allowed
 set (`system`, `light`, `dark`) keeps the schema future-proof for additional
 themes (per BLUEPRINT "architect for unlimited themes"). Timestamp the
-migration with today's date; existing convention is `YYYYMMDD0000NN`.
+migration with today's date; existing convention is `YYYYMMDD0000NN`. The
+`20260422000001` timestamp shown above is illustrative — run `date +%Y%m%d000001`
+at write-time to generate the real filename, not the literal value here.
 
-**USER_MODEL_COLUMN_ADDITION** — `USER_COLUMNS` and the `User` struct both need
-the field:
+**USER_MODEL_COLUMN_ADDITION** — `theme_preference` must be added in **four**
+places in `backend/src/models/user.rs`. `UserRow` and `User` are distinct types
+with an explicit `From<UserRow> for User` impl; missing any of these four edits
+produces a compile error:
 
 ```rust
-// SOURCE: backend/src/models/user.rs:7-8 (USER_COLUMNS constant)
+// 1. USER_COLUMNS constant (line 7) — append theme_preference to the SELECT list
 const USER_COLUMNS: &str =
-    "id, oidc_subject, display_name, email, role, is_child, session_version, created_at, updated_at";
+    "id, oidc_subject, display_name, email, role::text, is_child, \
+     created_at, updated_at, session_version, theme_preference";
 
-// ADD: theme_preference at end of the SELECT list and of the struct field list.
-// The rest of find_by_id / upsert_from_oidc logic passes through unchanged.
+// 2. UserRow struct (line 11) — add the field for sqlx FromRow
+struct UserRow {
+    // ... existing fields ...
+    theme_preference: String,
+}
+
+// 3. User public struct (line 24) — add the field
+pub struct User {
+    // ... existing fields ...
+    pub theme_preference: String,
+    // ... existing session_version_bytes: Vec<u8> synthetic field ...
+}
+
+// 4. From<UserRow> for User impl (line 39) — add the field to the constructor
+impl From<UserRow> for User {
+    fn from(row: UserRow) -> Self {
+        // ... existing field copies ...
+        Self {
+            // ... existing field initialisations ...
+            theme_preference: row.theme_preference,
+            // session_version_bytes computed as before — leave untouched
+        }
+    }
+}
 ```
+
+The rest of `find_by_id` / `upsert_from_oidc_and_maybe_promote` passes through
+unchanged. `session_version_bytes` is an unrelated synthetic field — leave its
+computation alone.
 
 **AUTH_ME_RESPONSE** — current handler at `backend/src/routes/auth.rs:162–177`:
 
@@ -301,10 +309,15 @@ only `ENABLE ROW LEVEL SECURITY` in the migration set is on `manifestations` at
 
 **PATCH_HANDLER_SHAPE** — follow `backend/src/routes/tokens.rs:33–183` (authed
 PATCH/POST handler, JSON request/response, `CurrentUser` extractor, `state.pool`
-for queries against tables without RLS):
+for queries against tables without RLS). The cookie is written via
+`axum_extra::extract::cookie::CookieJar`, returned as part of the response
+tuple — this composes with `Redirect` for the OIDC callback site too, and
+does **not** require mounting a separate `CookieManagerLayer` in the router:
 
 ```rust
 // NEW: backend/src/routes/auth.rs (append to existing module)
+use axum_extra::extract::cookie::CookieJar;
+
 #[derive(serde::Deserialize)]
 struct UpdateThemeRequest {
     theme_preference: String,
@@ -315,11 +328,14 @@ const ALLOWED_THEMES: &[&str] = &["system", "light", "dark"];
 async fn update_theme(
     current_user: CurrentUser,
     State(state): State<AppState>,
-    cookies: tower_cookies::Cookies, // or tower_sessions cookie jar — match whatever axum-login exposes
+    jar: CookieJar,
     Json(body): Json<UpdateThemeRequest>,
-) -> Result<Json<serde_json::Value>, AppError> {
+) -> Result<(CookieJar, Json<serde_json::Value>), AppError> {
     if !ALLOWED_THEMES.contains(&body.theme_preference.as_str()) {
-        return Err(AppError::BadRequest("invalid theme_preference".into()));
+        // AppError::Validation maps to 422 Unprocessable Entity across this
+        // API — there is no BadRequest variant. If you want 400 specifically,
+        // that needs a project-wide error-taxonomy change, not a local edit.
+        return Err(AppError::Validation("invalid theme_preference".into()));
     }
     sqlx::query("UPDATE users SET theme_preference = $1, updated_at = now() WHERE id = $2")
         .bind(&body.theme_preference)
@@ -327,42 +343,74 @@ async fn update_theme(
         .execute(&state.pool)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
-    // Mirror to cookie so FOUC script reads it on next cold load
-    set_theme_cookie(&cookies, &body.theme_preference);
-    Ok(Json(serde_json::json!({ "theme_preference": body.theme_preference })))
+    // Mirror to cookie so FOUC script reads it on next cold load.
+    // `set_theme_cookie` adds to the jar; returning (jar, ...) in the tuple
+    // emits the Set-Cookie header alongside the JSON body.
+    let jar = set_theme_cookie(jar, &body.theme_preference);
+    Ok((jar, Json(serde_json::json!({ "theme_preference": body.theme_preference }))))
 }
 
 // route registration: .route("/auth/me/theme", patch(update_theme))
 ```
 
-**THEME_COOKIE_WRITER** — the FOUC script reads `reverie_theme` cookie
+**THEME_COOKIE_WRITER** — the FOUC script reads the `reverie_theme` cookie
 synchronously. The session cookie (tower-sessions default name `id`) is
 `HttpOnly: true` (`backend/src/main.rs:27–34`), so a **separate** non-HttpOnly
-cookie is required:
+cookie is required. The cookie name is declared as a `pub const` and
+referenced, not re-literalled (see shared-constants tracker UNK-105):
 
 ```rust
-// NEW helper — wherever cookie handling belongs in the crate (likely a new
-// backend/src/auth/theme_cookie.rs or inside routes/auth.rs).
-fn set_theme_cookie(cookies: &tower_cookies::Cookies, value: &str) {
-    use tower_cookies::{Cookie, cookie::time::Duration};
-    let mut cookie = Cookie::new("reverie_theme", value.to_string());
-    cookie.set_path("/");
-    cookie.set_http_only(false); // JS must read it before hydration
-    cookie.set_same_site(tower_cookies::cookie::SameSite::Lax);
-    cookie.set_max_age(Duration::days(365));
-    // No `Secure` — matches session cookie behavior (plain HTTP behind TLS proxy)
-    cookies.add(cookie);
+// NEW: backend/src/auth/theme_cookie.rs
+use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
+use time::Duration;
+
+/// Cookie name for the FOUC theme preference. Duplicated in:
+///   - frontend/index.html inline FOUC script
+///   - frontend/src/lib/theme/cookie.ts
+/// All three MUST agree. Tracked as instance 1 under UNK-105.
+pub const THEME_COOKIE_NAME: &str = "reverie_theme";
+
+pub fn set_theme_cookie(jar: CookieJar, value: &str) -> CookieJar {
+    let cookie = Cookie::build((THEME_COOKIE_NAME, value.to_owned()))
+        .path("/")
+        .http_only(false) // JS must read it before hydration
+        .same_site(SameSite::Lax)
+        .max_age(Duration::days(365))
+        // No `Secure` — matches session cookie behavior (plain HTTP behind TLS proxy)
+        .build();
+    jar.add(cookie)
 }
 ```
 
+Unit test (mandatory — see Testing Strategy section) asserts that the produced
+cookie's name equals `"reverie_theme"` verbatim. This is the enforcement for
+the cross-stack constant; if someone renames the const, this test fails and
+surfaces the drift before it lands.
+
 This helper is also called from the OIDC `callback` handler
 (`backend/src/routes/auth.rs:~143`) right after `auth_session.login(&user)`
-succeeds, seeding the cookie from the DB value on every login.
-
-**SQLX_TEST_HARNESS** — migration + PATCH verification:
+succeeds, seeding the cookie from the DB value on every login. The callback's
+return type changes from `Redirect` to `(CookieJar, Redirect)` — the tuple
+form composes cleanly because `CookieJar` implements `IntoResponseParts`:
 
 ```rust
-// SOURCE: backend/src/models/user.rs:152-186 (upsert test) + backend/src/routes/metadata.rs:643-674 (route test)
+// backend/src/routes/auth.rs — callback handler tail
+let jar = set_theme_cookie(jar, &user.theme_preference);
+Ok((jar, Redirect::temporary("/")))
+```
+
+The callback signature gains `jar: CookieJar` as an extractor alongside the
+existing ones.
+
+**SQLX_TEST_HARNESS** — migration + PATCH verification. Helper signatures
+verified against `backend/src/test_support.rs` (2026-04-23):
+`create_adult_and_basic_auth(&PgPool, &str) -> (Uuid, String)` and
+`server_with_real_pools(&PgPool, &PgPool) -> axum_test::TestServer` — both
+pools required, second is the ingestion pool:
+
+```rust
+// SOURCE: backend/src/models/user.rs:152-186 (upsert test)
+//       + backend/src/routes/metadata.rs:643-674 (route test)
 #[sqlx::test(migrations = "./migrations")]
 async fn theme_preference_migration_applies(pool: sqlx::PgPool) {
     // Verify the column exists with correct default
@@ -377,15 +425,21 @@ async fn theme_preference_migration_applies(pool: sqlx::PgPool) {
 
 #[sqlx::test(migrations = "./migrations")]
 async fn patch_theme_updates_user_row(pool: sqlx::PgPool) {
+    use axum::http::{header::AUTHORIZATION, StatusCode};
     let app_pool = test_support::db::app_pool_for(&pool).await;
-    let (user_id, basic) = test_support::db::create_adult_and_basic_auth(&app_pool).await;
-    let server = test_support::db::server_with_real_pools(&app_pool, /* ingestion */);
+    let ingestion_pool = test_support::db::ingestion_pool_for(&pool).await;
+    let (user_id, basic) =
+        test_support::db::create_adult_and_basic_auth(&app_pool, "theme-test").await;
+    let server = test_support::db::server_with_real_pools(&app_pool, &ingestion_pool);
     let resp = server
         .patch("/auth/me/theme")
         .add_header(AUTHORIZATION, basic)
         .json(&serde_json::json!({"theme_preference": "dark"}))
         .await;
     assert_eq!(resp.status_code(), StatusCode::OK);
+    // Assert the Set-Cookie header was emitted with the canonical name
+    let set_cookie = resp.header("set-cookie").to_str().unwrap().to_owned();
+    assert!(set_cookie.starts_with("reverie_theme="));
     let stored: String = sqlx::query_scalar("SELECT theme_preference FROM users WHERE id = $1")
         .bind(user_id)
         .fetch_one(&app_pool)
@@ -393,11 +447,24 @@ async fn patch_theme_updates_user_row(pool: sqlx::PgPool) {
         .unwrap();
     assert_eq!(stored, "dark");
 }
-```
 
-Use `create_adult_and_basic_auth` (or `create_admin_and_basic_auth` if only
-admin helper exists; check `backend/src/test_support.rs` for the exact
-available function name).
+#[sqlx::test(migrations = "./migrations")]
+async fn patch_theme_rejects_invalid_value(pool: sqlx::PgPool) {
+    use axum::http::{header::AUTHORIZATION, StatusCode};
+    let app_pool = test_support::db::app_pool_for(&pool).await;
+    let ingestion_pool = test_support::db::ingestion_pool_for(&pool).await;
+    let (_user_id, basic) =
+        test_support::db::create_adult_and_basic_auth(&app_pool, "theme-test-invalid").await;
+    let server = test_support::db::server_with_real_pools(&app_pool, &ingestion_pool);
+    let resp = server
+        .patch("/auth/me/theme")
+        .add_header(AUTHORIZATION, basic)
+        .json(&serde_json::json!({"theme_preference": "purple"}))
+        .await;
+    // AppError::Validation → 422 UNPROCESSABLE_ENTITY (NOT 400). See error.rs.
+    assert_eq!(resp.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+```
 
 **FRONTEND_TESTING_HARNESS** — no existing pattern in the repo (first frontend
 test); mirror the Vitest + RTL canonical setup from the docs:
@@ -548,6 +615,60 @@ cookie, trusts the server and updates both cookie and DOM. Every `setPreference`
 call is optimistic (writes cookie + DOM immediately) then PATCHes; on PATCH
 failure it reverts both.
 
+**Cross-tab sync via `BroadcastChannel`**: the provider subscribes to
+`BroadcastChannel('reverie-theme')` on mount and posts the new value on
+successful `setPreference`. On receive, the receiving tab mirrors the value
+to its local state + DOM without re-PATCHing (the originating tab already
+did). This eliminates the "user changes theme in tab A, switches to tab B,
+sees old theme" papercut. `BroadcastChannel` is broadly supported
+(~2017-vintage API, iOS Safari 15.4+, all evergreen browsers); no fallback
+needed for this project.
+
+**SHADCN_COMPONENTS_JSON** — pre-written before `npx shadcn@latest init` so
+the init runs zero-prompt. Defaults chosen 2026-04-23. Path aliases must be
+present in `tsconfig.app.json` (`paths: { "@/*": ["src/*"] }`) and
+`vite.config.ts` (`resolve.alias: { "@": resolve(__dirname, "src") }`) before
+running `init`.
+
+```json
+{
+  "$schema": "https://ui.shadcn.com/schema.json",
+  "style": "new-york",
+  "rsc": false,
+  "tsx": true,
+  "tailwind": {
+    "config": "",
+    "css": "src/index.css",
+    "baseColor": "neutral",
+    "cssVariables": true,
+    "prefix": ""
+  },
+  "aliases": {
+    "components": "@/components",
+    "utils": "@/lib/utils",
+    "ui": "@/components/ui",
+    "lib": "@/lib",
+    "hooks": "@/hooks"
+  },
+  "iconLibrary": "lucide"
+}
+```
+
+Notes on choices:
+- `style: "new-york"` — since shadcn 2.5+ on Tailwind v4, `default` is no longer
+  offered; only `new-york` remains. Locked regardless.
+- `baseColor: "neutral"` — most neutral of the five options; tweakcn output in
+  D3.7 overwrites initial colour values, so the choice is about what shadcn
+  writes on init, not the final palette.
+- `tailwind.config: ""` — Tailwind v4 has no JS config file; theme is CSS-side.
+- `cssVariables: true` — required for the `[data-theme]` runtime swap pattern.
+- `rsc: false` — this is a Vite SPA, not Next.js. Flipping later if we
+  migrate to a meta-framework is the smallest part of that migration.
+- `iconLibrary: "lucide"` — ~1,500 icons covering reading-app vocabulary
+  (book, bookmark, library, scroll, glasses, notebook, pen, quote,
+  highlighter). Radix Icons' ~300 would hit the wall in hero screens.
+- Aliases match `frontend/CLAUDE.md` project structure exactly.
+
 **DEV_ROUTE_TREE_SHAKING** — the gating mechanism for `/design/*`:
 
 ```typescript
@@ -607,11 +728,12 @@ Backend (small):
 
 | File | Action | Why |
 |---|---|---|
-| `backend/migrations/20260422000001_add_theme_preference.up.sql` | CREATE | Add column, mirror `add_session_version` pattern |
-| `backend/migrations/20260422000001_add_theme_preference.down.sql` | CREATE | Rollback |
+| `backend/Cargo.toml` | UPDATE | Add `axum-extra = { version = "0.10", features = ["cookie"] }` direct dep (tower-cookies is transitive via axum-login; we use axum-extra's `CookieJar` for the typed extractor + response pattern that composes with `Redirect`) |
+| `backend/migrations/{today}000001_add_theme_preference.up.sql` | CREATE | Add column, mirror `add_session_version` pattern. Filename timestamp from `date +%Y%m%d000001` at write-time. |
+| `backend/migrations/{today}000001_add_theme_preference.down.sql` | CREATE | Rollback |
 | `backend/src/models/user.rs` | UPDATE | `USER_COLUMNS` constant + `User` struct + `UserRow` (if separate) gain `theme_preference: String` |
-| `backend/src/routes/auth.rs` | UPDATE | `me` handler adds field to JSON; new `update_theme` handler; cookie write in `callback` after login |
-| `backend/src/auth/theme_cookie.rs` | CREATE (or inline in auth.rs) | `set_theme_cookie` helper |
+| `backend/src/routes/auth.rs` | UPDATE | `me` handler adds field to JSON; new `update_theme` handler using `CookieJar` tuple return; OIDC `callback` signature gains `jar: CookieJar` and returns `(CookieJar, Redirect)` after seeding the theme cookie post-login |
+| `backend/src/auth/theme_cookie.rs` | CREATE | `THEME_COOKIE_NAME` const + `set_theme_cookie(jar, value) -> CookieJar` helper |
 | `backend/src/models/user.rs` or `backend/src/models/theme.rs` | UPDATE/CREATE | `ALLOWED_THEMES` constant |
 | `backend/tests/...` or inline `#[sqlx::test]` | CREATE | Migration smoke + PATCH integration tests |
 
@@ -768,7 +890,17 @@ Docs:
   ```
 - **VALIDATE:** Docs site build (`cd docs && npm run build`) succeeds after sidebar update in D3
 
-**D0 Exit Gate:** `npm test` green, deps visible in package.json, TDD scope documented.
+**Task D0.11 — Verify cookie middleware integration end-to-end**
+
+- **ACTION:** Add `axum-extra = { version = "0.10", features = ["cookie"] }` as a direct dep in `backend/Cargo.toml`.
+- **ACTION:** Write two throwaway test handlers in a temporary branch of the router (or as `#[sqlx::test]` harness fixtures):
+  1. `GET /_test/cookie-ok` — returns `(jar.add(Cookie::new("test_ok", "1")), StatusCode::OK)`
+  2. `GET /_test/cookie-redirect` — returns `(jar.add(Cookie::new("test_redirect", "1")), Redirect::temporary("/"))`
+- **ACTION:** Integration tests via `axum_test::TestServer` assert BOTH responses include the expected `Set-Cookie` header.
+- **RATIONALE:** The entire design-system backend sliver (theme PATCH + OIDC callback cookie write + FOUC seed) depends on `CookieJar` working as an extractor and returnable type. Verify the contract works for both OK and Redirect responses BEFORE starting D3.5. Failing fast here is the whole point of D0.
+- **VALIDATE:** Both tests pass. Remove the throwaway routes before exiting D0 (or roll them into a `#[cfg(test)]` module that never registers them outside tests).
+
+**D0 Exit Gate:** `npm test` green, `cargo test` green (including the cookie-middleware verification), deps visible in package.json + Cargo.toml, TDD scope documented.
 
 ---
 
@@ -837,16 +969,20 @@ two) clearly wins. **Record the decision in a short note at the top of
 
 **Task D3.2 — Create the theme-preference migration**
 
-- **ACTION:** Create `backend/migrations/20260422000001_add_theme_preference.up.sql` with `ALTER TABLE users ADD COLUMN theme_preference TEXT NOT NULL DEFAULT 'system';`
-- **ACTION:** Create `20260422000001_add_theme_preference.down.sql` with `ALTER TABLE users DROP COLUMN theme_preference;`
+- **ACTION:** Generate the migration timestamp at write-time: `STAMP=$(date +%Y%m%d000001)`. Create `backend/migrations/${STAMP}_add_theme_preference.up.sql` with `ALTER TABLE users ADD COLUMN theme_preference TEXT NOT NULL DEFAULT 'system';`
+- **ACTION:** Create `${STAMP}_add_theme_preference.down.sql` with `ALTER TABLE users DROP COLUMN theme_preference;`
 - **MIRROR:** `backend/migrations/20260414000001_add_session_version.*` verbatim
 - **VALIDATE:** `cd backend && sqlx migrate run` succeeds against a fresh DB; `sqlx migrate revert` cleanly reverts
 
 **Task D3.3 — Extend the user model**
 
-- **ACTION:** Add `theme_preference` to `USER_COLUMNS` in `backend/src/models/user.rs:7-8`; add `pub theme_preference: String` to the `User` struct and `UserRow` mapping if they're separate
-- **ACTION:** Add `const ALLOWED_THEMES: &[&str] = &["system", "light", "dark"];` (location: same file, near the struct)
-- **VALIDATE:** `cargo build -p reverie` succeeds; existing user tests still pass
+- **ACTION:** Make all four edits per the `USER_MODEL_COLUMN_ADDITION` pattern:
+  1. Append `theme_preference` to `USER_COLUMNS` constant (`backend/src/models/user.rs:7-8`)
+  2. Add `theme_preference: String` field to `UserRow` struct (line 11)
+  3. Add `pub theme_preference: String` field to `User` struct (line 24)
+  4. Add `theme_preference: row.theme_preference,` to `From<UserRow> for User` impl (line 39)
+- **ACTION:** Add `const ALLOWED_THEMES: &[&str] = &["system", "light", "dark"];` (location: `backend/src/auth/theme_cookie.rs` alongside `THEME_COOKIE_NAME`, or near the PATCH handler in `routes/auth.rs` — pick one location, don't duplicate)
+- **VALIDATE:** `cargo build -p reverie-api` succeeds; existing user tests still pass. Missing any of the four edits produces a clear compile error.
 
 **Task D3.4 — Update `/auth/me` response**
 
@@ -855,20 +991,30 @@ two) clearly wins. **Record the decision in a short note at the top of
 
 **Task D3.5 — Implement `PATCH /auth/me/theme`**
 
-- **ACTION:** See "PATCH_HANDLER_SHAPE" pattern. Register route in `routes::auth::router()`: `.route("/auth/me/theme", patch(update_theme))`
-- **ACTION:** Add `set_theme_cookie` helper (see "THEME_COOKIE_WRITER"). Confirm the crate already depends on `tower-cookies` or add it (mirror existing auth-related deps in `backend/Cargo.toml`)
-- **ACTION:** Call `set_theme_cookie` inside the OIDC `callback` handler immediately after `auth_session.login(&user)` succeeds, using `user.theme_preference`
-- **VALIDATE:** Integration test patching the preference and asserting:
-  1. The column is updated
-  2. The response body echoes the new value
-  3. The `reverie_theme` cookie is in the `Set-Cookie` response header
+- **ACTION:** Create `backend/src/auth/theme_cookie.rs` with `THEME_COOKIE_NAME` const and `set_theme_cookie(jar, value) -> CookieJar` helper per "THEME_COOKIE_WRITER" pattern. `axum-extra` dep was added in D0.11.
+- **ACTION:** Append `update_theme` handler to `backend/src/routes/auth.rs` per "PATCH_HANDLER_SHAPE" pattern — signature takes `jar: CookieJar`, returns `(CookieJar, Json<_>)`, validates against `ALLOWED_THEMES`, uses `AppError::Validation` (not `BadRequest` — see the pattern's inline comment).
+- **ACTION:** Register route in `routes::auth::router()`: `.route("/auth/me/theme", patch(update_theme))`
+- **ACTION:** Update the OIDC `callback` handler (`backend/src/routes/auth.rs:68–152`):
+  - Extractor list gains `jar: CookieJar`
+  - Return type changes from `impl IntoResponse` to `(CookieJar, Redirect)`
+  - Immediately after `auth_session.login(&user)` succeeds, call `let jar = set_theme_cookie(jar, &user.theme_preference);`
+  - Final return becomes `Ok((jar, Redirect::temporary("/")))`
+- **ACTION:** Unit-test `set_theme_cookie` in isolation — given a fresh `CookieJar` and the value `"dark"`, assert the returned jar's cookie has name `THEME_COOKIE_NAME` (string-compared to `"reverie_theme"` so a rename of the const fails the test), `http_only = false`, `same_site = Lax`, `path = "/"`, `max_age` equals one year. This test is the enforcement for cookie-name drift across the three locations tracked in UNK-105.
+- **VALIDATE:** Integration test (see `SQLX_TEST_HARNESS` pattern — two test cases provided there covering the happy path and invalid-value rejection):
+  1. Happy path: PATCH with `{"theme_preference": "dark"}` returns 200, column is updated, `Set-Cookie: reverie_theme=dark` present in response
+  2. Rejection: PATCH with `{"theme_preference": "purple"}` returns **422** (`AppError::Validation`), no row modified
+- **NOTE:** End-to-end OIDC callback success-path test (including "Set-Cookie includes reverie_theme") is tracked separately under [UNK-104](https://linear.app/unkos/issue/UNK-104) — requires `wiremock` + signed-ID-token scaffolding that doesn't yet exist in the project. Don't bundle that work into this PR.
 
-**Task D3.6 — Init shadcn/ui via CLI**
+**Task D3.6 — Init shadcn/ui via CLI (zero-prompt)**
 
-- **ACTION:** `cd frontend && npx shadcn@latest init` — select the Vite template; pick a base colour placeholder (can be overridden in Task D3.7); accept default aliases (`@/components`, `@/lib/utils`)
-- **ACTION:** Verify `frontend/components.json`, `frontend/src/lib/utils.ts`, updated `index.css`, and `tsconfig*.json` path aliases were generated
+- **ACTION (path aliases, prerequisite):** Before running `shadcn init`, add path aliases:
+  - `frontend/tsconfig.app.json`: add `"baseUrl": "."` and `"paths": { "@/*": ["src/*"] }` to `compilerOptions`
+  - `frontend/vite.config.ts`: add `resolve: { alias: { "@": path.resolve(__dirname, "src") } }` (import `path` from `node:path`)
+- **ACTION (pre-write `components.json`):** Write `frontend/components.json` with the contents from the `SHADCN_COMPONENTS_JSON` pattern BEFORE running init. Pre-writing the config means shadcn's init is zero-prompt (no stdin interaction).
+- **ACTION:** `cd frontend && npx shadcn@latest init --yes` — picks up the pre-written `components.json`. Init generates `src/lib/utils.ts` (the `cn` helper) and updates `src/index.css`.
 - **GOTCHA (Feb 2026 unified package):** the current shadcn CLI generates components that import from the unified `radix-ui` package rather than individual `@radix-ui/react-*` modules. Expect one big `radix-ui` dep in `package.json` instead of many `@radix-ui/react-*` entries — this is correct, not a bug.
-- **VALIDATE:** `npm run build` succeeds; `npm run lint` passes
+- **FALLBACK:** If `--yes` does not skip all prompts in the installed CLI version, run `npx shadcn@latest init --help` first and capture the current non-interactive flag set; adjust accordingly. Do NOT run interactive init — it blocks on stdin in CI/agent contexts.
+- **VALIDATE:** `npm run build` succeeds; `npm run lint` passes; `@/components/...` and `@/lib/utils` imports resolve correctly in a test file.
 
 **Task D3.7 — Commit Tailwind v4 multi-theme CSS**
 
@@ -878,15 +1024,16 @@ two) clearly wins. **Record the decision in a short note at the top of
 
 **Task D3.8 — Add shadcn primitives**
 
-- **ACTION:** Install the Step 11 primitive set via CLI. `combobox` is **not** a standalone shadcn primitive — it is a composed pattern built from `command` + `popover` + `cmdk`. Install as follows:
-  ```
-  npx shadcn@latest add button input label select command popover \
+- **ACTION:** Install the Step 11 primitive set via CLI non-interactively. `combobox` is **not** a standalone shadcn primitive — it is a composed pattern built from `command` + `popover` + `cmdk`. Pass `--yes` to skip confirmation prompts:
+  ```bash
+  npx shadcn@latest add --yes \
+    button input label select command popover \
     radio-group checkbox switch card dialog alert-dialog sheet table tabs \
     sonner tooltip dropdown-menu form avatar badge separator skeleton \
     scroll-area
   ```
   (Notes: `sonner` is the Toast primitive in current shadcn; `command` + `popover` compose into Combobox — see [shadcn Combobox docs](https://ui.shadcn.com/docs/components/combobox) for the composition pattern.)
-- **ACTION:** If `Form` requires `react-hook-form`, `zod`, `@hookform/resolvers`, shadcn CLI offers to install them — accept. `command` pulls in `cmdk`.
+- **ACTION:** If `--yes` does not auto-accept peer-dep installation prompts (`react-hook-form`, `zod`, `@hookform/resolvers` for Form; `cmdk` for command), manually `npm install react-hook-form zod @hookform/resolvers cmdk` first and re-run `add --yes`.
 - **VALIDATE:** All files appear under `frontend/src/components/ui/`; `npm run build` succeeds
 
 **Task D3.9 — Restyle every primitive against the token system**
@@ -900,10 +1047,11 @@ two) clearly wins. **Record the decision in a short note at the top of
 - **ACTION:** Create `frontend/src/lib/theme/{ThemeProvider.tsx,cookie.ts,api.ts}` per "THEME_PROVIDER" pattern
 - **ACTION:** Create `frontend/src/components/theme-switcher.tsx` — uses `DropdownMenu` primitive with System / Light / Dark options
 - **ACTION:** Mount `<ThemeProvider>` in `frontend/src/main.tsx` wrapping `<RouterProvider>`
+- **ACTION (cross-tab sync, C3):** Inside `ThemeProvider`, create a `BroadcastChannel('reverie-theme')` in a `useEffect` on mount (close on unmount). On successful `setPreference` (after the PATCH resolves), post the new preference to the channel. On receive, mirror the value to local state + DOM + cookie WITHOUT triggering another PATCH (the originating tab already did). This eliminates the cross-tab-drift papercut.
 - **ACTION:** TDD — write these tests FIRST per D0 TDD scope (see Testing Strategy section):
   - `cookie.test.ts`: round-trip parse/write, malformed cookie handling
-  - `ThemeProvider.test.tsx`: initial resolution from `document.documentElement.dataset.theme`; reconciliation with server value on mount; optimistic update + rollback on PATCH failure; `system` preference reacts to `prefers-color-scheme` media query change
-- **VALIDATE:** `npm test` all green; `/design/system` theme-switcher cycles through states
+  - `ThemeProvider.test.tsx`: initial resolution from `document.documentElement.dataset.theme`; reconciliation with server value on mount; optimistic update + rollback on PATCH failure; `system` preference reacts to `prefers-color-scheme` media query change; **BroadcastChannel message from another tab updates state without triggering a PATCH**
+- **VALIDATE:** `npm test` all green; `/design/system` theme-switcher cycles through states; manually open two tabs, change theme in one, verify the other updates without reload
 
 **Task D3.11 — Component gallery at `/design/system`**
 
@@ -911,7 +1059,7 @@ two) clearly wins. **Record the decision in a short note at the top of
 - **ACTION:** Wire the route via the dynamic-import pattern (Task D3.12)
 - **VALIDATE:** `npm run dev`, navigate to `/design/system`, manually toggle theme, every primitive renders correctly in both
 
-**Task D3.12 — Dev-only route tree + dynamic gating**
+**Task D3.12 — Dev-only route tree + dynamic gating + structural bundle gate**
 
 - **ACTION:** Create `frontend/src/routes/design.tsx` exporting `designRoutes` (array of `RouteObject`)
 - **ACTION:** In `main.tsx` (or a `routeTree.ts`), gate via:
@@ -922,12 +1070,30 @@ two) clearly wins. **Record the decision in a short note at the top of
     routes.push(...designRoutes);
   }
   ```
-- **VALIDATE:** `npm run build && grep -rEq "/design/(system|hero)|ComponentGallery|HeroBook|HeroLibrary" frontend/dist/` exits non-zero (no match)
+- **ACTION (structural bundle gate):** In `frontend/vite.config.ts`, configure `build.rollupOptions.output.manualChunks` to route all design-tree modules into a dedicated `design` chunk:
+  ```typescript
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('/src/routes/design/') ||
+              id.includes('/src/pages/design/')) {
+            return 'design';
+          }
+        },
+      },
+    },
+  },
+  ```
+  In production mode, Vite tree-shakes the entire `design-*` chunk because `import.meta.env.DEV` is replaced with the literal `false` and the `if`-branch is dead code. No `design-*.js` is emitted. In dev mode the chunk is emitted because the branch executes.
+- **VALIDATE (structural, not substring):** `npm run build && test -z "$(ls frontend/dist/assets/design-*.js 2>/dev/null)"` exits zero (no chunk emitted). Substring grep against minified output is unreliable (Vite mangles names); this check is against the build manifest structure.
 
 **Task D3.13 — Inline FOUC script in `index.html`**
 
 - **ACTION:** Inject the "FOUC_INLINE_SCRIPT" block in `frontend/index.html` between `<meta charset>` and `<link rel=icon>`; update `<title>Reverie</title>`
-- **VALIDATE:** Manual — set `reverie_theme=dark` cookie, hard-reload, open devtools, confirm `<html data-theme="dark">` is set before any React mount event. Disable JS entirely: `data-theme` is still set by the inline script; the catch block path is covered by adding a test with a malformed cookie string.
+- **VALIDATE (happy path):** Set `reverie_theme=dark` cookie, hard-reload, open devtools, confirm `<html data-theme="dark">` is set before any React mount event.
+- **VALIDATE (catch-block path):** Set `reverie_theme=<malformed>` (e.g. `reverie_theme=` with a control character, or `reverie_theme=javascript:alert(1)`), hard-reload, confirm `<html data-theme="light">` (the try/catch fallback). The catch branch handles malformed-cookie cases at runtime; JS-disabled is out of scope (the entire app is React; unstyled no-JS rendering is not a supported configuration).
+- **NOTE (CSP dependency):** Under CSP (tracked in UNK-106), this script tag will gain a `nonce="{nonce}"` attribute, requiring backend templating of `index.html`. The inline script *content* stays the same. Revisit this task during the CSP resume.
 
 **Task D3.14 — ESLint + Stylelint hex bans**
 
@@ -940,18 +1106,19 @@ two) clearly wins. **Record the decision in a short note at the top of
     }],
   },
   ```
-- **ACTION:** Install Tailwind v4-aware Stylelint syntax support + standard config:
-  ```
-  npm install -D stylelint-config-standard @dreamsicle.io/stylelint-config-tailwindcss
-  ```
-  Without the `@dreamsicle.io/stylelint-config-tailwindcss` extends, Stylelint 16's CSS parser false-positives on `@theme`, `@custom-variant`, `@layer`, `@utility` as "unknown at-rules".
+- **ACTION (Stylelint, first-party only):** `npm install -D stylelint stylelint-config-standard`. Do NOT install any third-party Tailwind-aware Stylelint config — the false-positives on Tailwind v4 at-rules are resolved via the built-in `at-rule-no-unknown` ignore list.
 - **ACTION:** Create `frontend/.stylelintrc.json`:
   ```json
   {
-    "extends": [
-      "stylelint-config-standard",
-      "@dreamsicle.io/stylelint-config-tailwindcss"
-    ],
+    "extends": ["stylelint-config-standard"],
+    "rules": {
+      "at-rule-no-unknown": [true, {
+        "ignoreAtRules": [
+          "theme", "custom-variant", "layer", "utility",
+          "apply", "config", "tailwind", "source", "variant"
+        ]
+      }]
+    },
     "overrides": [
       {
         "files": ["src/**/*.css", "!src/styles/themes/**/*.css"],
@@ -960,13 +1127,27 @@ two) clearly wins. **Record the decision in a short note at the top of
     ]
   }
   ```
-  The negated glob exempts theme token files where canonical hex values live; `color-no-hex` is built-in to Stylelint 16 (no separate plugin needed).
-- **ACTION:** Add TDD fixtures — two small test files that the lint runs over:
-  - `src/__tests__/fixtures/hex-ban.fixture.tsx` with `const c = "#abc123";` (expected to fail lint)
-  - `src/__tests__/fixtures/hex-ban.allowed.tsx` with no hex literals (expected to pass)
-  - Test runner: a tiny Vitest test that spawns `eslint --no-eslintrc -c …` on each fixture and asserts expected exit behaviour. Alternative: run inside a lint step, snapshot the report.
+  The negated glob exempts theme token files where canonical hex values live; `color-no-hex` is built-in to Stylelint 16. If Tailwind adds a new at-rule in a future release, append it to `ignoreAtRules` — one-line change per Tailwind release (rare).
+- **ACTION (rule-correctness test, in-process):** Test the ESLint hex-ban rule via ESLint's own `RuleTester` — no subprocess spawn, no fixture files:
+  ```typescript
+  // frontend/src/__tests__/hex-ban.test.ts
+  import { RuleTester } from 'eslint';
+  import rule from '../../eslint-rules/no-restricted-syntax'; // or import the config rule set
+  const tester = new RuleTester({ languageOptions: { ecmaVersion: 2022, sourceType: 'module' } });
+  tester.run('hex-ban', rule, {
+    valid: [
+      { code: 'const c = "hello";' },
+      { code: 'const c = bgSurface;' },
+    ],
+    invalid: [
+      { code: 'const c = "#abc123";', errors: 1 },
+      { code: 'const c = "#fff";', errors: 1 },
+    ],
+  });
+  ```
+  In-process, millisecond runtime, deterministic cross-platform. No `.fixture.tsx` files, no `spawn('eslint', …)`.
 - **ACTION:** Tighten CI (D0.9): remove `|| true` on the stylelint step; add `npx eslint src --max-warnings 0` if not already covered by `npm run lint`
-- **VALIDATE:** `npx stylelint 'src/**/*.css' --max-warnings 0` and `npm run lint` both exit 0; deliberately introduce a hex literal in a non-theme file — both fail as expected; revert
+- **VALIDATE:** `npx stylelint 'src/**/*.css' --max-warnings 0` and `npm run lint` both exit 0; deliberately introduce a hex literal in a non-theme file — both fail as expected; revert. `npm test` runs the `RuleTester`-based hex-ban test in under 100ms.
 
 **Task D3.15 — Motion + state tokens**
 
@@ -994,6 +1175,9 @@ two) clearly wins. **Record the decision in a short note at the top of
 **Task D3.18 — Canonicalise in `docs/design/visual-identity.md`**
 
 - **ACTION:** Create `docs/src/content/docs/design/visual-identity.md` with sections: Tokens (full list), Type Scale, Spacing, Motion, State Philosophy (empty/loading/error), Theme Architecture
+- **ACTION (Theme Architecture content):** Include explicit notes:
+  - "Cookie name `reverie_theme` is referenced in three places: `backend/src/auth/theme_cookie.rs` (`THEME_COOKIE_NAME` const), `frontend/index.html` inline FOUC script, `frontend/src/lib/theme/cookie.ts`. All three MUST change together. The backend unit test on `set_theme_cookie` enforces the backend side; cross-stack drift is tracked in [UNK-105](https://linear.app/unkos/issue/UNK-105)."
+  - "FOUC avoidance requires an inline `<script>` in `index.html`. Under CSP (tracked in [UNK-106](https://linear.app/unkos/issue/UNK-106)), this requires a per-request nonce attribute matching the `script-src` directive in the CSP header — implemented via backend templating of `index.html`. Until CSP lands the script tag has no nonce; revisit on CSP completion."
 - **ACTION:** Update `docs/astro.config.mjs` sidebar:
   ```javascript
   {
@@ -1014,7 +1198,7 @@ two) clearly wins. **Record the decision in a short note at the top of
 
 **D3 Exit Gate:** Gallery complete; both themes pass WCAG AA; a11y clean;
 no primitive shows stock shadcn DNA; production bundle free of `/design` code
-(CI grep gate passes).
+(structural manualChunks gate passes — no `design-*.js` in `dist/assets/`).
 
 ---
 
@@ -1063,14 +1247,19 @@ responsive; Lighthouse > 90; axe-core clean.
 | Test file | Test cases | Validates |
 |---|---|---|
 | `frontend/src/lib/theme/__tests__/cookie.test.ts` | parse missing / malformed / well-formed; write; round-trip | Cookie helper correctness |
-| `frontend/src/lib/theme/__tests__/ThemeProvider.test.tsx` | initial resolution from `data-theme` attribute; fetch-me reconciliation; optimistic setter + PATCH success; optimistic setter + PATCH failure (rollback); `system` preference reacts to `matchMedia` change | Theme state machine |
+| `frontend/src/lib/theme/__tests__/ThemeProvider.test.tsx` | initial resolution from `data-theme` attribute; fetch-me reconciliation; optimistic setter + PATCH success; optimistic setter + PATCH failure (rollback); `system` preference reacts to `matchMedia` change; **BroadcastChannel message from another tab updates state without triggering a PATCH** | Theme state machine + cross-tab sync |
 | `frontend/src/components/__tests__/theme-switcher.test.tsx` | renders three options; selecting calls `setPreference`; disabled state when mutation pending | UI behaviour |
-| `frontend/src/__tests__/hex-ban.test.ts` | runs ESLint against fixtures — `.fixture.tsx` fails, `.allowed.tsx` passes | Lint rule fixtures |
-| `backend/src/routes/auth.rs` tests (inline `#[sqlx::test]`) | migration adds column with default 'system'; `GET /auth/me` includes field; `PATCH /auth/me/theme` with valid body updates row + sets cookie; invalid body returns 400 | Backend contract |
+| `frontend/src/__tests__/hex-ban.test.ts` | ESLint `RuleTester` (in-process, no subprocess): valid cases pass, hex-literal cases fail with the expected message | Lint rule correctness |
+| `backend/src/auth/theme_cookie.rs` unit test | `set_theme_cookie(jar, "dark")` produces a cookie with name `"reverie_theme"` (verbatim string compare — enforces UNK-105 cross-stack const), `http_only = false`, `same_site = Lax`, `path = "/"`, `max_age = 365 days` | Cookie helper correctness + cross-stack name drift guard |
+| `backend/src/routes/auth.rs` tests (inline `#[sqlx::test]`) | migration adds column with default `'system'`; `GET /auth/me` includes the field; `PATCH /auth/me/theme` with valid body returns 200, updates row, emits `Set-Cookie: reverie_theme=…`; invalid body returns **422** (`AppError::Validation`) and does not modify the row | Backend contract |
+| `backend/_test/cookie-{ok,redirect}` integration (D0.11; throwaway routes) | `CookieJar` extractor + tuple return emits `Set-Cookie` for both `OK` and `Redirect` responses | Cookie middleware integration verified BEFORE D3.5 |
+
+OIDC callback successful-flow test (asserting `Set-Cookie: reverie_theme=…`
+after login) is tracked separately under [UNK-104](https://linear.app/unkos/issue/UNK-104).
 
 ### Integration Tests (in D3 scope)
 
-- Production build grep gate (CI): `grep -rEq "/design/(system|hero)|ComponentGallery|HeroBook|HeroLibrary" frontend/dist/` exits non-zero
+- Production build structural gate (CI): `npm run build && test -z "$(ls frontend/dist/assets/design-*.js 2>/dev/null)"` exits zero (no `design-*` chunk emitted in production)
 - axe-core on `/design/system` + both hero routes
 - Lighthouse (manual) on `/design/hero/library`
 
@@ -1080,9 +1269,9 @@ responsive; Lighthouse > 90; axe-core clean.
 - [ ] Malformed cookie value (e.g. `reverie_theme=bogus`) → FOUC script's catch falls back to `light`
 - [ ] `system` preference + OS theme change mid-session → effective theme updates without reload
 - [ ] Logged-out visitor → no `/auth/me` call fails provider init (provider detects 401 and stays on cookie value)
-- [ ] Two tabs open, theme changed in one → other tab eventually reconciles (cookie is the single source; tab 2 reconciles on next navigation or explicit sync)
+- [ ] Two tabs open, theme changed in one → BroadcastChannel propagates the change to the other tab in real time (no reload required)
 - [ ] Logout → session cookie cleared; `reverie_theme` cookie persists (user's device preference, not session state)
-- [ ] Invalid theme in PATCH body → 400, no row modified
+- [ ] Invalid theme in PATCH body → 422 (`AppError::Validation`), no row modified
 - [ ] Revert migration mid-development → row data loss (acceptable pre-release per repo memory)
 
 ---
@@ -1092,13 +1281,14 @@ responsive; Lighthouse > 90; axe-core clean.
 See BLUEPRINT.md Step 10 § Verification (lines 1822–1856) — already updated by
 this plan's adversarial-review pass to include:
 
-- `cargo test` (includes new `#[sqlx::test]`s)
+- `cargo test` (includes new `#[sqlx::test]`s + the `set_theme_cookie` unit test + the D0.11 cookie-middleware verification)
 - `cargo clippy -- -D warnings`
 - `npm run build && npm run lint && npm test -- --run`
 - `npx @axe-core/cli` against `/design/system`, `/design/hero/library`, `/design/hero/book`
 - `npx eslint frontend/src --max-warnings 0` + `npx stylelint "frontend/src/**/*.css" --max-warnings 0`
-- Production bundle gate (exits non-zero on leakage) — see BLUEPRINT lines 1837–1841
-- Manual cold-load FOUC check + Lighthouse audit
+- Production bundle structural gate: `npm run build && test -z "$(ls frontend/dist/assets/design-*.js 2>/dev/null)"` exits zero (no `design-*` chunk in production output)
+- Manual cold-load FOUC check (happy path + malformed-cookie path) + Lighthouse audit
+- Manual two-tab cross-tab theme sync check (BroadcastChannel)
 
 ---
 
@@ -1109,15 +1299,17 @@ Mirrors BLUEPRINT Step 10 Exit Criteria (lines 1859–1870):
 - [ ] `docs/design/philosophy.md` captures emotional target, anti-patterns, usage context
 - [ ] `docs/design/visual-identity.md` is the canonical spec: tokens, type scale, spacing, motion, state philosophy, theme architecture
 - [ ] Dark + Light themes implemented as CSS variable overrides under `[data-theme]`; theme switcher works; preference persists across reload and across devices (DB + cookie)
+- [ ] Cross-tab theme changes propagate in real time via `BroadcastChannel('reverie-theme')`
 - [ ] shadcn primitives installed and restyled — none show stock shadcn visual DNA
 - [ ] `/design/system` route shows every primitive in every state; both themes
 - [ ] `/design/hero/library` and `/design/hero/book` render at production fidelity
 - [ ] WCAG 2.2 AA contrast in both themes (axe-core + manual)
-- [ ] ESLint + Stylelint block arbitrary hex codes; fixture tests exercise both rules
+- [ ] ESLint blocks raw hex literals in `.tsx` (verified by in-process `RuleTester` test); Stylelint blocks raw hex in `.css` outside `src/styles/themes/**`
 - [ ] Crosscheck (Opus + Gemini) passes on design artefacts and hero screens
 - [ ] Architecture supports unlimited themes (proven via D3.19 smoke test)
-- [ ] First paint on cold load matches stored theme preference — no FOUC
-- [ ] CI bundle-leak grep gate exits non-zero on any `/design/*` code in `dist/`
+- [ ] First paint on cold load matches stored theme preference — no FOUC; malformed-cookie path falls back to `light`
+- [ ] CI structural bundle gate: no `design-*.js` chunk in `frontend/dist/assets/` in production builds
+- [ ] `set_theme_cookie` unit test enforces the canonical `"reverie_theme"` cookie name (UNK-105 cross-stack drift guard)
 
 ---
 
@@ -1126,11 +1318,10 @@ Mirrors BLUEPRINT Step 10 Exit Criteria (lines 1859–1870):
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | shadcn restyle work blows up scope (23 primitives × many states) | MED | MED | Restyle in batches; set a bounded-ambition rule: kill stock shadcn *visual* DNA (spacing/radius/colour), keep structural classes; if a primitive needs invasive rework, log it and defer to Step 11 |
-| Tailwind v4 `@theme inline` semantics differ subtly across minor versions | LOW | MED | Pin Tailwind version in `package.json`; verify every utility generates correctly by eyeballing `/design/system` after each batch |
+| Tailwind v4 `@theme inline` semantics differ subtly across minor versions | LOW | MED | `package-lock.json` is committed and CI uses `npm ci`, so builds are version-reproducible. Renovate (already running on this repo) opens reviewable PRs for any Tailwind minor/major bump — semantic changes to `@theme inline` would surface there before merging. Verify utility generation by eyeballing `/design/system` after each batch. |
 | FOUC script breaks on older browsers | LOW | LOW | Plain ES5, try/catch fallback to `light`; no modern APIs required |
-| Cross-tab theme drift confuses users | LOW | LOW | Document as "expected — changes propagate on next navigation"; not a bug. Store-sync via `BroadcastChannel` is post-MVP polish |
 | `@theme inline` prevents Tailwind from generating some utilities that reference unresolved runtime values | LOW | MED | If discovered during D3.9, fall back to split utilities (stable tokens in `@theme`, runtime-swapped values in component classes via `var()`) — documented in shadcn Tailwind v4 guide |
-| Vite dev proxy misconfigures cookie domain | LOW | HIGH | `changeOrigin: true` is load-bearing; test by inspecting `document.cookie` after login — if session cookie appears, theme cookie will too |
+| Vite dev proxy misconfigures cookie domain | LOW | HIGH | `changeOrigin: true` is load-bearing; test by inspecting `document.cookie` after login — if session cookie appears, theme cookie will too. **CSP caveat:** UNK-106 will likely have backend serve `index.html` (for nonce templating), which changes the dev topology. Re-validate the proxy + cookie behaviour during the CSP-driven plan refresh. |
 | Crosscheck fails at D5 on a high-cost iteration loop | MED | HIGH | Don't run crosscheck on a broken build — walk the exit gates at D3 and D4 manually first; iterate D3/D4 tightly before invoking D5 |
 | Migration revert in production loses user theme preferences | LOW (pre-release) | LOW | Acknowledged in BLUEPRINT rollback; pre-release schema is mutable per repo memory |
 | Third-party font licensing overlooked during D2/D3 font selection | LOW | HIGH | Constrain font choice to SIL OFL / Apache 2.0 / `@fontsource` catalogue (all bundled fonts are explicitly licensed) |
@@ -1157,13 +1348,15 @@ blocked.
 
 ## Confidence Score
 
-**7/10** for one-pass implementation success.
+**8/10** for one-pass implementation success (post-2026-04-23 adversarial review;
+plan parked pending UNK-106).
 
-**Rationale for 7:**
+**Rationale for 8:**
 
-- **Confident** on the backend sliver (migration, `USER_COLUMNS` update, `/auth/me` extension, PATCH handler) — direct mirror of an established pattern, no RLS complication, existing test harness.
-- **Confident** on the infrastructure (Vitest harness, Vite proxy, CI updates, ESLint/Stylelint, shadcn init, Tailwind v4 multi-theme structure) — well-documented external patterns, Context7 has verified shadcn v4 + Tailwind v4 support.
+- **Confident** on the backend sliver (migration, four-point `User` model edit, `/auth/me` extension, PATCH handler with `axum-extra::CookieJar` tuple return) — direct mirror of an established pattern, no RLS complication, existing test harness, helper signatures verified.
+- **Confident** on the infrastructure (Vitest harness, Vite proxy, CI updates, ESLint `RuleTester` + Stylelint built-in at-rule list, pre-written `components.json` for zero-prompt shadcn init, Tailwind v4 multi-theme structure, structural manualChunks bundle gate) — well-documented external patterns, all major load-bearing decisions verified during review.
 - **Medium confidence** on D3 primitive restyling — the task list is concrete but the *volume* of primitives × states is significant and design quality is subjective. Crosscheck at D5 is the safety net.
 - **Medium confidence** on D1/D2 creative phases — these are deliberately open-ended. The plan cannot drive them to a single answer; exit gates rely on human review.
-- **Two load-bearing assumptions** to verify early: (a) `tower-cookies` is either a dep or trivially addable alongside `tower-sessions` (verify from `backend/Cargo.toml` before D3.5); (b) the `axum-login` callback exposes the cookie jar in a way compatible with writing a sibling cookie (verify by reading `callback` source in D3.5 prep).
+- **Verified load-bearing assumptions** (during 2026-04-23 review): `axum-extra::CookieJar` is the correct mechanism (no `CookieManagerLayer` mounting question, composes with `Redirect` via tuple return); helper signatures `create_adult_and_basic_auth(pool, name)` and `server_with_real_pools(app_pool, ingestion_pool)` confirmed in `backend/src/test_support.rs`; `AppError::Validation` (422) confirmed as the project's chosen error variant for input validation (no `BadRequest`).
 - **Known unknowns:** tweakcn export format compatibility with `@theme inline` (docs cite both but I haven't hand-verified a tweakcn export running through Tailwind v4); shadcn's latest Form primitive may pull in `react-hook-form` + `zod` whose versions need pinning.
+- **Open dependency:** UNK-106 (CSP) must complete before this plan resumes. The FOUC inline script needs nonce treatment and the backend may end up serving `index.html` (changing the Vite proxy story). A fresh adversarial review after CSP lands will surface those deltas.
