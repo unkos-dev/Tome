@@ -12,8 +12,41 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Detect which areas of the repo changed so downstream jobs can skip
+  # entirely when their inputs are untouched. Documentation-only PRs
+  # (CLAUDE.md, README, /plans/, etc.) skip the heavy jobs.
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      audit: ${{ steps.filter.outputs.audit }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'backend/**'
+              - 'docker/init-roles.sql'
+              - 'docker-compose.yml'
+              - 'Dockerfile'
+              - '.github/workflows/ci.yml'
+            audit:
+              - 'backend/Cargo.toml'
+              - 'backend/Cargo.lock'
+              - '.github/workflows/ci.yml'
+            frontend:
+              - 'frontend/**'
+              - 'Dockerfile'
+              - '.github/workflows/ci.yml'
+
   backend:
     name: Backend
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -63,6 +96,8 @@ jobs:
 
   audit:
     name: Security Audit
+    needs: changes
+    if: needs.changes.outputs.audit == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -86,6 +121,8 @@ jobs:
 
   frontend:
     name: Frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
