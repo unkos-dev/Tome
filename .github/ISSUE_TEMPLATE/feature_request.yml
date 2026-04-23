@@ -1,0 +1,99 @@
+name: Feature request
+description: Propose a new feature or improvement to Reverie
+title: "feat: "
+labels: ["Feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for proposing a feature. Reverie is opinionated — not every
+        feature fits the project's direction. The fields below help maintainers
+        evaluate the proposal against the project's scope and constraints.
+
+        Before filing, please consider whether your idea is better discussed
+        first. Significant features often benefit from a quick discussion
+        before a formal proposal.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checklist
+      options:
+        - label: I have searched [existing issues](https://github.com/unkos-dev/reverie/issues?q=is%3Aissue) and confirmed this is not a duplicate
+          required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Use case
+      description: |
+        Concrete user story. Who is the user, what are they trying to do, and
+        what's currently blocking them?
+      placeholder: |
+        As a self-hosting operator running Reverie for my family, I want X
+        so that I can Y. Currently I have to Z, which is painful because...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you'd like Reverie to do. Include UX, API, or behaviour details where helpful.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other approaches you've thought about, and why the proposed solution is preferred.
+    validations:
+      required: false
+
+  - type: textarea
+    id: hosting-impact
+    attributes:
+      label: Self-hosting impact
+      description: |
+        How does this affect operators? Consider:
+        - New external dependencies (services, APIs, libraries)
+        - New environment variables or config required
+        - Security implications (new attack surface, new permissions, new headers)
+        - Breaking changes to existing deployments
+        - Migration requirements (DB schema, config format, etc.)
+      placeholder: |
+        - New env vars: REVERIE_FOO_API_KEY (optional, falls back to ...)
+        - New external dep: foo.example.com (rate-limited, no auth needed)
+        - Security: opens a new outbound connection — should be in CSP connect-src
+        - Migration: none required
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: How will we know this is done? Bullet list of testable conditions is ideal.
+      placeholder: |
+        - [ ]
+        - [ ]
+    validations:
+      required: false
+
+  - type: input
+    id: linear
+    attributes:
+      label: Linear issue (optional)
+      description: If you've already filed a related Linear issue, paste the URL or ID here.
+      placeholder: UNK-123 or https://linear.app/unkos/issue/UNK-123
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else relevant — references to similar features in other projects, links to relevant standards, mockups.
+    validations:
+      required: false

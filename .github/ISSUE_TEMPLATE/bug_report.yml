@@ -1,0 +1,154 @@
+name: Bug report
+description: Report a bug or unexpected behaviour in Reverie
+title: "bug: "
+labels: ["Bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report. The information below
+        helps maintainers reproduce the issue quickly. Please fill in every
+        required field — bug reports without enough environment detail
+        usually can't be acted on.
+
+        **Security issues do not belong here.** If you've found a vulnerability,
+        report it privately via [GitHub Security Advisories](https://github.com/unkos-dev/reverie/security/advisories/new).
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checklist
+      options:
+        - label: I have searched [existing issues](https://github.com/unkos-dev/reverie/issues?q=is%3Aissue) and confirmed this is not a duplicate
+          required: true
+        - label: I have confirmed this is not a security issue (security issues go via [private advisory](https://github.com/unkos-dev/reverie/security/advisories/new))
+          required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Clear and concise description of the bug.
+      placeholder: When I do X, Y happens instead of Z.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Numbered steps a maintainer can follow to reproduce the bug.
+      placeholder: |
+        1. Go to '...'
+        2. Click on '...'
+        3. Observe '...'
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What you expected to happen.
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What actually happened. Include error messages verbatim.
+    validations:
+      required: true
+
+  - type: input
+    id: reverie-version
+    attributes:
+      label: Reverie version
+      description: Release tag, commit SHA, or `git describe --always` output.
+      placeholder: v0.1.0 or 789e575
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment method
+      options:
+        - Docker (tagged release from ghcr.io)
+        - Docker (built locally)
+        - Built from source (cargo run)
+        - Other (specify in additional context)
+    validations:
+      required: true
+
+  - type: input
+    id: postgres-version
+    attributes:
+      label: PostgreSQL version
+      description: Output of `psql --version` or the image tag (e.g. `postgres:17`).
+      placeholder: 17.2
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / kernel
+      description: Output of `uname -a` or equivalent.
+      placeholder: Linux 6.8.0-... / macOS 14.5 / Windows Server 2022
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser + version (frontend bugs only)
+      description: Leave blank if this is a backend or pipeline bug.
+      placeholder: Firefox 124, Chrome 122, Safari 17
+    validations:
+      required: false
+
+  - type: dropdown
+    id: reverse-proxy
+    attributes:
+      label: Behind a reverse proxy?
+      description: Affects auth, cookies, and (post-CSP) header behaviour.
+      options:
+        - "Yes — Caddy / nginx / Traefik / other"
+        - "No — direct connection to backend"
+        - "Unsure"
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: |
+        Paste relevant log output from the backend or browser console.
+
+        **REDACT before pasting:** secrets, API keys, session cookies, OIDC
+        tokens, real user IDs, real email addresses, full request/response
+        bodies that contain user data. The maintainer doesn't need any of
+        these to debug.
+      render: text
+    validations:
+      required: false
+
+  - type: input
+    id: linear
+    attributes:
+      label: Linear issue (optional)
+      description: If you've already filed a related Linear issue, paste the URL or ID here.
+      placeholder: UNK-123 or https://linear.app/unkos/issue/UNK-123
+    validations:
+      required: false
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: Anything else that might be relevant — recent changes, related tickets, theories about the cause.
+    validations:
+      required: false
