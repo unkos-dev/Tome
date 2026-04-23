@@ -1,0 +1,12 @@
+name: Reverie CodeQL config
+
+# Exclude generated or non-source paths from analysis. The Rust and JS/TS
+# extractors already skip most build output; this list covers paths specific
+# to this repo (local-only planning scratch space + Astro's prebuilt output).
+paths-ignore:
+  - plans
+  - docs/.astro
+  - '**/node_modules'
+  - '**/target'
+  - '**/dist'
+  - '**/.next'

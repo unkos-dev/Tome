@@ -1,0 +1,73 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly scan, 17:00 UTC Sunday (~01:00 Monday Perth). Off-peak, and
+    # avoids top-of-the-hour contention on GitHub-hosted runners.
+    - cron: '37 17 * * 0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      # CodeQL needs security-events: write to upload SARIF results.
+      security-events: write
+      # actions: read lets the Actions extractor fetch referenced workflows.
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+          - language: javascript-typescript
+            build-mode: none
+          - language: rust
+            build-mode: manual
+    steps:
+      - uses: actions/checkout@v6
+
+      # Rust: install toolchain + prime cargo cache BEFORE codeql init, so that
+      # the cargo build step (which runs AFTER init so the extractor can hook
+      # cargo invocations) has a warm cache.
+      - if: matrix.language == 'rust'
+        uses: dtolnay/rust-toolchain@stable
+
+      - if: matrix.language == 'rust'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          config-file: ./.github/codeql/codeql-config.yml
+
+      # Build step must run AFTER init so the CodeQL Rust extractor can hook
+      # cargo's compiler invocations and observe expanded macros + resolved
+      # types. Plain debug build; --release / --all-targets add time without
+      # improving extraction quality.
+      - if: matrix.language == 'rust'
+        name: Build Rust
+        working-directory: backend
+        run: cargo build
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
