@@ -1,0 +1,51 @@
+name: "⚠️ Security report (do NOT use this — see below)"
+description: STOP. Security issues must be reported privately via GitHub Security Advisories, not as public issues.
+title: "DO NOT FILE — use private Security Advisories"
+labels: ["security"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        # ⚠️ Stop
+
+        **Do not file public security reports here.**
+
+        Reverie is designed for self-hosted deployment. A public issue about
+        a security vulnerability gives attackers a window before operators
+        can patch their installations. Even with this template's warning,
+        anyone with the URL of a submitted issue can see its contents
+        immediately.
+
+        ## What to do instead
+
+        Open a private GitHub Security Advisory:
+
+        **➡️ [github.com/unkos-dev/reverie/security/advisories/new](https://github.com/unkos-dev/reverie/security/advisories/new)**
+
+        We will work with you privately to validate, patch, and coordinate
+        disclosure on a timeline that respects operators' need to update
+        before the issue becomes public.
+
+        ## Why this template exists
+
+        It exists to redirect you. The Reverie issue tracker has blank
+        issues disabled to force template use, and this template makes the
+        "report a security issue" path obvious — but the actual destination
+        is the private advisory flow, not this template.
+
+        ## If you accidentally opened a public issue with security details
+
+        1. Close the issue immediately.
+        2. Open a Security Advisory with the same content.
+        3. Comment on the closed issue with no details — just a link saying
+           "Moved to private disclosure."
+        4. Email any maintainer if you need help redacting cached views.
+
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Confirmation
+      description: "Required: confirm you understand before this template can be submitted."
+      options:
+        - label: I understand and will use the [private Security Advisory](https://github.com/unkos-dev/reverie/security/advisories/new) flow instead. I will NOT submit this template with security details.
+          required: true
