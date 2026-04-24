@@ -152,3 +152,5 @@ When invoking `superpowers:brainstorming`, explicitly pass the spec
 location alongside the topic (belt-and-suspenders alongside this
 convention) — agents that read CLAUDE.md will honor this section, but the
 SKILL.md default is not enforced automatically.
+
+> Optimized tool-use workflow for agents: see [SDL.md](./SDL.md).
