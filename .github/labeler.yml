@@ -18,6 +18,10 @@
       - any-glob-to-any-file:
           - "docs/**"
           - "README.md"
+          - "**/CLAUDE.md"
+          - "**/AGENTS.md"
+          - "**/GEMINI.md"
+          - "SDL.md"
 
 "area/infra":
   - changed-files:
@@ -26,6 +30,12 @@
           - "Dockerfile"
           - "docker-compose*.yml"
           - "*.dockerfile"
+          - ".gitignore"
+          - ".gitattributes"
+          - ".editorconfig"
+          - "release-please-config.json"
+          - ".release-please-manifest.json"
+          - "version.txt"
 
 "security":
   - changed-files:
