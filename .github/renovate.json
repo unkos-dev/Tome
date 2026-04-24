@@ -1,0 +1,24 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Australia/Perth",
+  "schedule": ["before 6am on monday"],
+  "dependencyDashboard": true,
+  "dependencyDashboardTitle": "Dependency dashboard: Renovate",
+  "labels": ["dependencies"],
+  "rangeStrategy": "bump",
+  "prHourlyLimit": 0,
+  "prConcurrentLimit": 10,
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "schedule": ["at any time"],
+    "labels": ["dependencies", "security"]
+  },
+  "packageRules": [
+    {
+      "description": "One PR per dep — matches existing per-dependency Linear-ticket cadence",
+      "matchManagers": ["cargo", "npm", "dockerfile", "docker-compose", "github-actions"],
+      "groupName": null
+    }
+  ]
+}
