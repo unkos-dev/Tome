@@ -94,6 +94,18 @@ Release PR:
    - Negative tests (invalid input is rejected, error cases are handled)
    - Edge cases where the behaviour is non-obvious
    A PR with untested code will not be approved.
+6. **Security scrutiny is continuous, not terminal.** Reverie is open-source
+   and self-hosted — threat model is a multi-user exposed instance, not a
+   private deployment. For any change touching user input, auth, sessions,
+   secrets, file I/O, XML parsing, outbound HTTP, or response headers:
+   consult the relevant file in `.claude/security/` and explicitly answer
+   "will this stand up to a security review?" in the task summary before
+   marking done.
+7. **Never surface decrypted secret values.** When reporting about secrets
+   (env vars, API keys, session cookies, DB passwords, OIDC client secrets),
+   describe presence and shape only (source, length, format) — never the
+   value. No `grep`/`rg`/`cat` on env files or key material, even when the
+   user appears to be asking for the value.
 
 ---
 
