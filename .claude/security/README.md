@@ -77,5 +77,76 @@ Refresh process:
 
 ## Deviations
 
-_(None currently. Log any reverie-specific overrides here, with rationale and
-the specific file + section being overridden.)_
+Log any reverie-specific override here with the overridden file + section,
+reverie's position, rationale, and compensating controls. Prefer documenting
+the deviation over editing the imported file.
+
+### 1. Session cookie `Secure` flag omitted
+
+**Override:** `codeguard-0-session-management-and-cookies.md` → "Cookie Security
+Configuration" — mandates `Secure` on session cookies.
+
+**Reverie's position:** `Secure` is omitted. See `backend/src/main.rs` (session
+setup).
+
+**Rationale:** The backend runs behind a TLS-terminating reverse proxy and
+sees plain HTTP. Setting `Secure` on the cookie would prevent delivery over
+the plaintext hop between proxy and backend.
+
+**Compensating controls:** TLS enforced at the reverse proxy boundary.
+Deployments must ensure the proxy-to-backend hop is not routed over an
+untrusted network.
+
+### 2. `SameSite=Lax` instead of `Strict`
+
+**Override:** `codeguard-0-session-management-and-cookies.md` → "Cookie Security
+Configuration" — prefers `SameSite=Strict`; allows `Lax` "if necessary for
+flows".
+
+**Reverie's position:** `SameSite::Lax`.
+
+**Rationale:** The OIDC authorization-code redirect from the IdP back to
+reverie is a cross-site POST under Strict semantics and would be blocked.
+`Lax` permits the redirect to complete while still blocking most CSRF vectors.
+
+**Compensating controls:** PKCE + state parameter validation on the OIDC
+flow; session regeneration on authentication.
+
+### 3. 24-hour idle session expiry
+
+**Override:** `codeguard-0-session-management-and-cookies.md` → "Expiration and
+Logout" — prefers non-persistent cookies with 2–30 min idle timeouts.
+
+**Reverie's position:** `Expiry::OnInactivity(24h)` via `tower-sessions`.
+
+**Rationale:** Reverie is a personal-library application with long-running
+read sessions, not a high-value admin surface. A 24-hour idle window reflects
+the usage pattern; shorter timeouts would force repeated re-authentication
+during a natural reading session.
+
+**Compensating controls:** Sessions regenerate on authentication; logout
+invalidates the server-side session immediately. Admin-equivalent operations
+(if introduced) must set a stricter session context per Hard Rule 6.
+
+### 4. EPUB ingestion processes ZIP archives
+
+**Override:** `codeguard-0-file-handling-and-uploads.md` → "File Content
+Validation" — "Avoid ZIP files due to numerous attack vectors."
+
+**Reverie's position:** EPUB format **is** a ZIP archive; reverie cannot
+function without parsing them.
+
+**Rationale:** Unavoidable — EPUB is the primary ingestion target.
+
+**Compensating controls required:**
+
+- Magic-byte validation (confirm ZIP signature before processing)
+- Bounded decompression guards against zip-bomb patterns (max decompressed
+  size, max entry count, max nesting depth)
+- Generated filenames for extracted content; never trust manifest-provided
+  paths
+- Extracted content stored outside web root
+- EPUB parser runs on the ingestion pool with scoped RLS
+
+Any of these currently missing is a security bug. Verification tracked
+separately — see the conflict-check comment on PR #40.
