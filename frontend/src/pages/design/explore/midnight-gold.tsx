@@ -332,7 +332,12 @@ function Detail({ theme }: { theme: Theme }): ReactElement {
   const moreByAuthor = BOOKS.filter((b) => b.author === book.author && b.id !== book.id).slice(0, 4);
   return (
     <article className="mg-detail">
-      <div className="mg-detail-backdrop" style={coverBackdropStyle(book, theme)} />
+      <div className="mg-detail-hero-art" aria-hidden="true">
+        <div className="mg-detail-hero-art-bg" style={coverStyle(book, theme)} />
+        <div className="mg-detail-hero-art-tint" />
+        <div className="mg-detail-hero-art-vignette" />
+        <div className="mg-detail-hero-art-fade" />
+      </div>
       <div className="mg-detail-grid">
         <aside>
           <div className="mg-detail-cover">

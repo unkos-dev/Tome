@@ -709,20 +709,86 @@
   min-height: calc(100vh - 130px);
 }
 
-.mg-detail-backdrop {
+/* Hero-art treatment: streaming-service-style key-art region.
+ * Layer 1: blurred cover-derived gradient at huge scale, fills full width.
+ * Layer 2: dark tint overlay (or cream tint in light) so foreground reads.
+ * Layer 3: cover-key-color radial wash for identity.
+ * Layer 4: fade-to-canvas at bottom + side vignette so it merges into page.
+ */
+
+.mg-detail-hero-art {
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 480px;
+  height: 640px;
   z-index: 0;
-  opacity: 0.55;
-  filter: blur(80px) saturate(0.85);
+  overflow: hidden;
+  pointer-events: none;
 }
 
-.mg-detail-backdrop::after {
-  content: "";
+.mg-detail-hero-art-bg {
+  position: absolute;
+  inset: -8%;
+  filter: blur(64px) saturate(1.6) brightness(1.35);
+  transform: scale(1.15);
+}
+
+.mg-detail-hero-art-tint {
   position: absolute;
   inset: 0;
-  background: linear-gradient(180deg, transparent 0%, var(--mg-canvas) 92%);
+  background: radial-gradient(
+    120% 80% at 22% 28%,
+    transparent 0%,
+    color-mix(in srgb, var(--mg-canvas) 8%, transparent) 35%,
+    color-mix(in srgb, var(--mg-canvas) 35%, transparent) 70%,
+    color-mix(in srgb, var(--mg-canvas) 75%, transparent) 100%
+  );
+}
+
+.mg-root[data-theme="light"] .mg-detail-hero-art-bg {
+  filter: blur(80px) saturate(1.2) brightness(1.15);
+  opacity: 1;
+}
+
+.mg-root[data-theme="light"] .mg-detail-hero-art-tint {
+  background: radial-gradient(
+    120% 80% at 22% 28%,
+    color-mix(in srgb, var(--mg-canvas) 5%, transparent) 0%,
+    color-mix(in srgb, var(--mg-canvas) 30%, transparent) 50%,
+    color-mix(in srgb, var(--mg-canvas) 80%, transparent) 100%
+  );
+}
+
+.mg-detail-hero-art-fade {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 280px;
+  background: linear-gradient(180deg, transparent 0%, var(--mg-canvas) 100%);
+}
+
+.mg-detail-hero-art-vignette {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--mg-canvas) 50%, transparent) 0%, transparent 30%, transparent 70%, color-mix(in srgb, var(--mg-canvas) 50%, transparent) 100%);
+}
+
+/* Title overlay on the hero — large display serif, strong contrast,
+ * sits over the gradient so the page reads as a key-art treatment. */
+.mg-detail-hero-titlebar {
+  position: relative;
+  z-index: 1;
+  padding: 80px var(--mg-space-7) 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.mg-detail-hero-titlebar .mg-detail-eyebrow {
+  font-size: 11px;
+  letter-spacing: var(--mg-tracking-caps);
+  text-transform: uppercase;
+  color: var(--mg-accent);
+  margin-bottom: var(--mg-space-3);
+  font-weight: 500;
 }
 
 .mg-detail-grid {
