@@ -544,9 +544,22 @@
   border-radius: 50%;
 }
 
-.mg-status-dot.in-progress { background: var(--mg-accent); }
+.mg-status-dot.in-progress {
+  background: var(--mg-accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--mg-accent) 70%, transparent);
+  animation: mg-pulse 2.6s ease-in-out infinite;
+}
 .mg-status-dot.finished { background: var(--mg-success); }
 .mg-status-dot.unread { background: var(--mg-neutral); }
+
+@keyframes mg-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--mg-accent) 70%, transparent); }
+  50%      { box-shadow: 0 0 0 7px color-mix(in srgb, var(--mg-accent) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mg-status-dot.in-progress { animation: none; }
+}
 
 /* ------------------------- Stats strip ------------------------- */
 

@@ -936,9 +936,22 @@
   border-radius: 50%;
 }
 
-.sig-status-dot.in-progress { background: var(--sig-accent); }
+.sig-status-dot.in-progress {
+  background: var(--sig-accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--sig-accent) 70%, transparent);
+  animation: sig-pulse 2.2s ease-in-out infinite;
+}
 .sig-status-dot.finished { background: var(--sig-success); }
 .sig-status-dot.unread { background: var(--sig-neutral); }
+
+@keyframes sig-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--sig-accent) 70%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--sig-accent) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sig-status-dot.in-progress { animation: none; }
+}
 
 /* ------------------------- Theme toggle ------------------------- */
 

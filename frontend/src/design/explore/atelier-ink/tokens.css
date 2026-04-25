@@ -679,9 +679,22 @@
   vertical-align: 1px;
 }
 
-.ai-status-dot.in-progress { background: var(--ai-accent); }
+.ai-status-dot.in-progress {
+  background: var(--ai-accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--ai-accent) 60%, transparent);
+  animation: ai-pulse 2.4s ease-in-out infinite;
+}
 .ai-status-dot.finished { background: var(--ai-success); }
 .ai-status-dot.unread { background: var(--ai-neutral); }
+
+@keyframes ai-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ai-accent) 60%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--ai-accent) 0%, transparent); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ai-status-dot.in-progress { animation: none; }
+}
 
 /* ------------------------- Featured tile (editorial layout) ------------------------- */
 
