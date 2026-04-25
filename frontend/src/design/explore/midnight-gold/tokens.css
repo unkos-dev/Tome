@@ -59,8 +59,8 @@
 }
 
 .mg-root {
-  --mg-font-display: "Spectral", "Source Serif 4", "Iowan Old Style", Georgia, serif;
-  --mg-font-text:    "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mg-font-display: "Spectral", "Iowan Old Style", Georgia, serif;
+  --mg-font-text:    "Inter Variable", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   --mg-font-mono:    "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --mg-type-micro:  10px;
@@ -123,6 +123,69 @@
  * return later if Step 11 wants it. */
 
 .mg-root > * { position: relative; z-index: 1; }
+
+/* ------------------------- Font pairing variants ------------------------- */
+/* D2-only font picker. D3 task 20 narrows to the chosen pairing and
+ * removes the rest. Each variant only overrides --mg-font-display; the
+ * sans companion stays Inter Variable to keep the comparison clean. */
+
+.mg-root[data-font="fraunces"] {
+  --mg-font-display: "Fraunces Variable", "Spectral", "Iowan Old Style", Georgia, serif;
+}
+
+.mg-root[data-font="newsreader"] {
+  --mg-font-display: "Newsreader Variable", "Spectral", "Iowan Old Style", Georgia, serif;
+}
+
+.mg-root[data-font="source-serif-4"] {
+  --mg-font-display: "Source Serif 4 Variable", "Spectral", "Iowan Old Style", Georgia, serif;
+}
+
+/* ------------------------- Font picker chrome ------------------------- */
+
+.mg-fontpicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 var(--mg-space-4);
+  margin-right: var(--mg-space-3);
+  border-left: 1px solid var(--mg-border);
+  border-right: 1px solid var(--mg-border);
+  align-self: stretch;
+}
+
+.mg-fontpicker-swatch {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--mg-border);
+  background: var(--mg-surface);
+  border-radius: 4px;
+  cursor: pointer;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--mg-fg-muted);
+  transition: all var(--mg-motion-fast) var(--mg-ease-out);
+}
+
+.mg-fontpicker-swatch:hover {
+  border-color: var(--mg-border-strong);
+  color: var(--mg-fg);
+}
+
+.mg-fontpicker-swatch[aria-pressed="true"] {
+  background: var(--mg-canvas);
+  border-color: var(--mg-accent);
+  color: var(--mg-accent);
+  box-shadow: 0 0 0 1px var(--mg-accent);
+}
+
+.mg-fontpicker-swatch[data-font="spectral"] span        { font-family: "Spectral", serif; }
+.mg-fontpicker-swatch[data-font="fraunces"] span        { font-family: "Fraunces Variable", serif; }
+.mg-fontpicker-swatch[data-font="newsreader"] span      { font-family: "Newsreader Variable", serif; }
+.mg-fontpicker-swatch[data-font="source-serif-4"] span  { font-family: "Source Serif 4 Variable", serif; }
 
 /* ------------------------- Top chrome ------------------------- */
 
