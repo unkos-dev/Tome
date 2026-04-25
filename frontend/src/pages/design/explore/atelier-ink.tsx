@@ -16,31 +16,22 @@ type Mock = "home" | "detail" | "library";
 type GridSize = "s" | "m" | "l";
 type ViewMode = "grid" | "table";
 
-const COVER_DARK = [
-  ["#1A1F2A", "#0F1218"],
-  ["#1E2330", "#0D1016"],
-  ["#16202B", "#0E1117"],
-  ["#1B1F28", "#101319"],
-  ["#1F2530", "#11151B"],
-];
-
-const COVER_LIGHT = [
-  ["#E2DDD0", "#B8B19A"],
-  ["#E8E2D2", "#BEB69D"],
-  ["#DBD5C5", "#A89F86"],
-  ["#EDE7D5", "#C5BEA4"],
-  ["#DFD9C9", "#B0A88E"],
-];
-
 function coverStyle(book: Book, theme: Theme): CSSProperties {
-  const tier = bookTier(book.id);
-  const palette = theme === "dark" ? COVER_DARK : COVER_LIGHT;
-  const [a, b] = palette[tier];
   const hue = bookHue(book.id);
+  const tier = bookTier(book.id);
+  if (theme === "dark") {
+    const top = `hsl(${hue}, 18%, ${24 + tier * 2}%)`;
+    const bot = `hsl(${hue}, 14%, ${12 + tier}%)`;
+    return {
+      background: `linear-gradient(160deg, ${top} 0%, ${bot} 100%)`,
+      color: "#EFEAE0",
+    };
+  }
+  const top = `hsl(${hue}, 22%, ${78 - tier * 2}%)`;
+  const bot = `hsl(${hue}, 18%, ${58 - tier * 2}%)`;
   return {
-    background: `linear-gradient(155deg, ${a} 0%, ${b} 100%)`,
-    color: theme === "dark" ? "#EFEAE0" : "#0E1015",
-    boxShadow: `inset 0 -40% 60% -30% hsla(${hue}, 12%, 8%, 0.4)`,
+    background: `linear-gradient(160deg, ${top} 0%, ${bot} 100%)`,
+    color: "#1A1812",
   };
 }
 

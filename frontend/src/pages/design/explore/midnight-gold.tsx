@@ -16,31 +16,26 @@ type Mock = "home" | "detail" | "library";
 type GridSize = "s" | "m" | "l";
 type ViewMode = "grid" | "table";
 
-const COVER_PALETTES_DARK = [
-  ["#3B2A18", "#1F1812"],
-  ["#2C2418", "#15110B"],
-  ["#3A2D20", "#1A1410"],
-  ["#28201A", "#161210"],
-  ["#33291B", "#1C160F"],
-];
-
-const COVER_PALETTES_LIGHT = [
-  ["#D8C394", "#A98A4E"],
-  ["#E2D2A9", "#B89A60"],
-  ["#CDB888", "#9A7E45"],
-  ["#E8DBB6", "#C0A668"],
-  ["#D5BE92", "#A88955"],
-];
-
 function coverStyle(book: Book, theme: Theme): CSSProperties {
   const hue = bookHue(book.id);
   const tier = bookTier(book.id);
-  const palette = theme === "dark" ? COVER_PALETTES_DARK : COVER_PALETTES_LIGHT;
-  const [a, b] = palette[tier];
+  // Warm-bias the hue: pull every cover towards 30°–60° (amber/ochre) range
+  // so the palette family stays "Midnight Gold" while still varying per book.
+  const warmHue = 22 + ((hue + tier * 11) % 28);
   const angle = (hue % 90) + 135;
+  if (theme === "dark") {
+    const top = `hsl(${warmHue}, 32%, ${26 + tier * 2}%)`;
+    const bot = `hsl(${warmHue - 6}, 28%, ${12 + tier}%)`;
+    return {
+      background: `linear-gradient(${angle}deg, ${top} 0%, ${bot} 90%)`,
+      color: "#ECE3D0",
+    };
+  }
+  const top = `hsl(${warmHue}, 38%, ${74 - tier * 2}%)`;
+  const bot = `hsl(${warmHue - 6}, 36%, ${52 - tier * 2}%)`;
   return {
-    background: `linear-gradient(${angle}deg, ${a} 0%, ${b} 80%)`,
-    color: theme === "dark" ? "#ECE3D0" : "#2A231A",
+    background: `linear-gradient(${angle}deg, ${top} 0%, ${bot} 90%)`,
+    color: "#2A231A",
   };
 }
 

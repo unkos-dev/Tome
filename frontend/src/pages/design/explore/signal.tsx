@@ -16,29 +16,22 @@ type Mock = "home" | "detail" | "library";
 type GridSize = "s" | "m" | "l";
 type ViewMode = "grid" | "table";
 
-const COVER_DARK = [
-  ["#181B23", "#0E1117"],
-  ["#1F232C", "#13161D"],
-  ["#171A21", "#0B0E14"],
-  ["#1C2029", "#10141B"],
-  ["#191D26", "#0D1018"],
-];
-
-const COVER_LIGHT = [
-  ["#E8EBF0", "#C7CCD6"],
-  ["#EEF1F5", "#D2D7E0"],
-  ["#E2E5EB", "#BFC4CE"],
-  ["#F0F2F6", "#D8DCE4"],
-  ["#E5E8ED", "#C2C7D0"],
-];
-
 function coverStyle(book: Book, theme: Theme): CSSProperties {
+  const hue = bookHue(book.id);
   const tier = bookTier(book.id);
-  const palette = theme === "dark" ? COVER_DARK : COVER_LIGHT;
-  const [a, b] = palette[tier];
+  if (theme === "dark") {
+    const top = `hsl(${hue}, 14%, ${28 + tier * 2}%)`;
+    const bot = `hsl(${hue}, 10%, ${14 + tier}%)`;
+    return {
+      background: `linear-gradient(180deg, ${top} 0%, ${bot} 100%)`,
+      color: "#F5F6F8",
+    };
+  }
+  const top = `hsl(${hue}, 14%, ${88 - tier}%)`;
+  const bot = `hsl(${hue}, 12%, ${72 - tier * 2}%)`;
   return {
-    background: `linear-gradient(180deg, ${a} 0%, ${b} 100%)`,
-    color: theme === "dark" ? "#F5F6F8" : "#0A0B10",
+    background: `linear-gradient(180deg, ${top} 0%, ${bot} 100%)`,
+    color: "#0A0B10",
   };
 }
 
@@ -90,7 +83,7 @@ function Tile({ book, theme, size = "default" }: TileProps): ReactElement {
   );
 }
 
-function Home(): ReactElement {
+function Home({ theme }: { theme: Theme }): ReactElement {
   const featured = SHELVES.inProgress[0] ?? BOOKS[0];
   return (
     <>
@@ -138,7 +131,7 @@ function Home(): ReactElement {
         </div>
         <div className="sig-carousel">
           {SHELVES.inProgress.map((b) => (
-            <Tile key={b.id} book={b} theme="dark" size="lg" />
+            <Tile key={b.id} book={b} theme={theme} size="lg" />
           ))}
         </div>
       </section>
@@ -153,7 +146,7 @@ function Home(): ReactElement {
         </div>
         <div className="sig-carousel">
           {SHELVES.recentlyAdded.map((b) => (
-            <Tile key={b.id} book={b} theme="dark" />
+            <Tile key={b.id} book={b} theme={theme} />
           ))}
         </div>
       </section>
@@ -167,7 +160,7 @@ function Home(): ReactElement {
         </div>
         <div className="sig-carousel">
           {SHELVES.forgotten.map((b) => (
-            <Tile key={b.id} book={b} theme="dark" />
+            <Tile key={b.id} book={b} theme={theme} />
           ))}
         </div>
       </section>
@@ -181,7 +174,7 @@ function Home(): ReactElement {
         </div>
         <div className="sig-carousel">
           {SHELVES.byYusra.map((b) => (
-            <Tile key={b.id} book={b} theme="dark" />
+            <Tile key={b.id} book={b} theme={theme} />
           ))}
         </div>
       </section>
@@ -418,7 +411,7 @@ export default function Signal(): ReactElement {
         </Link>
       </div>
 
-      {mock === "home" && <Home />}
+      {mock === "home" && <Home theme={theme} />}
       {mock === "detail" && <Detail theme={theme} />}
       {mock === "library" && <Library theme={theme} />}
     </div>
