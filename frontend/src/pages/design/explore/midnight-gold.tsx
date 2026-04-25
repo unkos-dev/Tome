@@ -8,7 +8,8 @@ import "@fontsource-variable/manrope/index.css";
 import "@fontsource-variable/geist/index.css";
 import "@fontsource-variable/plus-jakarta-sans/index.css";
 import "@fontsource-variable/bricolage-grotesque/index.css";
-import "@fontsource-variable/outfit/index.css";
+import "@fontsource-variable/space-grotesk/index.css";
+import "@fontsource/anton/400.css";
 
 import "../../../design/explore/midnight-gold/tokens.css";
 import {
@@ -26,14 +27,14 @@ type Theme = "dark" | "light";
 type Mock = "home" | "detail" | "library";
 type GridSize = "s" | "m" | "l";
 type ViewMode = "grid" | "table";
-type HeadingFont = "manrope" | "bricolage-grotesque" | "outfit" | "inter";
+type HeadingFont = "manrope" | "bricolage-grotesque" | "space-grotesk" | "anton";
 type BodyFont = "inter" | "manrope" | "geist" | "plus-jakarta-sans";
 
 const HEADING_FONTS: { id: HeadingFont; label: string; sample: string }[] = [
-  { id: "manrope", label: "Manrope · compact", sample: "Ag" },
+  { id: "manrope", label: "Manrope · compact neutral", sample: "Ag" },
   { id: "bricolage-grotesque", label: "Bricolage Grotesque · variable display", sample: "Ag" },
-  { id: "outfit", label: "Outfit · geometric distinctive", sample: "Ag" },
-  { id: "inter", label: "Inter · neutral geometric", sample: "Ag" },
+  { id: "space-grotesk", label: "Space Grotesk · distinctive geometric", sample: "Ag" },
+  { id: "anton", label: "Anton · compressed dramatic", sample: "Ag" },
 ];
 
 const BODY_FONTS: { id: BodyFont; label: string; sample: string }[] = [

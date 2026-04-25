@@ -133,11 +133,11 @@
 /* D2-only font picker. D3 task 20 narrows to the chosen heading + body
  * pair and removes the rest along with the picker UI. */
 
-/* Heading axis — replaces what was the serif slot in the prior picker. */
+/* Heading axis — display-class candidates with proportion variety. */
 .mg-root[data-heading="manrope"]             { --mg-font-heading: "Manrope Variable", "Inter Variable", system-ui, sans-serif; }
 .mg-root[data-heading="bricolage-grotesque"] { --mg-font-heading: "Bricolage Grotesque Variable", "Inter Variable", system-ui, sans-serif; }
-.mg-root[data-heading="outfit"]              { --mg-font-heading: "Outfit Variable", "Inter Variable", system-ui, sans-serif; }
-.mg-root[data-heading="inter"]               { --mg-font-heading: "Inter Variable", system-ui, sans-serif; }
+.mg-root[data-heading="space-grotesk"]       { --mg-font-heading: "Space Grotesk Variable", "Inter Variable", system-ui, sans-serif; }
+.mg-root[data-heading="anton"]               { --mg-font-heading: "Anton", "Inter Variable", system-ui, sans-serif; }
 
 /* Body axis — chrome and content paragraphs. */
 .mg-root[data-body="inter"]             { --mg-font-text: "Inter Variable", system-ui, sans-serif; }
@@ -202,8 +202,8 @@
 
 .mg-fontpicker-swatch[data-heading="manrope"] span             { font-family: "Manrope Variable", sans-serif; }
 .mg-fontpicker-swatch[data-heading="bricolage-grotesque"] span { font-family: "Bricolage Grotesque Variable", sans-serif; }
-.mg-fontpicker-swatch[data-heading="outfit"] span              { font-family: "Outfit Variable", sans-serif; }
-.mg-fontpicker-swatch[data-heading="inter"] span               { font-family: "Inter Variable", sans-serif; }
+.mg-fontpicker-swatch[data-heading="space-grotesk"] span       { font-family: "Space Grotesk Variable", sans-serif; }
+.mg-fontpicker-swatch[data-heading="anton"] span               { font-family: "Anton", sans-serif; }
 
 .mg-fontpicker-swatch[data-body="inter"] span             { font-family: "Inter Variable", sans-serif; }
 .mg-fontpicker-swatch[data-body="manrope"] span           { font-family: "Manrope Variable", sans-serif; }
@@ -919,9 +919,9 @@
 .mg-detail-aside dd {
   margin: 2px 0 0;
   color: var(--mg-fg);
-  font-family: var(--mg-font-display);
+  font-family: var(--mg-font-text);
   font-size: 15px;
-  font-weight: 400;
+  font-weight: 500;
 }
 
 .mg-detail-eyebrow {
@@ -986,12 +986,13 @@
 }
 
 .mg-detail-summary {
-  font-family: var(--mg-font-display);
-  font-size: 19px;
-  line-height: 1.7;
+  font-family: var(--mg-font-text);
+  font-size: 17px;
+  line-height: 1.65;
   color: var(--mg-fg);
   max-width: 62ch;
   margin: 0 0 var(--mg-space-7);
+  font-weight: 400;
 }
 
 .mg-detail-summary p { margin: 0 0 var(--mg-space-4); }
@@ -1449,9 +1450,9 @@
 .mg-table th.sorted-desc::after { content: " ↓"; color: var(--mg-accent); opacity: 1; }
 
 .mg-table td .title {
-  font-family: var(--mg-font-display);
+  font-family: var(--mg-font-text);
   font-size: var(--mg-type-body);
-  font-weight: 400;
+  font-weight: 500;
   color: var(--mg-fg);
   line-height: 1.2;
 }
