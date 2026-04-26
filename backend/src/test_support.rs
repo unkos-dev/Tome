@@ -72,7 +72,7 @@ pub fn test_config() -> Config {
             csp_report_endpoint: None,
             frontend_dist_path: None,
             csp_html_header: None,
-            csp_api_header: String::from(
+            csp_api_header: axum::http::HeaderValue::from_static(
                 "default-src 'none'; frame-ancestors 'none'; base-uri 'none'",
             ),
         },

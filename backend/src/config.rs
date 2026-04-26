@@ -77,14 +77,15 @@ pub struct WritebackConfig {
 ///
 /// Two-phase initialisation: `from_env()` populates the booleans +
 /// `csp_report_endpoint` + `frontend_dist_path` and leaves both CSP-header
-/// fields unset (`csp_api_header = String::new()`, `csp_html_header =
-/// None`). `main()` then finalises them by calling
-/// [`crate::security::csp::build_api_csp`] (unconditionally) and
-/// [`crate::security::csp::build_html_csp`] (only when `frontend_dist_path`
-/// is `Some` and `validate_frontend_dist` has yielded the script-src hash
-/// list). A `SecurityConfig` obtained directly from `from_env()` — without
-/// this second pass — will not emit a useful `Content-Security-Policy`
-/// header.
+/// fields with empty placeholder values. `main()` then finalises them by
+/// validating the output of [`crate::security::csp::build_api_csp`]
+/// (unconditionally) and [`crate::security::csp::build_html_csp`] (only
+/// when `frontend_dist_path` is `Some` and `validate_frontend_dist` has
+/// yielded the script-src hash list) into [`axum::http::HeaderValue`] at
+/// startup — a non-conformant string panics in `main()` rather than
+/// silently dropping the CSP header at request time. A `SecurityConfig`
+/// obtained directly from `from_env()` — without this second pass — will
+/// emit an empty `Content-Security-Policy` header.
 #[derive(Debug, Clone)]
 pub struct SecurityConfig {
     pub behind_https: bool,
@@ -92,8 +93,8 @@ pub struct SecurityConfig {
     pub hsts_preload: bool,
     pub csp_report_endpoint: Option<url::Url>,
     pub frontend_dist_path: Option<std::path::PathBuf>,
-    pub csp_html_header: Option<String>,
-    pub csp_api_header: String,
+    pub csp_html_header: Option<axum::http::HeaderValue>,
+    pub csp_api_header: axum::http::HeaderValue,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -420,7 +421,7 @@ impl SecurityConfig {
             csp_report_endpoint,
             frontend_dist_path,
             csp_html_header: None,
-            csp_api_header: String::new(),
+            csp_api_header: axum::http::HeaderValue::from_static(""),
         })
     }
 
