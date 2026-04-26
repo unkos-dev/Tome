@@ -7,12 +7,7 @@
 //! This test lives under `backend/tests/` so the routes are automatically
 //! cfg-gated to `test` — they never exist in the production router.
 
-use axum::{
-    Router,
-    http::StatusCode,
-    response::Redirect,
-    routing::get,
-};
+use axum::{Router, http::StatusCode, response::Redirect, routing::get};
 use axum_extra::extract::cookie::{Cookie, CookieJar};
 use axum_test::TestServer;
 
@@ -55,10 +50,7 @@ async fn cookie_jar_tuple_with_redirect_emits_set_cookie() {
     // TestServer follows redirects by default; disable so we see the 307
     // response headers directly.
     let server = TestServer::new(router());
-    let resp = server
-        .get("/_test/cookie-redirect")
-        .expect_failure()
-        .await;
+    let resp = server.get("/_test/cookie-redirect").expect_failure().await;
     assert_eq!(resp.status_code(), StatusCode::TEMPORARY_REDIRECT);
     let header = resp
         .headers()
