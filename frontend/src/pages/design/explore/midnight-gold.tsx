@@ -1,10 +1,13 @@
 import { useState, useRef, useEffect, type ReactElement, type CSSProperties } from "react";
 import { Link } from "react-router";
 
-// Locked typography: Author (display) + Satoshi (body). Both variable
-// faces with italic counterparts are self-hosted under public/fonts/
-// fontshare/files/, bypassing Fontshare CDN's cookie-set/ORB issue and
-// matching the production CSP (font-src 'self').
+// Locked typography: Author (display) + Satoshi (body), with italic
+// counterparts. Delivered from Fontshare's CDN (cdn.fontshare.com) — the
+// FFL EULA prohibits self-hosting on a public server. We author the
+// @font-face block ourselves (fontshare.css) so the woff2 requests bypass
+// the cookie-bearing CSS API that trips Chromium ORB. CSP allows
+// `font-src 'self' https://cdn.fontshare.com`; see frontend/public/fonts/
+// fontshare/README.md for the rationale.
 import "../../../design/explore/midnight-gold/fontshare.css";
 import "../../../design/explore/midnight-gold/tokens.css";
 import {
