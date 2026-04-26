@@ -73,19 +73,26 @@ pub struct WritebackConfig {
     pub max_attempts: u32,
 }
 
-/// Response-header policy (UNK-106).
+/// Response-header policy.
 ///
-/// Two-phase initialisation: `from_env()` populates the booleans +
-/// `csp_report_endpoint` + `frontend_dist_path` and leaves both CSP-header
-/// fields with empty placeholder values. `main()` then finalises them by
-/// validating the output of [`crate::security::csp::build_api_csp`]
-/// (unconditionally) and [`crate::security::csp::build_html_csp`] (only
-/// when `frontend_dist_path` is `Some` and `validate_frontend_dist` has
-/// yielded the script-src hash list) into [`axum::http::HeaderValue`] at
-/// startup — a non-conformant string panics in `main()` rather than
-/// silently dropping the CSP header at request time. A `SecurityConfig`
-/// obtained directly from `from_env()` — without this second pass — will
-/// emit an empty `Content-Security-Policy` header.
+/// CSP values are stored as precomputed `HeaderValue`s. They depend on
+/// `validate_frontend_dist` (an async filesystem check), so `csp_api_header`
+/// and `csp_html_header` are left as `None` after `from_env()` and finalised
+/// by `main()` via [`crate::security::csp::build_api_csp`] /
+/// [`crate::security::csp::build_html_csp`]. A non-conformant CSP string
+/// panics in `main()` rather than silently dropping the header at request
+/// time.
+///
+/// HSTS and Reporting-Endpoints are derived from the booleans / URL stored
+/// here via [`Self::hsts_header_value`] and
+/// [`Self::reporting_endpoints_header_value`]. Both compose static-ASCII
+/// strings from validated inputs and panic on the impossible case (a
+/// programming invariant has been violated and we want to know).
+///
+/// A `SecurityConfig` obtained directly from `from_env()` — without the
+/// CSP-finalisation pass — emits no `Content-Security-Policy` on either
+/// route class (both fields stay `None`); HSTS and Reporting-Endpoints
+/// are still applied because they are derived on demand.
 #[derive(Debug, Clone)]
 pub struct SecurityConfig {
     pub behind_https: bool,
@@ -94,7 +101,7 @@ pub struct SecurityConfig {
     pub csp_report_endpoint: Option<url::Url>,
     pub frontend_dist_path: Option<std::path::PathBuf>,
     pub csp_html_header: Option<axum::http::HeaderValue>,
-    pub csp_api_header: axum::http::HeaderValue,
+    pub csp_api_header: Option<axum::http::HeaderValue>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -421,13 +428,16 @@ impl SecurityConfig {
             csp_report_endpoint,
             frontend_dist_path,
             csp_html_header: None,
-            csp_api_header: axum::http::HeaderValue::from_static(""),
+            csp_api_header: None,
         })
     }
 
     /// HSTS response-header value. `None` when `behind_https=false` — the
-    /// middleware must not emit HSTS on plaintext HTTP or the cookie would be
-    /// refused on the next TLS-less request.
+    /// middleware must not emit HSTS on plaintext HTTP or the browser would
+    /// refuse to talk to the host on its next TLS-less request. The composed
+    /// string is static ASCII; `from_str` panics on the impossible case so
+    /// any future composition bug surfaces loudly instead of silently
+    /// dropping the header.
     pub fn hsts_header_value(&self) -> Option<axum::http::HeaderValue> {
         if !self.behind_https {
             return None;
@@ -439,17 +449,22 @@ impl SecurityConfig {
         if self.hsts_preload {
             v.push_str("; preload");
         }
-        // The composition is ASCII + punctuation we just appended ourselves —
-        // from_str cannot fail here. Return Option to stay defensive.
-        axum::http::HeaderValue::from_str(&v).ok()
+        Some(axum::http::HeaderValue::from_str(&v).unwrap_or_else(|e| {
+            panic!("HSTS string is not a valid HTTP header value ({e}): {v:?}")
+        }))
     }
 
     /// `Reporting-Endpoints: csp-endpoint="<url>"`. `None` when
-    /// `csp_report_endpoint` is unset.
+    /// `csp_report_endpoint` is unset. The URL was validated by
+    /// [`Self::from_env`] (no `"` `;` CR or LF; valid `url::Url`); `as_str()`
+    /// returns the canonical percent-encoded form. `from_str` panics on the
+    /// impossible case rather than silently dropping the header.
     pub fn reporting_endpoints_header_value(&self) -> Option<axum::http::HeaderValue> {
         let url = self.csp_report_endpoint.as_ref()?;
         let v = format!("csp-endpoint=\"{}\"", url.as_str());
-        axum::http::HeaderValue::from_str(&v).ok()
+        Some(axum::http::HeaderValue::from_str(&v).unwrap_or_else(|e| {
+            panic!("Reporting-Endpoints value is not a valid HTTP header value ({e}): {v:?}")
+        }))
     }
 }
 

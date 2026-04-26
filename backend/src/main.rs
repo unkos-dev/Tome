@@ -92,14 +92,14 @@ async fn main() {
     // Finalise CSP headers once at startup. API CSP has no dynamic inputs
     // besides the optional report endpoint. HTML CSP consumes the script-src
     // hash list produced by `vite build`'s csp-hash plugin and read back from
-    // the committed sidecar.
-    //
-    // Conversion to HeaderValue happens here, not per-request: a malformed
-    // CSP string is a programmer/build-system bug, and panicking at startup
-    // beats silently dropping the security header on every response.
+    // the committed sidecar. Panicking at startup beats silently dropping
+    // the security header on every response.
     let api_csp = security::csp::build_api_csp(config.security.csp_report_endpoint.as_ref());
-    config.security.csp_api_header = axum::http::HeaderValue::from_str(&api_csp)
-        .expect("API CSP string is not a valid HTTP header value — this is a build bug");
+    config.security.csp_api_header = Some(
+        axum::http::HeaderValue::from_str(&api_csp).unwrap_or_else(|e| {
+            panic!("API CSP is not a valid HTTP header value ({e}): {api_csp:?}")
+        }),
+    );
     if let Some(dist_path) = config.security.frontend_dist_path.clone() {
         let validated = security::dist_validation::validate_frontend_dist(&dist_path)
             .expect("frontend dist validation failed — rebuild frontend (vite build)");
@@ -107,9 +107,11 @@ async fn main() {
             &validated.script_src_hashes,
             config.security.csp_report_endpoint.as_ref(),
         );
-        let html_header = axum::http::HeaderValue::from_str(&html_csp)
-            .expect("HTML CSP string is not a valid HTTP header value — this is a build bug");
-        config.security.csp_html_header = Some(html_header);
+        config.security.csp_html_header = Some(
+            axum::http::HeaderValue::from_str(&html_csp).unwrap_or_else(|e| {
+                panic!("HTML CSP is not a valid HTTP header value ({e}): {html_csp:?}")
+            }),
+        );
     }
 
     tracing_subscriber::fmt()

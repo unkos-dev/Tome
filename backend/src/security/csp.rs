@@ -122,4 +122,30 @@ mod tests {
                 .replace("             ", "")
         );
     }
+
+    #[test]
+    fn builder_outputs_are_valid_header_values() {
+        // Locks in the startup contract: main() converts these strings into
+        // axum HeaderValue with .unwrap_or_else(panic). If a future builder
+        // change introduces a byte outside the HTTP visible-ASCII range this
+        // test catches it before production startup does.
+        let report = url("https://log.example/csp");
+        let cases: &[(&str, String)] = &[
+            ("build_api_csp(None)", build_api_csp(None)),
+            ("build_api_csp(Some)", build_api_csp(Some(&report))),
+            (
+                "build_html_csp(hashes, None)",
+                build_html_csp(&h("sha256-YWJjZA=="), None),
+            ),
+            (
+                "build_html_csp(hashes, Some)",
+                build_html_csp(&h("sha256-YWJjZA=="), Some(&report)),
+            ),
+        ];
+        for (label, value) in cases {
+            axum::http::HeaderValue::from_str(value).unwrap_or_else(|e| {
+                panic!("{label} produced invalid HTTP header value ({e}): {value:?}")
+            });
+        }
+    }
 }

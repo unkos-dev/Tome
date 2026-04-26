@@ -942,7 +942,7 @@ mod tests {
                 csp_report_endpoint: None,
                 frontend_dist_path: None,
                 csp_html_header: None,
-                csp_api_header: axum::http::HeaderValue::from_static(""),
+                csp_api_header: None,
             },
             openlibrary_base_url: ol_uri.into(),
             googlebooks_base_url: gb_uri.into(),
