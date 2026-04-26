@@ -3,18 +3,40 @@ title: Testing Scope for the Design System
 description: How the design-system work is tested, and what is deliberately exempt.
 ---
 
-The Step 10 design system is tested at two distinct bars:
+The Step 10 design system is tested at two distinct bars.
 
-- **Deterministic logic (unit tests, mandatory):** theme provider (initial
-  resolution from cookie/DB/`prefers-color-scheme`, persistence, API sync),
-  cookie helpers, the custom ESLint hex-literal rule fixtures, and the
-  route-gating production-build structural assertion.
-- **Visual / composition work (exempt from unit tests):** verified by
-  `@axe-core/cli` against `/design/system`, manual Dark/Light toggle, and
-  the `/crosscheck` dual-model review gate at D5. Applied-page Lighthouse
-  gates are Step 11's responsibility.
+## What ships with deterministic unit tests
 
-This split is deliberate. Snapshotting visual output on per-component unit
+- **Today (D0–D2):**
+  - `Lockup` brand component — RTL coverage of the wordmark variants and
+    accessibility contract (`frontend/src/components/Lockup.test.tsx`).
+  - The CSP-hash Vite plugin — node-environment unit tests under
+    `frontend/vite-plugins/__tests__/csp-hash.test.ts`.
+  - The `axum_extra` `CookieJar` tuple-response contract that the backend
+    design-system sliver (theme PATCH, OIDC callback cookie seed) depends
+    on — `backend/tests/cookie_jar_sanity.rs`.
+- **D3–D5 acceptance bar (added before the relevant feature lands):**
+  - Theme provider: initial resolution from cookie/DB/`prefers-color-scheme`,
+    persistence, and API sync.
+  - Theme cookie helpers (read, write, expiry).
+  - The custom ESLint hex-literal rule fixtures (raw-hex outside token
+    files is a lint error).
+  - Route-gating production-build structural assertion (the `/design/*`
+    explore tree is excluded from production bundles).
+
+## What is exempt from unit tests
+
+Visual and composition work is verified by:
+
+- `@axe-core/cli` against the explore tree at `/design/explore` today, and
+  against `/design/system` once the canonical theme codification ships in
+  D3.
+- Manual Dark/Light toggle.
+- The `/crosscheck` dual-model review gate at D5.
+
+Applied-page Lighthouse gates are Step 11's responsibility.
+
+This split is deliberate. Snapshotting visual output in per-component unit
 tests locks styling into a pixel-brittle contract that Step 11 cannot move.
 The design system's acceptance bar is the axe-core hard gate plus a human
 review — per-component visual regression tooling is not adopted.
