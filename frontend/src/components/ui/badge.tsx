@@ -46,4 +46,5 @@ function Badge({
   )
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- shadcn pattern: cva const + component co-located.
 export { Badge, badgeVariants }

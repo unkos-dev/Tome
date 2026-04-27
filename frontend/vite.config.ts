@@ -24,6 +24,28 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Route the dev-only design tree into its own chunk. main.tsx gates
+        // the import behind `if (import.meta.env.DEV)`; in production
+        // `import.meta.env.DEV` is replaced with literal `false`, the
+        // dynamic-import branch becomes dead code, Vite tree-shakes the
+        // chunk, and no `design-*.js` is emitted into `dist/assets/`.
+        // Substring-grepping the minified output is unreliable (Vite
+        // mangles names); the Level 4 gate in the plan checks for the
+        // chunk file's structural absence instead.
+        manualChunks(id) {
+          if (
+            id.includes("/src/routes/design") ||
+            id.includes("/src/pages/design/")
+          ) {
+            return "design";
+          }
+        },
+      },
+    },
+  },
   server: {
     headers: {
       "Content-Security-Policy": DEV_CSP,
