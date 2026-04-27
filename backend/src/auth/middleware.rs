@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 use crate::auth::backend::AuthBackend;
 use crate::error::AppError;
+use crate::models::role::Role;
 use crate::models::{device_token, user};
 use crate::state::AppState;
 
@@ -13,14 +14,14 @@ pub type AuthCtx = AuthSession<AuthBackend>;
 #[derive(Debug, Clone)]
 pub struct CurrentUser {
     pub user_id: Uuid,
-    pub role: String,
+    pub role: Role,
     pub is_child: bool,
 }
 
 impl CurrentUser {
     /// Return `Err(Forbidden)` unless the user is an admin.
     pub fn require_admin(&self) -> Result<(), AppError> {
-        if self.role == "admin" {
+        if matches!(self.role, Role::Admin) {
             Ok(())
         } else {
             Err(AppError::Forbidden)

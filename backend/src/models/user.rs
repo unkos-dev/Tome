@@ -4,12 +4,12 @@ use sqlx::PgPool;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+use crate::models::role::Role;
 use crate::models::theme_preference::ThemePreference;
 
-// `theme_preference` is decoded directly via sqlx::Type (Postgres ENUM
-// `theme_preference`); only `role` needs the ::text cast because it
-// stays a String on the model side.
-const USER_COLUMNS: &str = "id, oidc_subject, display_name, email, role::text, is_child, \
+// Both `role` and `theme_preference` are decoded directly via sqlx::Type
+// (Postgres ENUM types `user_role` and `theme_preference` respectively).
+const USER_COLUMNS: &str = "id, oidc_subject, display_name, email, role, is_child, \
                             created_at, updated_at, session_version, theme_preference";
 
 /// Raw row from the database. Use `User::from` to get the public type.
@@ -19,7 +19,7 @@ struct UserRow {
     oidc_subject: String,
     display_name: String,
     email: Option<String>,
-    role: String, // Decoded from role::text cast in query
+    role: Role,
     is_child: bool,
     created_at: OffsetDateTime,
     updated_at: OffsetDateTime,
@@ -33,7 +33,7 @@ pub struct User {
     pub oidc_subject: String,
     pub display_name: String,
     pub email: Option<String>,
-    pub role: String,
+    pub role: Role,
     pub is_child: bool,
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -167,7 +167,7 @@ mod tests {
         assert_eq!(user.display_name, "Alice");
         assert_eq!(user.email.as_deref(), Some("alice@example.com"));
         // First user in a fresh DB is auto-promoted to admin.
-        assert_eq!(user.role, "admin");
+        assert_eq!(user.role, Role::Admin);
         assert_eq!(user.session_version, 0);
         assert_eq!(user.session_version_bytes, 0_i32.to_le_bytes());
 
@@ -190,5 +190,37 @@ mod tests {
             .expect("find by subject")
             .unwrap();
         assert_eq!(found.id, user.id);
+    }
+
+    /// Loud-failure regression for UNK-108. Simulates the failure mode
+    /// where the DB `user_role` enum gains a value that has no Rust
+    /// counterpart (e.g. an operator runs an out-of-band `ALTER TYPE`,
+    /// or a future migration lands ahead of the matching Rust change).
+    /// `sqlx::Type` must surface this as a decode error, not silently
+    /// coerce — that's what makes the typed enum a real authorization
+    /// boundary rather than a polite suggestion.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn role_decode_fails_for_unknown_db_variant(pool: PgPool) {
+        sqlx::query("ALTER TYPE user_role ADD VALUE 'superadmin'")
+            .execute(&pool)
+            .await
+            .expect("alter user_role enum");
+
+        let subject = format!("drift-test-{}", Uuid::new_v4());
+        let user = upsert_from_oidc_and_maybe_promote(&pool, &subject, "Drift", None)
+            .await
+            .expect("upsert");
+
+        sqlx::query("UPDATE users SET role = 'superadmin'::user_role WHERE id = $1")
+            .bind(user.id)
+            .execute(&pool)
+            .await
+            .expect("inject unknown role");
+
+        let result = find_by_id(&pool, user.id).await;
+        assert!(
+            result.is_err(),
+            "expected sqlx decode error for unknown DB variant, got {result:?}"
+        );
     }
 }
