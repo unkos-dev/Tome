@@ -40,10 +40,11 @@ resolve to brand variables.
 | `--color-fg` | `#0E0D0A` (Ink) | `#E8E0D0` (Cream) | Primary text |
 | `--color-fg-muted` | `#5A5244` | `#A8A090` | Secondary text |
 | `--color-fg-faint` | `#8A8170` | `#6E6858` | Tertiary text |
-| `--color-accent` | `#8E6F38` | `#C9A961` (Gold) | Accent / focus / CTA |
-| `--color-accent-soft` | `#DCC890` | `#4A3C24` | Selected backgrounds |
+| `--color-accent` | `#8E6F38` | `#C9A961` (Gold) | Accent / focus / CTA — primary affordances only, never hover |
+| `--color-accent-soft` | `#DCC890` | `#4A3C24` | Selected backgrounds (pair with `text-fg`, not `text-fg-on-accent`) |
 | `--color-accent-strong` | `#6E5424` | `#D4B070` | Pressed accent |
-| `--color-fg-on-accent` | `#E8DCC2` | `#0E0D0A` | Text on accent fill |
+| `--color-fg-on-accent` | `#E8DCC2` | `#0E0D0A` | Text on saturated `bg-accent` only — fails AA on `bg-accent-soft` |
+| `--color-hover` | `#E5D8BC` (= surface-2) | `#2A261D` (= surface-2) | shadcn-primitive hover/focus lift; decoupled from gold |
 
 **No state-color tokens.** `--color-success`, `--color-warning`,
 `--color-danger`, `--color-info`, and `--color-neutral` are deliberately
@@ -53,6 +54,18 @@ The Light-theme accent (`#8E6F38`) is the brand's `#C9A961` darkened to
 satisfy WCAG 2.2 1.4.11 (UI component 3:1) and 1.4.3 large-text
 contrast against `#E8DCC2`. It does **not** pass 1.4.3 normal-text
 4.5:1 — restrict to focus rings, large CTAs, and recovery actions.
+axe-core surfaces this as a violation on any Light surface where
+`bg-accent` carries normal body text; the design-system axe gate
+tolerates these documented violations on the `lg`-size button + badge
+surfaces in the [`/design/system`](#) gallery, but introducing
+`bg-accent` on *new* normal-size Light surfaces is a brand violation,
+not an axe-noise issue.
+
+`--color-hover` decouples shadcn primitives' hover/focus treatment from
+the gold register: dropdown items and select items light up at
+`--color-hover` (= `--color-surface-2`) on focus instead of saturating
+gold, so brand `--color-accent` stays the unambiguous signature for
+primary actions, focus rings, and recovery actions.
 
 ## Typography
 
@@ -101,10 +114,11 @@ and the gold accent — never a state-coded hue. The canonical mapping:
 | State | Expression |
 |---|---|
 | Default / idle | `text-fg`, `bg-surface` (or unchanged) |
-| Hover | `translate-y-[-1px]` + `border-border-strong` |
+| Hover (surface lift) | `translate-y-[-1px]` + `border-border-strong` |
+| Hover (in-list item) | `bg-hover` (= `bg-surface-2`) |
 | Active / pressed | `bg-accent` or `bg-accent-strong` |
-| Selected | `bg-accent-soft` background + `text-fg` (errata: original spec said `text-fg-on-accent` but that combo fails AA in both themes — `text-fg-on-accent` is only correct on full `bg-accent` fills) |
-| Disabled | `opacity-50` + `text-fg-faint` |
+| Selected | `bg-accent-soft` background + `text-fg` |
+| Disabled | `opacity-50` + `text-fg-muted` (`text-fg-faint` is decorative-only — opacity-50 × fg-faint drops below AA) |
 | Loading | opacity pulse 0.85 ↔ 1.0, ~1.6s, on the region |
 | Error | `text-fg font-semibold` + gold recovery action |
 | Success (explicit) | gold inline note (`text-fg-on-accent` on full `bg-accent` fill); fades after ~3s |

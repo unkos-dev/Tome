@@ -31,13 +31,18 @@ export function cspHashPlugin(): Plugin {
         const foucPath = resolve(resolvedConfig.root, FOUC_SOURCE);
         const fouc = readFileSync(foucPath, "utf8");
 
-        // Injection-safety guard: inline <script> is terminated by </script>
-        // (case-insensitive) and the browser treats the first match as the
-        // script-tag close. Content that includes this literal would escape
-        // the script element and render as HTML.
-        if (/<\/script>/i.test(fouc)) {
+        // Injection-safety guard: the HTML parser terminates an inline
+        // <script> at `</script` followed by ASCII whitespace (\s — space,
+        // tab, newline, etc.), `/`, or `>`. A trailing `>` is NOT required.
+        // Content that matches escapes the script element and renders as
+        // HTML. UNK-114 issue 5 broadened this from `/<\/script>/i` after a
+        // `</script` literal in a comment terminated fouc.js silently in
+        // D3.13. `</script` followed by a name character (e.g. `</scripty`)
+        // is not a terminator — the regex requires the parser-recognised
+        // suffix to keep the guard from false-positiving.
+        if (/<\/script[\s/>]/i.test(fouc)) {
           throw new Error(
-            `reverie-csp-hash: ${FOUC_SOURCE} contains '</script>' — inline script injection would break the HTML.`,
+            `reverie-csp-hash: ${FOUC_SOURCE} contains a closing-script-tag literal (</script followed by whitespace, /, or >) — inline script injection would break the HTML.`,
           );
         }
 
