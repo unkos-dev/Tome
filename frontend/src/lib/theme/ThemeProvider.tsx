@@ -9,12 +9,16 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
+import { toast } from "sonner";
 import {
   readThemeCookie,
   writeThemeCookie,
   type ThemePreference,
 } from "./cookie";
 import { fetchMe, patchTheme } from "./api";
+
+const PATCH_FAILURE_MESSAGE =
+  "Could not save theme preference. Reverted to your previous setting.";
 
 type EffectiveTheme = "light" | "dark";
 
@@ -186,6 +190,7 @@ export function ThemeProvider({ children }: ThemeProviderProps): ReactElement {
           applyEffective(prevEffective);
           setPreferenceState(prevPreference);
           setEffectiveState(prevEffective);
+          toast.error(PATCH_FAILURE_MESSAGE);
           return;
         }
         channelRef.current?.postMessage({ preference: next });
@@ -195,6 +200,7 @@ export function ThemeProvider({ children }: ThemeProviderProps): ReactElement {
         setPreferenceState(prevPreference);
         setEffectiveState(prevEffective);
         console.warn("theme PATCH failed; rolled back", error);
+        toast.error(PATCH_FAILURE_MESSAGE);
       }
     },
     [preference, effective],

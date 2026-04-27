@@ -4,6 +4,7 @@ import { createBrowserRouter, RouterProvider, type RouteObject } from 'react-rou
 import './index.css'
 import App from './App.tsx'
 import { ThemeProvider } from './lib/theme/ThemeProvider.tsx'
+import { Toaster } from './components/ui/sonner.tsx'
 
 const routes: RouteObject[] = [{ path: '/', element: <App /> }]
 
@@ -22,6 +23,7 @@ createRoot(rootElement).render(
   <StrictMode>
     <ThemeProvider>
       <RouterProvider router={router} />
+      <Toaster />
     </ThemeProvider>
   </StrictMode>,
 )
