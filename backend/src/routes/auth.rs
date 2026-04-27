@@ -199,6 +199,11 @@ struct UpdateThemeRequest {
     theme_preference: ThemePreference,
 }
 
+// 422 contract: invalid `theme_preference` values are rejected by axum 0.8's
+// default `Json` extractor (`JsonRejection::JsonDataError` → 422), so serde
+// is the wire-boundary validation gate. If a future axum upgrade changes
+// the default rejection status, the `patch_theme_rejects_invalid_value`
+// test in this module will fail and surface the regression.
 async fn update_theme(
     current_user: CurrentUser,
     State(state): State<AppState>,
