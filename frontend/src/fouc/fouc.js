@@ -10,8 +10,9 @@
 //   - Cookie name "reverie_theme" matches THEME_COOKIE_NAME on the backend
 //     (backend/src/auth/theme_cookie.rs) and frontend (lib/theme/cookie.ts).
 //     UNK-105 tracks any drift.
-//   - Body must NOT contain the literal string </script (the plugin
-//     throws at build time).
+//   - Body must not contain a closing-script-tag literal (would terminate
+//     the surrounding inline script when injected into index.html); the
+//     csp-hash Vite plugin throws if it sees one.
 //   - try/catch fallback to "light" is the documented worst-case path
 //     (malformed cookie, parse error, or matchMedia failure).
 (function () {
