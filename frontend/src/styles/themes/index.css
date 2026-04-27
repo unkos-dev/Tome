@@ -52,6 +52,37 @@
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
 
+  /* shadcn-compatibility alias layer — rebinds shadcn's expected token
+     names onto the canonical brand palette so stock primitives in
+     components/ui/* render brand-aligned without per-file rewrites.
+     New code should prefer the canonical --color-canvas/--color-fg/etc.
+     names; this layer exists so the shadcn registry primitives we
+     install (button, card, dropdown-menu, etc.) drop in without
+     visual drift to the default neutral-grey palette.
+
+     Destructive tokens deliberately alias to fg/border so banned
+     hue-coded state expression (red error) collapses into the
+     §11A no-hue mapping (font-semibold + gold recovery action).
+     The aliases keep the utilities renderable so primitives compile;
+     the actual error-state UX is enforced at the surface level. */
+  --color-background:           var(--canvas);
+  --color-foreground:           var(--fg);
+  --color-card:                 var(--surface);
+  --color-card-foreground:      var(--fg);
+  --color-popover:              var(--surface);
+  --color-popover-foreground:   var(--fg);
+  --color-primary:              var(--accent);
+  --color-primary-foreground:   var(--fg-on-accent);
+  --color-secondary:            var(--surface-2);
+  --color-secondary-foreground: var(--fg);
+  --color-muted:                var(--surface);
+  --color-muted-foreground:     var(--fg-muted);
+  --color-accent-foreground:    var(--fg-on-accent);
+  --color-input:                var(--border);
+  --color-ring:                 var(--accent);
+  --color-destructive:          var(--fg);
+  --color-destructive-foreground: var(--fg-on-accent);
+
   /* Motion tokens — philosophy §8 timing budget (interaction motion 200–300ms;
      page transitions ≤300ms). Theme transition is a longer 300ms because it
      touches the entire surface. */
