@@ -426,4 +426,150 @@ mod tests {
             "rejected request must not emit a reverie_theme cookie; got: {theme_cookies:?}"
         );
     }
+
+    /// End-to-end happy path through `/auth/login` → `/auth/callback`. Exercises:
+    /// PKCE/CSRF/nonce session round-trip, mock token exchange against a
+    /// signed ID token whose nonce matches what `/auth/login` stored,
+    /// upsert-and-promote-to-admin (first user), session login (cookie cycled),
+    /// and the FOUC theme cookie seeded from the freshly-loaded user record.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn callback_succeeds_first_user_promoted_to_admin(pool: sqlx::PgPool) {
+        use crate::auth::backend::AuthBackend;
+        use crate::models::role::Role;
+        use crate::state::AppState;
+        use crate::test_support::oidc_mock::MockOidcProvider;
+        use tower_sessions::session::Id as SessionId;
+        use tower_sessions::{MemoryStore, SessionStore};
+
+        let app_pool = test_support::db::app_pool_for(&pool).await;
+        let ingestion_pool = test_support::db::ingestion_pool_for(&pool).await;
+
+        // Mock IdP: spins up wiremock + signs a key + serves /jwks.
+        // client_id matches `test_config().oidc_client_id` (empty string).
+        let mock = MockOidcProvider::start("").await;
+        let oidc_client = mock.client("http://localhost:3000/auth/callback");
+
+        // Shared session store so the test can read what /auth/login wrote.
+        let store = MemoryStore::default();
+        let state = AppState {
+            pool: app_pool.clone(),
+            ingestion_pool,
+            config: test_support::test_config(),
+            oidc_client,
+        };
+        let auth_backend = AuthBackend {
+            pool: app_pool.clone(),
+        };
+        let app = crate::build_router_with_session_store(state, auth_backend, store.clone());
+        let mut server = axum_test::TestServer::new(app);
+        server.save_cookies();
+
+        // Step 1: drive /auth/login. Server stores csrf_token, nonce,
+        // pkce_verifier in the session and 307-redirects to the IdP.
+        let login_resp = server.get("/auth/login").await;
+        assert_eq!(login_resp.status_code(), StatusCode::TEMPORARY_REDIRECT);
+
+        // Step 2: extract the session ID from the issued cookie and load
+        // the stored OIDC flow state out of the shared MemoryStore.
+        let session_cookie_value = login_resp.cookie("id").value().to_string();
+        let session_id: SessionId = session_cookie_value.parse().expect("parse session id");
+        let record = store
+            .load(&session_id)
+            .await
+            .expect("load session record")
+            .expect("session record present");
+        let csrf: String = serde_json::from_value(
+            record
+                .data
+                .get("csrf_token")
+                .expect("csrf_token in session")
+                .clone(),
+        )
+        .expect("csrf_token is string");
+        let nonce: String =
+            serde_json::from_value(record.data.get("nonce").expect("nonce in session").clone())
+                .expect("nonce is string");
+
+        // Step 3: install /token responder that returns an ID token
+        // signed with the mock's key and bearing the matching nonce.
+        mock.mount_token_endpoint(
+            "test-subject-123",
+            Some("alice@example.com"),
+            Some("Alice Test"),
+            &nonce,
+        )
+        .await;
+
+        // Step 4: drive /auth/callback. Cookie jar carries the session id
+        // from the login response; CSRF state is the value /auth/login stored.
+        let cb_resp = server
+            .get("/auth/callback")
+            .add_query_param("code", "mock-auth-code")
+            .add_query_param("state", &csrf)
+            .await;
+        assert_eq!(
+            cb_resp.status_code(),
+            StatusCode::TEMPORARY_REDIRECT,
+            "expected 307 to /, got body: {}",
+            cb_resp.text()
+        );
+        assert_eq!(
+            cb_resp
+                .header("location")
+                .to_str()
+                .expect("location is ascii"),
+            "/",
+        );
+
+        // Session-fixation defence: axum-login's login() must rotate the
+        // session id, so the cookie value after callback differs from the
+        // one issued by /auth/login. A regression where login() stops
+        // cycling would let a pre-auth attacker plant a session id that
+        // becomes authenticated post-login.
+        let new_session_value = cb_resp.cookie("id").value().to_string();
+        assert_ne!(
+            new_session_value, session_cookie_value,
+            "session id must rotate across login() to prevent fixation"
+        );
+
+        // Step 5: callback emits a `reverie_theme` cookie reflecting the
+        // upserted user's default ThemePreference::System.
+        let theme_cookie = cb_resp
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .find(|c| c.starts_with("reverie_theme="))
+            .expect("reverie_theme cookie present after callback");
+        assert!(
+            theme_cookie.starts_with("reverie_theme=system"),
+            "expected reverie_theme=system, got: {theme_cookie}"
+        );
+
+        // Step 6: user row exists and was promoted to admin (first user).
+        let (db_role, db_email): (Role, Option<String>) =
+            sqlx::query_as("SELECT role, email FROM users WHERE oidc_subject = $1")
+                .bind("test-subject-123")
+                .fetch_one(&app_pool)
+                .await
+                .expect("user row inserted by callback");
+        assert_eq!(db_role, Role::Admin, "first user must be promoted to admin");
+        assert_eq!(db_email.as_deref(), Some("alice@example.com"));
+
+        // Step 7: the cycled session cookie authenticates /auth/me.
+        // axum-login's login() rotates the session id; axum-test's
+        // save_cookies() picks up the new id from the callback response.
+        let me_resp = server.get("/auth/me").await;
+        assert_eq!(me_resp.status_code(), StatusCode::OK);
+        let me_body: serde_json::Value = me_resp.json();
+        assert_eq!(
+            me_body.get("role").and_then(|v| v.as_str()),
+            Some("admin"),
+            "expected /auth/me role=admin, got body: {me_body}"
+        );
+        assert_eq!(
+            me_body.get("email").and_then(|v| v.as_str()),
+            Some("alice@example.com"),
+        );
+    }
 }

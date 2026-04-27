@@ -474,3 +474,181 @@ pub mod db {
         w.finish().unwrap().into_inner()
     }
 }
+
+/// Mock OIDC provider scaffolding for end-to-end auth-flow tests.
+///
+/// Spins up a `wiremock::MockServer` with `/jwks` and `/token` endpoints,
+/// generates a real RSA keypair per test, and exposes an `OidcClient`
+/// configured to point at the mock. Lets tests drive the full callback
+/// flow (PKCE/CSRF/nonce validation → token exchange → ID token signature
+/// verification → user upsert → session login) without going through a
+/// real IdP.
+pub mod oidc_mock {
+    use openidconnect::core::{
+        CoreClient, CoreIdToken, CoreIdTokenClaims, CoreJsonWebKey, CoreJsonWebKeySet,
+        CoreJwsSigningAlgorithm, CoreProviderMetadata, CoreResponseType, CoreRsaPrivateSigningKey,
+        CoreSubjectIdentifierType,
+    };
+    use openidconnect::{
+        AccessToken, Audience, AuthUrl, ClientId, ClientSecret, EmptyAdditionalClaims,
+        EmptyAdditionalProviderMetadata, EndUserEmail, EndUserName, IssuerUrl, JsonWebKeyId,
+        JsonWebKeySetUrl, LocalizedClaim, Nonce as OidcNonce, RedirectUrl, ResponseTypes,
+        StandardClaims, SubjectIdentifier, TokenUrl,
+    };
+    use rsa::RsaPrivateKey;
+    use rsa::pkcs1::EncodeRsaPrivateKey;
+    use rsa::pkcs1::LineEnding;
+    use rsa::traits::PublicKeyParts;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    use super::OidcClient;
+
+    /// One-shot mock OIDC provider. Construct with [`Self::start`], wire an
+    /// `OidcClient` into your `AppState` via [`Self::client`], then call
+    /// [`Self::mount_token_endpoint`] before driving `/auth/callback`.
+    pub struct MockOidcProvider {
+        server: MockServer,
+        signing_key_pem: String,
+        kid: String,
+        issuer: String,
+        client_id: String,
+        jwks: CoreJsonWebKeySet,
+    }
+
+    impl MockOidcProvider {
+        /// Boot a `MockServer` and serve a freshly-generated JWKS at `/jwks`.
+        /// `client_id` is the OIDC `aud` claim — must match `OIDC_CLIENT_ID`
+        /// in the AppState's config (`test_config()` uses an empty string;
+        /// pass `""` here to match).
+        pub async fn start(client_id: &str) -> Self {
+            // 2048-bit RSA — fast enough for a per-test keygen and matches
+            // the bar real IdPs publish (Authentik, Keycloak default to 2048).
+            let mut rng = rand_core_06::OsRng;
+            let private_key = RsaPrivateKey::new(&mut rng, 2048).expect("rsa keygen");
+            let signing_key_pem = private_key
+                .to_pkcs1_pem(LineEnding::LF)
+                .expect("pkcs1 pem encode")
+                .to_string();
+            let n = private_key.n().to_bytes_be();
+            let e = private_key.e().to_bytes_be();
+            let kid = "test-kid".to_string();
+            let jwk = CoreJsonWebKey::new_rsa(n, e, Some(JsonWebKeyId::new(kid.clone())));
+            let jwks = CoreJsonWebKeySet::new(vec![jwk]);
+            let jwks_body = serde_json::to_value(&jwks).expect("serialize jwks");
+
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/jwks"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(jwks_body))
+                .mount(&server)
+                .await;
+
+            let issuer = server.uri();
+            Self {
+                server,
+                signing_key_pem,
+                kid,
+                issuer,
+                client_id: client_id.to_string(),
+                jwks,
+            }
+        }
+
+        /// Build an `OidcClient` bound to this mock with embedded JWKS, so
+        /// `id_token_verifier` does not need network IO.
+        pub fn client(&self, redirect_uri: &str) -> OidcClient {
+            let issuer_url = IssuerUrl::new(self.issuer.clone()).expect("valid issuer url");
+            let auth_url = AuthUrl::new(format!("{}/auth", self.issuer)).expect("auth url");
+            let jwks_url =
+                JsonWebKeySetUrl::new(format!("{}/jwks", self.issuer)).expect("jwks url");
+            let token_url = TokenUrl::new(format!("{}/token", self.issuer)).expect("token url");
+
+            let metadata = CoreProviderMetadata::new(
+                issuer_url,
+                auth_url,
+                jwks_url,
+                vec![ResponseTypes::new(vec![CoreResponseType::Code])],
+                vec![CoreSubjectIdentifierType::Public],
+                vec![CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256],
+                EmptyAdditionalProviderMetadata {},
+            )
+            .set_token_endpoint(Some(token_url))
+            .set_jwks(self.jwks.clone());
+
+            CoreClient::from_provider_metadata(
+                metadata,
+                ClientId::new(self.client_id.clone()),
+                Some(ClientSecret::new("test-secret".to_string())),
+            )
+            .set_redirect_uri(RedirectUrl::new(redirect_uri.to_string()).expect("redirect url"))
+        }
+
+        /// Install a `/token` responder that returns a signed ID token whose
+        /// claims include the given `nonce`. Call after reading the
+        /// server-stored nonce out of the shared session store but before
+        /// driving `/auth/callback`.
+        pub async fn mount_token_endpoint(
+            &self,
+            subject: &str,
+            email: Option<&str>,
+            name: Option<&str>,
+            nonce: &str,
+        ) {
+            use chrono::{Duration, Utc};
+            let issuer_url = IssuerUrl::new(self.issuer.clone()).expect("valid issuer url");
+            let access_token = AccessToken::new("test-access-token".to_string());
+
+            let mut standard_claims =
+                StandardClaims::new(SubjectIdentifier::new(subject.to_string()));
+            if let Some(e) = email {
+                standard_claims = standard_claims
+                    .set_email(Some(EndUserEmail::new(e.to_string())))
+                    .set_email_verified(Some(true));
+            }
+            if let Some(n) = name {
+                let mut localized: LocalizedClaim<EndUserName> = LocalizedClaim::new();
+                localized.insert(None, EndUserName::new(n.to_string()));
+                standard_claims = standard_claims.set_name(Some(localized));
+            }
+
+            let claims = CoreIdTokenClaims::new(
+                issuer_url,
+                vec![Audience::new(self.client_id.clone())],
+                Utc::now() + Duration::seconds(300),
+                Utc::now(),
+                standard_claims,
+                EmptyAdditionalClaims {},
+            )
+            .set_nonce(Some(OidcNonce::new(nonce.to_string())));
+
+            let signing_key = CoreRsaPrivateSigningKey::from_pem(
+                &self.signing_key_pem,
+                Some(JsonWebKeyId::new(self.kid.clone())),
+            )
+            .expect("parse signing key");
+
+            let id_token = CoreIdToken::new(
+                claims,
+                &signing_key,
+                CoreJwsSigningAlgorithm::RsaSsaPkcs1V15Sha256,
+                Some(&access_token),
+                None,
+            )
+            .expect("sign id token");
+
+            let token_response = serde_json::json!({
+                "access_token": access_token.secret(),
+                "token_type": "Bearer",
+                "expires_in": 300,
+                "id_token": id_token.to_string(),
+            });
+
+            Mock::given(method("POST"))
+                .and(path("/token"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(token_response))
+                .mount(&self.server)
+                .await;
+        }
+    }
+}
