@@ -52,7 +52,10 @@ describe("readThemeCookie", () => {
 });
 
 describe("writeThemeCookie", () => {
-  test("writes the cookie with the canonical attribute string", () => {
+  test("writes the cookie without Secure on http: pages", () => {
+    // jsdom default location.protocol is "http:" — assert the HTTP path.
+    expect(window.location.protocol).toBe("http:");
+
     const setter = vi.fn();
     Object.defineProperty(document, "cookie", {
       configurable: true,
@@ -75,6 +78,38 @@ describe("writeThemeCookie", () => {
     expect(written).toContain("SameSite=Lax");
     expect(written).not.toContain("HttpOnly");
     expect(written).not.toContain("Secure");
+  });
+
+  test("writes the cookie with Secure on https: pages", () => {
+    // jsdom's window.location.protocol is read-only on the location
+    // object itself — replace the whole `location` to flip protocol.
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      writable: true,
+      value: { ...originalLocation, protocol: "https:" },
+    });
+
+    try {
+      const setter = vi.fn();
+      Object.defineProperty(document, "cookie", {
+        configurable: true,
+        get: () => "",
+        set: setter,
+      });
+
+      writeThemeCookie("dark");
+
+      const written = setter.mock.calls[0]?.[0] as string;
+      expect(written).toContain("SameSite=Lax");
+      expect(written).toContain("Secure");
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        writable: true,
+        value: originalLocation,
+      });
+    }
   });
 
   test("round-trips through document.cookie", () => {

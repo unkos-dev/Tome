@@ -30,14 +30,18 @@ export function readThemeCookie(): ThemePreference | null {
 //   Max-Age=31536000  — matches backend's Duration::days(365)
 //   SameSite=Lax      — matches backend
 //   HttpOnly          — intentionally absent on BOTH sides (JS reads for FOUC)
-//   Secure            — intentionally absent on BOTH sides (TLS proxy fronts
-//                       plain HTTP; matches session cookie behaviour)
-// Drift is caught by the backend `set_theme_cookie_writes_canonical_attributes`
-// test plus this module's `cookie.test.ts` attribute assertions.
+//   Secure            — conditional on the user-facing protocol. The backend
+//                       gates it on SecurityConfig::behind_https; the
+//                       frontend gates it on location.protocol === 'https:'.
+//                       Both reduce to the same answer the browser sees.
+// Drift is caught by the backend `set_theme_cookie_*` tests plus this
+// module's `cookie.test.ts` attribute assertions.
 export function writeThemeCookie(value: ThemePreference): void {
+  const secure = location.protocol === "https:" ? "; Secure" : "";
   document.cookie =
     `${THEME_COOKIE_NAME}=${value}; ` +
     `Path=/; ` +
     `Max-Age=${ONE_YEAR_SECONDS}; ` +
-    `SameSite=Lax`;
+    `SameSite=Lax` +
+    secure;
 }

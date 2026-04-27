@@ -162,7 +162,11 @@ async fn callback(
 
     // Seed reverie_theme cookie from the freshly-loaded user record so the
     // FOUC script reads the same value on next cold load.
-    let jar = set_theme_cookie(jar, &user.theme_preference);
+    let jar = set_theme_cookie(
+        jar,
+        &user.theme_preference,
+        state.config.security.behind_https,
+    );
 
     Ok((jar, Redirect::temporary("/")))
 }
@@ -213,7 +217,11 @@ async fn update_theme(
         .execute(&state.pool)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
-    let jar = set_theme_cookie(jar, &body.theme_preference);
+    let jar = set_theme_cookie(
+        jar,
+        &body.theme_preference,
+        state.config.security.behind_https,
+    );
     Ok((
         jar,
         Json(serde_json::json!({ "theme_preference": body.theme_preference })),
@@ -364,9 +372,19 @@ mod tests {
             .await
             .expect("read back theme_preference");
         assert_eq!(stored, "system", "row must remain default after rejection");
+        // Filter to reverie_theme= specifically — session middleware may
+        // emit its own Set-Cookie on authenticated routes, and that's
+        // unrelated to the theme-rejection invariant we're testing.
+        let theme_cookies: Vec<&str> = resp
+            .headers()
+            .get_all("set-cookie")
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .filter(|c| c.starts_with("reverie_theme="))
+            .collect();
         assert!(
-            resp.headers().get("set-cookie").is_none(),
-            "rejected request must not emit Set-Cookie"
+            theme_cookies.is_empty(),
+            "rejected request must not emit a reverie_theme cookie; got: {theme_cookies:?}"
         );
     }
 }
