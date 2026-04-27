@@ -282,7 +282,10 @@ mod tests {
             test_support::db::create_adult_and_basic_auth(&app_pool, "theme-me-default").await;
         let server = test_support::db::server_with_real_pools(&app_pool, &ingestion_pool);
 
-        let resp = server.get("/auth/me").add_header(AUTHORIZATION, basic).await;
+        let resp = server
+            .get("/auth/me")
+            .add_header(AUTHORIZATION, basic)
+            .await;
         assert_eq!(resp.status_code(), StatusCode::OK);
 
         let body: serde_json::Value = resp.json();
@@ -321,12 +324,11 @@ mod tests {
             "expected reverie_theme=dark prefix; got: {set_cookie}"
         );
 
-        let stored: String =
-            sqlx::query_scalar("SELECT theme_preference FROM users WHERE id = $1")
-                .bind(user_id)
-                .fetch_one(&app_pool)
-                .await
-                .expect("read back theme_preference");
+        let stored: String = sqlx::query_scalar("SELECT theme_preference FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&app_pool)
+            .await
+            .expect("read back theme_preference");
         assert_eq!(stored, "dark");
     }
 
@@ -348,12 +350,11 @@ mod tests {
         // AppError::Validation maps to 422 (NOT 400) — see backend/src/error.rs.
         assert_eq!(resp.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
 
-        let stored: String =
-            sqlx::query_scalar("SELECT theme_preference FROM users WHERE id = $1")
-                .bind(user_id)
-                .fetch_one(&app_pool)
-                .await
-                .expect("read back theme_preference");
+        let stored: String = sqlx::query_scalar("SELECT theme_preference FROM users WHERE id = $1")
+            .bind(user_id)
+            .fetch_one(&app_pool)
+            .await
+            .expect("read back theme_preference");
         assert_eq!(stored, "system", "row must remain default after rejection");
         assert!(
             resp.headers().get("set-cookie").is_none(),
