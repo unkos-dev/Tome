@@ -46,6 +46,9 @@ zip = "8"
 
 [dev-dependencies]
 axum-test = "20"
+chrono = "0.4"
+rand_core_06 = { package = "rand_core", version = "0.6", features = ["std", "getrandom"] }
+rsa = { version = "0.9", features = ["pem"] }
 wiremock = "0.6"
 
 [lints.rust]

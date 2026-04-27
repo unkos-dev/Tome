@@ -24,7 +24,23 @@ pub fn build_router(state: AppState, auth_backend: AuthBackend) -> Router {
     // expires client-side but the HashMap entry stays until process restart.
     // Acceptable for single-instance self-hosted deployments; replace with
     // tower-sessions-sqlx-store if memory growth under sustained use becomes an issue.
-    let session_store = MemoryStore::default();
+    build_router_with_session_store(state, auth_backend, MemoryStore::default())
+}
+
+/// Same as [`build_router`] but with a caller-provided session store.
+///
+/// Used by integration tests to share a `MemoryStore` between the test
+/// harness and the running server, so the test can inspect (or pre-seed)
+/// session state — e.g. read a server-generated `nonce` to mint a matching
+/// ID token in the OIDC callback test.
+pub fn build_router_with_session_store<S>(
+    state: AppState,
+    auth_backend: AuthBackend,
+    session_store: S,
+) -> Router
+where
+    S: tower_sessions::SessionStore + Clone,
+{
     // Secure flag intentionally omitted: backend runs behind a TLS-terminating
     // reverse proxy and sees plain HTTP, so Secure would prevent cookie delivery.
     // Cookies are unsigned — session security relies on the cryptographic randomness
