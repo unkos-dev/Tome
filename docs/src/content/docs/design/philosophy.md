@@ -49,7 +49,7 @@ brand invariant:
 | Disabled | `opacity-50` + `text-fg-faint` |
 | Loading | opacity pulse 0.85 ↔ 1.0, ~1.6s, on the region |
 | Error | `text-fg font-semibold` + gold recovery action |
-| Success (explicit) | gold inline note (`text-fg-on-accent` on `bg-accent-soft`); fades after ~3s |
+| Success (explicit) | gold inline note (`text-fg-on-accent` on full `bg-accent` fill); fades after ~3s |
 | Link | underline + `text-accent` on hover; no permanent colour difference |
 | Focus (keyboard) | 2px gold outline + 2px offset (`focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2`) |
 

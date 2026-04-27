@@ -42,7 +42,7 @@ tests on both stacks.
 | D3.11 | /design/system gallery                              | Done         |
 | D3.12 | Dev-only route gate + manualChunks                  | Done         |
 | D3.13 | FOUC body                                           | Done (after `</script` fix) |
-| D3.14 | ESLint + Stylelint hex bans                         | **PARTIAL — hook blocker** |
+| D3.14 | ESLint + Stylelint hex bans                         | Done         |
 | D3.15 | Motion tokens + state-without-hue                   | Done (in D3.7) |
 | D3.16 | Self-host Author/Satoshi/JBM                        | Done         |
 | D3.17 | axe accessibility pass                              | Dark clean; Light has 4 documented violations |
@@ -58,7 +58,7 @@ tests on both stacks.
 |----------------------------------|--------|---------|
 | L1 Backend clippy                | PASS   | `cargo clippy -p reverie-api --all-targets -- -D warnings` clean |
 | L1 Frontend lint (ESLint)        | PASS   | `npm run lint` clean |
-| L1 Stylelint                     | BLOCKED | `.stylelintrc.json` cannot be created (config-protection hook); D3.14 partial |
+| L1 Stylelint                     | PASS   | `.stylelintrc.json` shipped in `f44c3fa`; rule active (`color-no-hex` on `src/**/*.css`) |
 | L2 Backend tests                 | PASS   | 434 + 2 unit tests, 0 failures |
 | L2 Frontend tests                | PASS   | 30 tests, 0 failures (cookie + ThemeProvider + existing) |
 | L3 Backend build                 | PASS   | `cargo build -p reverie-api` |
@@ -98,25 +98,6 @@ text. That's louder than a strictly-soft-gold treatment but matches
 the brand's "selected = gold" intent. If the gallery surfaces
 specific primitives where the gold-on-hover is too loud, follow up
 with per-primitive `cva` overrides in a separate polish PR.
-
-### D3.14 — config-protection hook blocked the actual rule wiring
-
-**Plan letter:** add `no-restricted-syntax` hex-ban rule to
-`eslint.config.js` (with a Lockup overrides exemption), create
-`.stylelintrc.json`, and write `__tests__/hex-ban.test.ts`.
-
-**What we did:** none of the above. The user's
-`~/.claude/scripts/hooks/config-protection.js` PreToolUse hook blocks
-edits to `eslint.config.js` and prevents creating `.stylelintrc.json`,
-both of which are on its protected-files list.
-
-**Why:** the hook is part of the user's harness; bypassing it would
-require either a global settings change (out of scope for this PR)
-or the user temporarily disabling the hook for one edit.
-
-**Action needed from user:** disable `config-protection.js`
-temporarily, apply the patch in this PR's body, re-enable. Specific
-edit text is in the appendix below.
 
 ### D3.17 — axe Light-theme violations match plan §327's documented trade-off
 
@@ -203,10 +184,12 @@ fix.
 
 | Test File | Tests |
 |---|---|
-| `backend/src/auth/theme_cookie.rs#tests` | `set_theme_cookie_writes_canonical_attributes` (verbatim attribute string assertions for the cross-stack drift guard); `allowed_themes_matches_frontend_union` |
-| `backend/src/routes/auth.rs#tests` | `me_returns_theme_preference_default`; `patch_theme_updates_user_row` (200 + Set-Cookie + DB row); `patch_theme_rejects_invalid_value` (422 + no row mutation + no Set-Cookie) |
-| `frontend/src/lib/theme/cookie.test.ts` | 8 tests: round-trip, malformed → null, ignores other cookies, attribute string parity (`Path=/`, `Max-Age=31536000`, `SameSite=Lax`, NOT `HttpOnly`, NOT `Secure`) |
+| `backend/src/auth/theme_cookie.rs#tests` | `set_theme_cookie_writes_canonical_attributes_without_secure` and `set_theme_cookie_sets_secure_when_behind_https` (cross-stack drift guard + behind_https branching) |
+| `backend/src/models/theme_preference.rs#tests` | `as_str_matches_serde_lowercase`, `json_roundtrip_uses_lowercase_string`, `json_rejects_unknown_variant` (wire-format parity + serde validation gate) |
+| `backend/src/routes/auth.rs#tests` | `me_returns_theme_preference_default`; `patch_theme_returns_401_without_auth`; `patch_theme_updates_user_row` (parametrized over `light` / `dark` / `system`); `patch_theme_rejects_invalid_value` (422 + no row mutation + no `reverie_theme=` Set-Cookie) |
+| `frontend/src/lib/theme/cookie.test.ts` | 9 tests: round-trip, malformed → null, ignores other cookies, attribute parity on http: (no Secure) and on https: (Secure) |
 | `frontend/src/lib/theme/ThemeProvider.test.tsx` | 8 tests: initial-state matrix (cookie × dataset.theme × matchMedia), 401 → no PATCH, server reconciliation, optimistic update + 422 rollback, matchMedia reactivity |
+| `frontend/src/fouc/fouc.test.ts` | 7 tests: jsdom evaluation of the inline FOUC body — cookie ∈ {dark, light, system + matchMedia, no cookie}, malformed cookie, matchMedia throws → catch warns + defaults to light |
 
 ---
 
@@ -232,10 +215,14 @@ operator surface `docs/security/content-security-policy.md ## Cookies`:
 on logout.** `reverie_theme` is the explicit counterexample.
 
 The cookie attribute string (`Path=/, Max-Age=31536000, SameSite=Lax,
-no HttpOnly, no Secure`) is pinned by symmetric unit tests on backend
+no HttpOnly`) is pinned by symmetric unit tests on backend
 (verbatim string asserts on the built `Cookie` struct) and frontend
-(string asserts on the written `document.cookie` input). Drift on
-either side fails the corresponding test in the same PR.
+(string asserts on the written `document.cookie` input). The `Secure`
+attribute is conditional on user-facing protocol — gated by
+`SecurityConfig::behind_https` on the backend and
+`location.protocol === 'https:'` on the frontend; both stacks have
+tests for the present and absent cases. Drift on either side fails
+the corresponding test in the same PR.
 
 ### (b) CSP strengthening — `font-src` drops the CDN
 
@@ -277,122 +264,56 @@ not as a structural risk to operators. JetBrains Mono is OFL-1.1
 
 ---
 
-## Appendix — D3.14 Action Required from User
+## Appendix — Post-Review Fixups
 
-The config-protection hook blocked the ESLint + Stylelint config
-edits. To complete D3.14, temporarily disable
-`~/.claude/scripts/hooks/config-protection.js` (e.g., comment out
-the `PreToolUse` matcher in `~/.claude/settings.json`), apply the
-following patches, then re-enable.
+After the report was archived, a five-agent multi-agent review on PR #52
+surfaced issues that landed as commits `4d5f888` through `68d8d49` on
+the same branch. The fixes:
 
-### Patch 1 — `frontend/eslint.config.js`
-
-```js
-// Add to the existing top-of-file imports section:
-const hexBanRule = {
-  'no-restricted-syntax': [
-    'error',
-    {
-      selector: "Literal[value=/^#[0-9a-fA-F]{3,8}$/]",
-      message:
-        'No raw hex codes in .tsx/.ts. Use semantic tokens (bg-canvas, text-fg, etc.).',
-    },
-  ],
-};
-```
-
-Add `rules: { ...hexBanRule }` to the `files: ['**/*.{ts,tsx}']`
-config block.
-
-Add a Lockup-exemption block at the end of the array:
-
-```js
-{
-  files: ['src/components/Lockup.tsx'],
-  rules: {
-    'no-restricted-syntax': 'off', // Brand constants by design — see philosophy §11C
-  },
-},
-```
-
-### Patch 2 — `frontend/.stylelintrc.json` (CREATE)
-
-```json
-{
-  "extends": ["stylelint-config-standard"],
-  "rules": {
-    "at-rule-no-unknown": [
-      true,
-      {
-        "ignoreAtRules": [
-          "theme", "custom-variant", "layer", "utility",
-          "apply", "config", "tailwind", "source", "variant"
-        ]
-      }
-    ]
-  },
-  "overrides": [
-    {
-      "files": ["src/**/*.css", "!src/styles/themes/**/*.css", "!src/styles/fonts.css"],
-      "rules": { "color-no-hex": true }
-    }
-  ]
-}
-```
-
-Run `npm install -D stylelint stylelint-config-standard` if missing.
-
-### Patch 3 — `frontend/src/__tests__/hex-ban.test.ts` (CREATE)
-
-```ts
-import { RuleTester } from "eslint";
-
-// Re-create the rule shape inline so the test enforces what
-// eslint.config.js declares.
-const rule = {
-  meta: { type: "problem", schema: [] as const },
-  create(context: import("eslint").Rule.RuleContext) {
-    return {
-      Literal(node: import("estree").Node) {
-        if (
-          node.type === "Literal" &&
-          typeof node.value === "string" &&
-          /^#[0-9a-fA-F]{3,8}$/.test(node.value)
-        ) {
-          context.report({ node, message: "No raw hex codes." });
-        }
-      },
-    };
-  },
-};
-
-const tester = new RuleTester({
-  languageOptions: { ecmaVersion: 2022, sourceType: "module" },
-});
-
-tester.run("hex-ban", rule, {
-  valid: [
-    { code: 'const c = "hello";' },
-    { code: "const c = bgSurface;" },
-  ],
-  invalid: [
-    { code: 'const c = "#abc123";', errors: 1 },
-    { code: 'const c = "#fff";', errors: 1 },
-  ],
-});
-```
+- `cargo fmt` on the new auth test code (CI was failing).
+- OIDC session cleanup at `routes/auth.rs:151-153` switched from
+  `let _ = session.remove(...)` (silently discarded `Result`) to
+  `if let Err(e) = ... { tracing::warn!(...) }` so a degraded session
+  store surfaces in logs without aborting login.
+- Theme PATCH rollback now surfaces failures via `toast.error(...)`.
+  `Toaster` was registered but never mounted; `sonner.tsx` was importing
+  `useTheme` from `next-themes` (which was never wired). Wired through
+  the project's `ThemeProvider`, mounted in `main.tsx`, dropped the
+  `next-themes` dep.
+- Theme cookie's `Secure` attribute is now conditional on
+  `SecurityConfig::behind_https`. Frontend mirrors via
+  `location.protocol === 'https:'`. Closes the CodeQL high-sev alert.
+- `theme_preference` was promoted from a stringly-typed value to a
+  Postgres ENUM + Rust `enum ThemePreference` (with `sqlx::Type` +
+  `serde`). The runtime `ALLOWED_THEMES.contains` check is gone — serde
+  is the validation gate at the wire boundary. The OIDC callback could
+  previously have written a corrupted DB value into the cookie; that
+  path is now type-checked.
+- `theme-switcher.tsx` `as ThemePreference` cast replaced with a narrow
+  via `OPTIONS.find`.
+- `ThemeProvider.tsx` reconcile effect's `// eslint-disable-next-line
+  react-hooks/exhaustive-deps` removed in favour of a `useRef`-captured
+  mount-time preference. `useMemo(deriveInitialState, [])` converted to
+  `useMemo(() => deriveInitialState(), [])` to satisfy the React
+  Compiler `use-memo` rule that the suppression was masking.
+- `fouc.js` catch now `console.warn`s the failure before defaulting to
+  light. The fallback strategy was correct; suppressing the diagnostic
+  was not (the catch had previously hidden the `</script` literal bug
+  fixed in `d29a7cc`).
+- New tests: `patch_theme_returns_401_without_auth`, parametrized
+  happy-path PATCH over `[light, dark, system]`, and
+  `frontend/src/fouc/fouc.test.ts` (jsdom evaluation of the inline FOUC
+  body — six branches plus the catch's warn breadcrumb).
 
 ---
 
 ## Next Steps
 
 1. Open PR against `main` from `feat/design-system-d3`.
-2. Apply the D3.14 patches above (requires temporarily disabling the
-   config-protection hook).
-3. Run `/crosscheck` (Opus + Gemini) per
+2. Run `/crosscheck` (Opus + Gemini) per
    `feedback_crosscheck_default.md` before declaring ready-for-review.
-4. User reviews + merges per `feedback_user_does_merge.md`.
-5. Follow-ups (separate PRs):
+3. User reviews + merges per `feedback_user_does_merge.md`.
+4. Follow-ups (separate PRs):
    - UNK-104: OIDC callback `Set-Cookie: reverie_theme` e2e test
      (needs `wiremock` + signed-ID-token scaffolding).
    - UNK-113: review JetBrains Mono adoption post-0.1.0; remove
