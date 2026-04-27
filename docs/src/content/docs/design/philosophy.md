@@ -45,7 +45,7 @@ brand invariant:
 | Default / idle | `text-fg`, `bg-surface` (or unchanged) |
 | Hover | `translate-y-[-1px]` + `border-border-strong` |
 | Active / pressed | `bg-accent` or `bg-accent-strong` |
-| Selected | `bg-accent-soft` background + `text-fg-on-accent` |
+| Selected | `bg-accent-soft` background + `text-fg` |
 | Disabled | `opacity-50` + `text-fg-faint` |
 | Loading | opacity pulse 0.85 ↔ 1.0, ~1.6s, on the region |
 | Error | `text-fg font-semibold` + gold recovery action |
