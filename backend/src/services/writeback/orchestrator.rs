@@ -23,6 +23,7 @@ use uuid::Uuid;
 use zip::ZipArchive;
 
 use crate::config::Config;
+use crate::models::manifestation_format::ManifestationFormat;
 use crate::services::epub::{self, ValidationOutcome, ValidationReport, repack};
 use crate::services::ingestion::path_template;
 
@@ -78,7 +79,7 @@ struct JobSnapshot {
     manifestation_id: Uuid,
     reason: String,
     file_path: String,
-    format: String,
+    format: ManifestationFormat,
     cover_path: Option<String>,
     title: Option<String>,
     description: Option<String>,
@@ -102,7 +103,7 @@ pub async fn run_once(
     let reason = snap.reason.clone();
 
     // Skip early when retrying won't help.
-    if snap.format != "epub" {
+    if snap.format != ManifestationFormat::Epub {
         return Ok(RunOutcome::Skipped {
             manifestation_id,
             reason,
@@ -449,7 +450,7 @@ fn rollback_atomic(
 async fn load_snapshot(pool: &PgPool, job_id: Uuid) -> Result<JobSnapshot, WritebackError> {
     let row = sqlx::query(
         "SELECT wj.manifestation_id, wj.reason, \
-                m.work_id, m.file_path, m.format::text AS format, m.cover_path, \
+                m.work_id, m.file_path, m.format, m.cover_path, \
                 m.publisher, m.pub_date, m.isbn_10, m.isbn_13, \
                 w.title, w.description, w.language \
            FROM writeback_jobs wj \
@@ -635,6 +636,7 @@ fn move_cover_sidecar(pending_path: &str) -> std::io::Result<()> {
 mod tests {
     use super::*;
     use crate::config::{CleanupMode, CoverConfig, EnrichmentConfig, WritebackConfig};
+    use crate::models::manifestation_format::ManifestationFormat;
     use std::io::Write;
     use zip::ZipWriter;
     use zip::write::{ExtendedFileOptions, FileOptions};
@@ -655,7 +657,7 @@ mod tests {
             oidc_client_secret: String::new(),
             oidc_redirect_uri: String::new(),
             ingestion_database_url: String::new(),
-            format_priority: vec!["epub".into()],
+            format_priority: vec![ManifestationFormat::Epub],
             cleanup_mode: CleanupMode::None,
             enrichment: EnrichmentConfig {
                 enabled: false,
@@ -1461,7 +1463,7 @@ mod tests {
             manifestation_id: Uuid::nil(),
             reason: "metadata".into(),
             file_path: String::new(),
-            format: "epub".into(),
+            format: ManifestationFormat::Epub,
             cover_path: None,
             title: title.map(|s| s.to_string()),
             description: None,

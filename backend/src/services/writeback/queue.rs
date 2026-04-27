@@ -332,6 +332,7 @@ pub(crate) async fn revert_in_progress(pool: &PgPool) -> sqlx::Result<()> {
 mod tests {
     use super::*;
     use crate::config::{CleanupMode, CoverConfig, EnrichmentConfig, WritebackConfig};
+    use crate::models::manifestation_format::ManifestationFormat;
     use tokio::sync::Barrier;
 
     use crate::test_support::db::{app_pool_for, ingestion_pool_for, writeback_pool_for};
@@ -350,7 +351,7 @@ mod tests {
             oidc_client_secret: String::new(),
             oidc_redirect_uri: String::new(),
             ingestion_database_url: String::new(),
-            format_priority: vec!["epub".into()],
+            format_priority: vec![ManifestationFormat::Epub],
             cleanup_mode: CleanupMode::None,
             enrichment: EnrichmentConfig {
                 enabled: false,

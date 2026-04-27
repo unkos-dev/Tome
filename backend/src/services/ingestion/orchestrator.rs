@@ -6,7 +6,9 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 use walkdir::WalkDir;
 
-use crate::config::{CleanupMode, Config, SUPPORTED_FORMATS};
+use crate::config::{CleanupMode, Config};
+use crate::models::ingestion_status::IngestionStatus;
+use crate::models::manifestation_format::ManifestationFormat;
 use crate::models::{ingestion_job, work};
 use crate::services::epub::{self, ValidationOutcome};
 use crate::services::ingestion::{cleanup, copier, format_filter, path_template, quarantine};
@@ -323,21 +325,23 @@ async fn process_file(
     };
 
     // Step 4: Determine manifestation_format from extension.
-    // This check is invariant-enforced (format_filter only selects extensions from
-    // format_priority ⊆ SUPPORTED_FORMATS), but we keep it as a safety net.
+    // The format_filter::select_by_priority earlier guarantees ext parses to a
+    // ManifestationFormat — this is the safety net for any code path that
+    // bypasses that filter.
     let ext = vars.get("ext").cloned().unwrap_or_default();
-    if !SUPPORTED_FORMATS.contains(&ext.as_str()) {
-        // Clean up the copy that was already written to the library.
-        let dest = dest_path_str.clone();
-        let _ = tokio::task::spawn_blocking(move || {
-            if let Err(e) = std::fs::remove_file(&dest) {
-                tracing::warn!(path = %dest, error = %e, "failed to remove orphaned library file after format check");
-            }
-        })
-        .await;
-        return ProcessResult::Failed(format!("unsupported format: {ext}"));
-    }
-    let format_str = ext.as_str();
+    let format = match ext.parse::<ManifestationFormat>() {
+        Ok(fmt) => fmt,
+        Err(_) => {
+            let dest = dest_path_str.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                if let Err(e) = std::fs::remove_file(&dest) {
+                    tracing::warn!(path = %dest, error = %e, "failed to remove orphaned library file after format check");
+                }
+            })
+            .await;
+            return ProcessResult::Failed(format!("unsupported format: {ext}"));
+        }
+    };
 
     // Step 4.5: EPUB structural validation and auto-repair.
     // Only applies to EPUB files; other formats pass through as 'valid'.
@@ -475,7 +479,7 @@ async fn process_file(
         &vars,
         &final_path_str,
         &copy_result,
-        format_str,
+        format,
         validation_status_str,
         &accessibility_metadata,
     )
@@ -537,7 +541,7 @@ async fn commit_ingest(
     vars: &std::collections::HashMap<String, String>,
     final_path_str: &str,
     copy_result: &copier::CopyResult,
-    format_str: &str,
+    format: ManifestationFormat,
     validation_status_str: &str,
     accessibility_metadata: &Option<serde_json::Value>,
 ) -> Result<(Uuid, Uuid), sqlx::Error> {
@@ -562,15 +566,15 @@ async fn commit_ingest(
         "INSERT INTO manifestations \
              (work_id, format, file_path, ingestion_file_hash, current_file_hash, \
               file_size_bytes, ingestion_status, validation_status, accessibility_metadata) \
-         VALUES ($1, $2::manifestation_format, $3, $4, $4, $5, \
-                 'complete'::ingestion_status, $6::validation_status, $7) \
+         VALUES ($1, $2, $3, $4, $4, $5, $6, $7::validation_status, $8) \
          RETURNING id",
     )
     .bind(work_id)
-    .bind(format_str)
+    .bind(format)
     .bind(final_path_str)
     .bind(&copy_result.sha256)
     .bind(copy_result.file_size as i64)
+    .bind(IngestionStatus::Complete)
     .bind(validation_status_str)
     .bind(accessibility_metadata)
     .fetch_one(&mut *tx)
@@ -675,7 +679,7 @@ mod tests {
             oidc_client_secret: String::new(),
             oidc_redirect_uri: String::new(),
             ingestion_database_url: String::new(),
-            format_priority: vec!["epub".into(), "pdf".into()],
+            format_priority: vec![ManifestationFormat::Epub, ManifestationFormat::Pdf],
             // Preserve source files during tests so we can run multiple scans
             cleanup_mode: CleanupMode::None,
             enrichment: crate::config::EnrichmentConfig {

@@ -11,6 +11,7 @@ use crate::auth::oidc::OidcClient;
 use crate::config::{
     CleanupMode, Config, CoverConfig, EnrichmentConfig, OpdsConfig, SecurityConfig, WritebackConfig,
 };
+use crate::models::manifestation_format::ManifestationFormat;
 use crate::state::AppState;
 
 pub fn test_config() -> Config {
@@ -28,12 +29,12 @@ pub fn test_config() -> Config {
         oidc_redirect_uri: String::new(),
         ingestion_database_url: String::new(),
         format_priority: vec![
-            "epub".into(),
-            "pdf".into(),
-            "mobi".into(),
-            "azw3".into(),
-            "cbz".into(),
-            "cbr".into(),
+            ManifestationFormat::Epub,
+            ManifestationFormat::Pdf,
+            ManifestationFormat::Mobi,
+            ManifestationFormat::Azw3,
+            ManifestationFormat::Cbz,
+            ManifestationFormat::Cbr,
         ],
         cleanup_mode: CleanupMode::All,
         enrichment: EnrichmentConfig {
