@@ -802,6 +802,7 @@ pub async fn fan_out_for_dry_run(
 mod tests {
     use super::*;
     use crate::config::{CleanupMode, CoverConfig, EnrichmentConfig};
+    use crate::models::manifestation_format::ManifestationFormat;
     use serde_json::json;
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -904,7 +905,7 @@ mod tests {
             oidc_client_secret: String::new(),
             oidc_redirect_uri: String::new(),
             ingestion_database_url: String::new(),
-            format_priority: vec!["epub".into()],
+            format_priority: vec![ManifestationFormat::Epub],
             cleanup_mode: CleanupMode::None,
             enrichment: EnrichmentConfig {
                 enabled: true,

@@ -1,16 +1,15 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use crate::models::manifestation_format::ManifestationFormat;
+
 /// Select the highest-priority format for each filename stem.
 ///
 /// Groups files by `(parent_directory, lowercase_stem)` so that files with the
 /// same name in different subdirectories are treated as distinct books. For each
 /// group, picks the file whose extension matches the earliest entry in `priority`.
 /// Files with unknown or missing extensions are silently ignored.
-pub fn select_by_priority(files: &[PathBuf], priority: &[String]) -> Vec<PathBuf> {
-    // Group files by (parent dir, lowercase stem) — not stem alone.
-    // Stem-only grouping incorrectly collapses files from different directories
-    // (e.g., Fantasy/Foundation.epub and SciFi/Foundation.pdf) into one group.
+pub fn select_by_priority(files: &[PathBuf], priority: &[ManifestationFormat]) -> Vec<PathBuf> {
     let mut groups: HashMap<(PathBuf, String), Vec<&PathBuf>> = HashMap::new();
     for file in files {
         let parent = file.parent().unwrap_or(Path::new("")).to_path_buf();
@@ -26,12 +25,19 @@ pub fn select_by_priority(files: &[PathBuf], priority: &[String]) -> Vec<PathBuf
     for candidates in groups.values() {
         let mut best: Option<(usize, &PathBuf)> = None;
         for candidate in candidates {
-            let ext = candidate
+            let Some(ext) = candidate
                 .extension()
                 .and_then(|e| e.to_str())
-                .map(|e| e.to_lowercase());
-            if let Some(ext) = ext
-                && let Some(pos) = priority.iter().position(|p| *p == ext)
+                .map(|e| e.to_lowercase())
+            else {
+                continue;
+            };
+            // Unknown extensions (parse failure) are silently ignored — the
+            // ingestion orchestrator's earlier guard already enforces support.
+            let Ok(fmt) = ext.parse::<ManifestationFormat>() else {
+                continue;
+            };
+            if let Some(pos) = priority.iter().position(|p| *p == fmt)
                 && (best.is_none() || pos < best.unwrap().0)
             {
                 best = Some((pos, candidate));
@@ -42,7 +48,6 @@ pub fn select_by_priority(files: &[PathBuf], priority: &[String]) -> Vec<PathBuf
         }
     }
 
-    // Sort for deterministic output
     selected.sort();
     selected
 }
@@ -51,14 +56,14 @@ pub fn select_by_priority(files: &[PathBuf], priority: &[String]) -> Vec<PathBuf
 mod tests {
     use super::*;
 
-    fn priority() -> Vec<String> {
+    fn priority() -> Vec<ManifestationFormat> {
         vec![
-            "epub".into(),
-            "pdf".into(),
-            "mobi".into(),
-            "azw3".into(),
-            "cbz".into(),
-            "cbr".into(),
+            ManifestationFormat::Epub,
+            ManifestationFormat::Pdf,
+            ManifestationFormat::Mobi,
+            ManifestationFormat::Azw3,
+            ManifestationFormat::Cbz,
+            ManifestationFormat::Cbr,
         ]
     }
 
@@ -109,7 +114,7 @@ mod tests {
 
     #[test]
     fn custom_priority_pdf_first() {
-        let priority = vec!["pdf".into(), "epub".into()];
+        let priority = vec![ManifestationFormat::Pdf, ManifestationFormat::Epub];
         let files = vec![PathBuf::from("a.epub"), PathBuf::from("a.pdf")];
         let result = select_by_priority(&files, &priority);
         assert_eq!(result, vec![PathBuf::from("a.pdf")]);

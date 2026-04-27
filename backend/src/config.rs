@@ -1,5 +1,7 @@
 use std::env;
 
+use crate::models::manifestation_format::ManifestationFormat;
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub port: u16,
@@ -14,7 +16,7 @@ pub struct Config {
     pub oidc_client_secret: String,
     pub oidc_redirect_uri: String,
     pub ingestion_database_url: String,
-    pub format_priority: Vec<String>,
+    pub format_priority: Vec<ManifestationFormat>,
     pub cleanup_mode: CleanupMode,
     pub enrichment: EnrichmentConfig,
     pub cover: CoverConfig,
@@ -115,9 +117,6 @@ pub enum CleanupMode {
     None,
 }
 
-/// Formats supported by the manifestation_format DB enum.
-pub const SUPPORTED_FORMATS: &[&str] = &["epub", "pdf", "mobi", "azw3", "cbz", "cbr"];
-
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
     #[error("missing required environment variable: {0}")]
@@ -153,24 +152,21 @@ impl Config {
         let ingestion_database_url =
             env::var("DATABASE_URL_INGESTION").unwrap_or_else(|_| database_url.clone());
 
-        let format_priority: Vec<String> = env::var("REVERIE_FORMAT_PRIORITY")
+        let format_priority: Vec<ManifestationFormat> = env::var("REVERIE_FORMAT_PRIORITY")
             .unwrap_or_else(|_| "epub,pdf,mobi,azw3,cbz,cbr".into())
             .split(',')
             .map(|s| s.trim().to_lowercase())
             .filter(|s| !s.is_empty())
-            .collect();
-
-        for fmt in &format_priority {
-            if !SUPPORTED_FORMATS.contains(&fmt.as_str()) {
-                return Err(ConfigError::Invalid {
-                    var: "REVERIE_FORMAT_PRIORITY".into(),
-                    reason: format!(
-                        "unsupported format '{fmt}'. Supported: {}",
-                        SUPPORTED_FORMATS.join(", ")
-                    ),
-                });
-            }
-        }
+            .map(|s| {
+                s.parse::<ManifestationFormat>()
+                    .map_err(|_| ConfigError::Invalid {
+                        var: "REVERIE_FORMAT_PRIORITY".into(),
+                        reason: format!(
+                            "unsupported format '{s}'. Supported: epub, pdf, mobi, azw3, cbz, cbr"
+                        ),
+                    })
+            })
+            .collect::<Result<_, _>>()?;
 
         let cleanup_mode = match env::var("REVERIE_CLEANUP_MODE")
             .unwrap_or_else(|_| "all".into())
@@ -605,7 +601,14 @@ mod tests {
                 );
                 assert_eq!(
                     config.format_priority,
-                    vec!["epub", "pdf", "mobi", "azw3", "cbz", "cbr"]
+                    vec![
+                        ManifestationFormat::Epub,
+                        ManifestationFormat::Pdf,
+                        ManifestationFormat::Mobi,
+                        ManifestationFormat::Azw3,
+                        ManifestationFormat::Cbz,
+                        ManifestationFormat::Cbr,
+                    ]
                 );
                 assert_eq!(config.cleanup_mode, CleanupMode::All);
                 // Enrichment defaults
@@ -770,7 +773,14 @@ mod tests {
                     config.ingestion_database_url,
                     "postgres://ingestion@localhost/reverie_dev"
                 );
-                assert_eq!(config.format_priority, vec!["pdf", "epub", "mobi"]);
+                assert_eq!(
+                    config.format_priority,
+                    vec![
+                        ManifestationFormat::Pdf,
+                        ManifestationFormat::Epub,
+                        ManifestationFormat::Mobi,
+                    ]
+                );
             },
         );
     }

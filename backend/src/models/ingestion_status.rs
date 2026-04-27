@@ -1,0 +1,75 @@
+//! `IngestionStatus` — closed value set for the Postgres `ingestion_status`
+//! ENUM applied to `manifestations.ingestion_status`.
+//!
+//! Defensive type-safety (UNK-107): there is no current Rust-side `String`
+//! field for this enum; values are written as SQL literals
+//! (`'complete'::ingestion_status`) at INSERT time and never read back into
+//! Rust. Introducing the type lets future read paths decode loudly via
+//! `sqlx::Type` and replaces the SQL literal pattern with bindable values.
+//!
+//! Wire formats:
+//! - Postgres: `ingestion_status` ENUM type (see migration
+//!   `20260412150001_extensions_enums_and_roles.up.sql`).
+//! - JSON: lowercase string —
+//!   "pending" | "processing" | "complete" | "failed" | "skipped".
+
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, sqlx::Type,
+)]
+#[serde(rename_all = "lowercase")]
+#[sqlx(type_name = "ingestion_status", rename_all = "lowercase")]
+pub enum IngestionStatus {
+    Pending,
+    Processing,
+    Complete,
+    Failed,
+    Skipped,
+}
+
+impl IngestionStatus {
+    /// Wire string for any place that needs the canonical lowercase form.
+    /// Matches the `#[serde(rename_all)]` and `#[sqlx(rename_all)]` mappings.
+    #[allow(dead_code)] // No production consumer yet — anchors wire-format invariant for future read paths.
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Processing => "processing",
+            Self::Complete => "complete",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn as_str_matches_serde_lowercase() {
+        for (variant, wire) in [
+            (IngestionStatus::Pending, "pending"),
+            (IngestionStatus::Processing, "processing"),
+            (IngestionStatus::Complete, "complete"),
+            (IngestionStatus::Failed, "failed"),
+            (IngestionStatus::Skipped, "skipped"),
+        ] {
+            assert_eq!(variant.as_str(), wire);
+        }
+    }
+
+    #[test]
+    fn json_roundtrip_uses_lowercase_string() {
+        let status = IngestionStatus::Complete;
+        let json = serde_json::to_string(&status).expect("serialize");
+        assert_eq!(json, "\"complete\"");
+        let back: IngestionStatus = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back, IngestionStatus::Complete);
+    }
+
+    #[test]
+    fn json_rejects_unknown_variant() {
+        let result: Result<IngestionStatus, _> = serde_json::from_str("\"resumed\"");
+        assert!(result.is_err(), "expected resumed to be rejected");
+    }
+}

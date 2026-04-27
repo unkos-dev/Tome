@@ -266,6 +266,7 @@ mod tests {
 
     fn test_config_with_max_attempts(max_attempts: u32) -> Config {
         use crate::config::{CleanupMode, CoverConfig, EnrichmentConfig};
+        use crate::models::manifestation_format::ManifestationFormat;
 
         Config {
             port: 3000,
@@ -280,7 +281,7 @@ mod tests {
             oidc_client_secret: String::new(),
             oidc_redirect_uri: String::new(),
             ingestion_database_url: String::new(),
-            format_priority: vec!["epub".into()],
+            format_priority: vec![ManifestationFormat::Epub],
             cleanup_mode: CleanupMode::None,
             enrichment: EnrichmentConfig {
                 enabled: true,
