@@ -59,7 +59,7 @@ interface ExampleProps {
 function Example({ label, children }: ExampleProps): ReactElement {
   return (
     <div className="bg-surface border border-border rounded-md p-4 flex flex-col gap-3">
-      <span className="text-fg-faint text-xs uppercase tracking-wider">
+      <span className="text-fg-muted text-xs uppercase tracking-wider">
         {label}
       </span>
       {children}
@@ -77,7 +77,7 @@ export default function DesignSystemPage(): ReactElement {
             size={28}
             theme={effective === "dark" ? "dark" : "light"}
           />
-          <span className="text-fg-faint text-sm">/ design-system</span>
+          <span className="text-fg-muted text-sm">/ design-system</span>
         </div>
         <ThemeSwitcher />
       </header>
@@ -104,29 +104,38 @@ export default function DesignSystemPage(): ReactElement {
 
         <Section
           title="Buttons"
-          description="Action / outline / ghost. No 'destructive' hue per philosophy §11A."
+          description="Brand rule: bg-accent (Reverie Gold) is reserved for large CTAs, focus rings, and recovery actions on Light theme — the 8E6F38 darkened gold passes AA at 18pt+ but not at 14pt body. Default-size actions use the outline variant; lg size unlocks the gold fill."
         >
-          <Example label="Primary action">
-            <Button>Add to library</Button>
+          <Example label="Primary action (large CTA)">
+            <Button size="lg">Add to library</Button>
           </Example>
-          <Example label="Outline">
+          <Example label="Outline (default size)">
             <Button variant="outline">Browse</Button>
           </Example>
           <Example label="Ghost">
             <Button variant="ghost">Cancel</Button>
           </Example>
           <Example label="Disabled">
-            <Button disabled>Pending</Button>
+            <Button disabled variant="outline">
+              Pending
+            </Button>
           </Example>
-          <Example label="Sizes">
+          <Example label="Sizes (outline, brand-aligned)">
             <div className="flex flex-col items-start gap-2">
-              <Button size="sm">Small</Button>
-              <Button size="default">Default</Button>
+              <Button size="sm" variant="outline">
+                Small
+              </Button>
+              <Button size="default" variant="outline">
+                Default
+              </Button>
               <Button size="lg">Large</Button>
             </div>
           </Example>
           <Example label="Loading (opacity-pulse)">
-            <Button className="animate-[loading-pulse_1.6s_ease-in-out_infinite]">
+            <Button
+              size="lg"
+              className="animate-[loading-pulse_1.6s_ease-in-out_infinite]"
+            >
               Saving…
             </Button>
           </Example>
@@ -168,8 +177,8 @@ export default function DesignSystemPage(): ReactElement {
           </Example>
           <Example label="Select">
             <Select defaultValue="title">
-              <SelectTrigger className="w-full">
-                <SelectValue />
+              <SelectTrigger className="w-full" aria-label="Sort order">
+                <SelectValue placeholder="Sort by" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="title">Title</SelectItem>
@@ -194,7 +203,9 @@ export default function DesignSystemPage(): ReactElement {
                 </p>
               </CardContent>
               <CardFooter>
-                <Button size="sm">Open</Button>
+                <Button size="sm" variant="outline">
+                  Open
+                </Button>
               </CardFooter>
             </Card>
           </Example>
@@ -262,11 +273,16 @@ export default function DesignSystemPage(): ReactElement {
               </Button>
             </div>
           </Example>
-          <Example label="Disabled (opacity-50 + text-fg-faint)">
-            <p className="opacity-50 text-fg-faint">Unavailable in offline mode</p>
+          <Example label="Disabled (opacity-50 + text-fg-muted, aria-disabled)">
+            <p
+              className="opacity-50 text-fg-muted"
+              aria-disabled="true"
+            >
+              Unavailable in offline mode
+            </p>
           </Example>
-          <Example label="Selected (bg-accent-soft + text-fg-on-accent)">
-            <span className="bg-accent-soft text-fg-on-accent rounded-sm px-2 py-1 text-sm">
+          <Example label="Selected (bg-accent-soft + text-fg)">
+            <span className="bg-accent-soft text-fg rounded-sm px-2 py-1 text-sm">
               Currently reading
             </span>
           </Example>
