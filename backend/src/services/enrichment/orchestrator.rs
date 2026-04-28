@@ -291,7 +291,13 @@ async fn apply_canonical_batch(
 
             match decision {
                 Decision::Apply(version_id) => {
-                    apply_field(tx, snapshot, field, version_id).await?;
+                    if !apply_field(tx, snapshot, field, version_id).await? {
+                        // Journal value unusable (non-string, malformed
+                        // date) — try the next source for this field
+                        // instead of inflating counters and enqueuing a
+                        // writeback for a change that did not happen.
+                        continue;
+                    }
                     outcome.applied += 1;
                     info!(
                         %manifestation_id, %field, %version_id, source_id,
@@ -299,12 +305,21 @@ async fn apply_canonical_batch(
                     );
                     if field == "isbn_10" || field == "isbn_13" {
                         let rematch = work::rematch_on_isbn_change(tx, manifestation_id).await?;
-                        if matches!(rematch, work::RematchOutcome::Suspected { .. }) {
-                            outcome.duplicate_suspected = true;
-                            warn!(
-                                %manifestation_id,
-                                "enrichment: work.duplicate_suspected"
-                            );
+                        match rematch {
+                            work::RematchOutcome::NoOp => {}
+                            work::RematchOutcome::Suspected { .. } => {
+                                outcome.duplicate_suspected = true;
+                                warn!(
+                                    %manifestation_id,
+                                    "enrichment: work.duplicate_suspected"
+                                );
+                            }
+                            work::RematchOutcome::AutoMerged { from, to } => {
+                                info!(
+                                    %manifestation_id, %from, %to,
+                                    "enrichment: work.auto_merged"
+                                );
+                            }
                         }
                     }
                     // Enqueue writeback in the same tx so the pointer move
@@ -592,7 +607,6 @@ fn is_work_field(field: &str) -> bool {
     matches!(field, "title" | "description" | "language")
 }
 
-/// Apply a scalar field to its canonical column + `*_version_id` pointer.
 fn is_cover_field(f: &str) -> bool {
     f == "cover" || f == "cover_url"
 }
@@ -618,12 +632,19 @@ async fn enqueue_writeback(
     Ok(())
 }
 
+/// Apply a scalar field to its canonical column + `*_version_id` pointer.
+///
+/// Returns `true` when the apply should count toward the run's `applied`
+/// tally and trigger a writeback enqueue. Returns `false` when the journal
+/// value is unusable (non-string JSON, malformed `pub_date`) so the caller
+/// can try the next source instead of inflating counters and enqueuing a
+/// writeback for a change that did not happen.
 async fn apply_field(
     tx: &mut Transaction<'_, Postgres>,
     snapshot: &Snapshot,
     field: &str,
     version_id: Uuid,
-) -> sqlx::Result<()> {
+) -> sqlx::Result<bool> {
     // Pull canonical value from the journal row — serialised as JSON so we
     // have a single source of truth.
     let value: serde_json::Value =
@@ -636,7 +657,7 @@ async fn apply_field(
         "title" => {
             let Some(v) = json_as_string(&value) else {
                 tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
-                return Ok(());
+                return Ok(false);
             };
             sqlx::query(
                 "UPDATE works SET title = $1, sort_title = lower($1), title_version_id = $2 \
@@ -647,11 +668,12 @@ async fn apply_field(
             .bind(snapshot.work_id)
             .execute(&mut **tx)
             .await?;
+            Ok(true)
         }
         "description" => {
             let Some(v) = json_as_string(&value) else {
                 tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
-                return Ok(());
+                return Ok(false);
             };
             sqlx::query(
                 "UPDATE works SET description = $1, description_version_id = $2 WHERE id = $3",
@@ -661,11 +683,12 @@ async fn apply_field(
             .bind(snapshot.work_id)
             .execute(&mut **tx)
             .await?;
+            Ok(true)
         }
         "language" => {
             let Some(v) = json_as_string(&value) else {
                 tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
-                return Ok(());
+                return Ok(false);
             };
             sqlx::query("UPDATE works SET language = $1, language_version_id = $2 WHERE id = $3")
                 .bind(&v)
@@ -673,11 +696,12 @@ async fn apply_field(
                 .bind(snapshot.work_id)
                 .execute(&mut **tx)
                 .await?;
+            Ok(true)
         }
         "publisher" => {
             let Some(v) = json_as_string(&value) else {
                 tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
-                return Ok(());
+                return Ok(false);
             };
             sqlx::query(
                 "UPDATE manifestations SET publisher = $1, publisher_version_id = $2 WHERE id = $3",
@@ -687,34 +711,36 @@ async fn apply_field(
             .bind(snapshot.manifestation_id)
             .execute(&mut **tx)
             .await?;
+            Ok(true)
         }
         "pub_date" => {
             let Some(v) = json_as_string(&value) else {
                 tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
-                return Ok(());
+                return Ok(false);
             };
-            if let Ok(date) = parse_iso_date(&v) {
-                sqlx::query(
-                    "UPDATE manifestations SET pub_date = $1, pub_date_version_id = $2 WHERE id = $3",
-                )
-                .bind(date)
-                .bind(version_id)
-                .bind(snapshot.manifestation_id)
-                .execute(&mut **tx)
-                .await?;
-            } else {
-                // Intentional divergence from routes::metadata::apply_version,
-                // which returns AppError::Validation. In the pipeline a bad
-                // pub_date comes from an external source; we keep the journal
-                // row so a reviewer can still accept/reject it and skip the
-                // canonical write.
+            // Intentional divergence from routes::metadata::apply_version,
+            // which returns AppError::Validation. In the pipeline a bad
+            // pub_date comes from an external source; we keep the journal
+            // row so a reviewer can still accept/reject it and skip the
+            // canonical write.
+            let Ok(date) = parse_iso_date(&v) else {
                 tracing::debug!(value = %v, "pub_date value not ISO; skipping canonical apply");
-            }
+                return Ok(false);
+            };
+            sqlx::query(
+                "UPDATE manifestations SET pub_date = $1, pub_date_version_id = $2 WHERE id = $3",
+            )
+            .bind(date)
+            .bind(version_id)
+            .bind(snapshot.manifestation_id)
+            .execute(&mut **tx)
+            .await?;
+            Ok(true)
         }
         "isbn_10" => {
             let Some(v) = json_as_string(&value) else {
                 tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
-                return Ok(());
+                return Ok(false);
             };
             sqlx::query(
                 "UPDATE manifestations SET isbn_10 = $1, isbn_10_version_id = $2 WHERE id = $3",
@@ -724,11 +750,12 @@ async fn apply_field(
             .bind(snapshot.manifestation_id)
             .execute(&mut **tx)
             .await?;
+            Ok(true)
         }
         "isbn_13" => {
             let Some(v) = json_as_string(&value) else {
                 tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
-                return Ok(());
+                return Ok(false);
             };
             sqlx::query(
                 "UPDATE manifestations SET isbn_13 = $1, isbn_13_version_id = $2 WHERE id = $3",
@@ -738,12 +765,17 @@ async fn apply_field(
             .bind(snapshot.manifestation_id)
             .execute(&mut **tx)
             .await?;
+            Ok(true)
         }
+        // Cover fields and any other recognised non-canonical fields rely on
+        // the writeback worker for the actual change (Step 11), so the
+        // caller still enqueues a writeback and counts the apply.
+        other if is_cover_field(other) => Ok(true),
         other => {
             tracing::debug!(field = %other, "no auto-apply handler; staying staged");
+            Ok(false)
         }
     }
-    Ok(())
 }
 
 /// Coerce a JSON journal value into the scalar string that canonical
@@ -790,7 +822,9 @@ fn summarise_failure(source_id: &str, err: &SourceError) -> SourceFailure {
     };
     SourceFailure {
         source_id: source_id.to_string(),
-        error: err.to_string(),
+        // {err:#} preserves the full anyhow `.chain()` of context for
+        // SourceError::Other; otherwise only the leaf message survives.
+        error: format!("{err:#}"),
         retry_after,
         terminal,
     }
