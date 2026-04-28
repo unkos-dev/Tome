@@ -43,10 +43,11 @@ brand invariant:
 | State | Expression |
 |---|---|
 | Default / idle | `text-fg`, `bg-surface` (or unchanged) |
-| Hover | `translate-y-[-1px]` + `border-border-strong` |
+| Hover (surface lift) | `translate-y-[-1px]` + `border-border-strong` |
+| Hover (in-list item) | `bg-hover` (= `bg-surface-2`); brand gold is reserved for primary affordances and is never a hover treatment |
 | Active / pressed | `bg-accent` or `bg-accent-strong` |
 | Selected | `bg-accent-soft` background + `text-fg` |
-| Disabled | `opacity-50` + `text-fg-faint` |
+| Disabled | `opacity-50` + `text-fg-muted` |
 | Loading | opacity pulse 0.85 ↔ 1.0, ~1.6s, on the region |
 | Error | `text-fg font-semibold` + gold recovery action |
 | Success (explicit) | gold inline note (`text-fg-on-accent` on full `bg-accent` fill); fades after ~3s |
@@ -61,6 +62,33 @@ assumption they'll be useful later. Charts and code blocks are scoped
 exceptions — when they ship, the deviation is documented in
 [Visual Identity](/design/visual-identity/) and constrained to the
 surface that requires it.
+
+`--color-fg-faint` is **decorative-only** — breadcrumb separators,
+ornamental dividers, and similar tertiary glyphs. It is never a
+functional-state colour, because `opacity-50 × text-fg-faint` falls
+below AA in both themes; that's why the disabled-state mapping above
+uses `text-fg-muted` instead.
+
+Brand `--color-accent` (Reverie Gold) is the signature affordance for
+primary actions, focus rings, and recovery actions only. It is **not**
+a hover treatment. shadcn primitives that ship with `bg-accent` for
+hover/focus (dropdown items, select items) bind to `--color-hover`
+(= `--color-surface-2`) instead, so the gold register stays
+unambiguous.
+
+### Light-theme accent: documented axe deviation
+
+The Light-theme accent (`#8E6F38`) passes WCAG 2.2 1.4.11 (UI-component
+3:1) and 1.4.3 large-text against Parchment, but does **not** pass
+1.4.3 normal-text 4.5:1. axe-core therefore surfaces violations on
+Light surfaces where `bg-accent` carries normal body text. The
+restriction "use Reverie Gold only for focus rings, large CTAs, and
+recovery actions" is the brand's mitigation; the
+[`/design/system`](/design/visual-identity/) gallery may surface a
+small number of axe violations on the documented `lg`-size button +
+badge surfaces, and the design-system axe gate tolerates those.
+Introducing `bg-accent` on *new* normal-size Light surfaces is a brand
+violation, not an axe-noise issue, and reviewers should reject it.
 
 ## Motion
 

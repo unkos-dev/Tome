@@ -125,7 +125,40 @@ describe("cspHashPlugin", () => {
       // @ts-expect-error — see note above.
       configResolved(fakeResolvedConfig(root, "serve"));
     }
-    expect(() => getHandler(plugin)(VALID_HTML)).toThrow(/<\/script>/i);
+    expect(() => getHandler(plugin)(VALID_HTML)).toThrow(/closing-script-tag literal/i);
+  });
+
+  // The HTML parser terminates an inline <script> at `</script` followed by
+  // any of: whitespace (\s), `/`, or `>`. The guard must catch all four
+  // termination signatures, not just `</script>`. UNK-114 issue 5.
+  it.each([
+    ["space", "var x = '</script ';"],
+    ["tab", "var x = '</script\t';"],
+    ["newline", "var x = '</script\n';"],
+    ["slash", "var x = '</script/';"],
+  ])("throws when fouc.js contains </script followed by %s", (_label, body) => {
+    const plugin = cspHashPlugin();
+    const root = projectWithFouc(body);
+    const configResolved = plugin.configResolved;
+    if (typeof configResolved === "function") {
+      // @ts-expect-error — see note above.
+      configResolved(fakeResolvedConfig(root, "serve"));
+    }
+    expect(() => getHandler(plugin)(VALID_HTML)).toThrow(/closing-script-tag literal/i);
+  });
+
+  it("does NOT throw when </script appears as a non-terminating substring (e.g. </scripty)", () => {
+    const plugin = cspHashPlugin();
+    // `</scripty>` is not a script terminator — the next char after `</script`
+    // is a name character, not whitespace/slash/`>`. Must not false-positive.
+    const body = "var s = '</scripty>';";
+    const root = projectWithFouc(body);
+    const configResolved = plugin.configResolved;
+    if (typeof configResolved === "function") {
+      // @ts-expect-error — see note above.
+      configResolved(fakeResolvedConfig(root, "serve"));
+    }
+    expect(() => getHandler(plugin)(VALID_HTML)).not.toThrow();
   });
 
   it("end-to-end: `npx vite build` produces sidecar whose hash matches the injected inline script body", () => {

@@ -40,6 +40,14 @@
   --color-accent-soft:   var(--accent-soft);
   --color-accent-strong: var(--accent-strong);
   --color-fg-on-accent:  var(--fg-on-accent);
+  /* `bg-hover` is the shadcn-primitive hover/focus lift token.
+     Decoupled from brand `--color-accent` (Reverie Gold) so dropdown,
+     select, and similar primitives don't saturate gold on every hover.
+     Per philosophy §11A "no hue-coded states" + §2 "quiet over loud":
+     gold is the signature for primary affordance, not a hover treatment.
+     Aliased to `--color-surface-2` so hover reads as a quiet elevation
+     in both themes; redefine if hover needs to diverge from surface-2. */
+  --color-hover:         var(--surface-2);
 
   /* Typography — Satoshi for body/chrome, Author for display, JetBrains
      Mono is loaded but conditional (UNK-113 reviews adoption post-0.1.0). */
@@ -77,7 +85,6 @@
   --color-secondary-foreground: var(--fg);
   --color-muted:                var(--surface);
   --color-muted-foreground:     var(--fg-muted);
-  --color-accent-foreground:    var(--fg-on-accent);
   --color-input:                var(--border);
   --color-ring:                 var(--accent);
   --color-destructive:          var(--fg);

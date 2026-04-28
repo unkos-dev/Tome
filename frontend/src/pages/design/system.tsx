@@ -250,6 +250,7 @@ export default function DesignSystemPage(): ReactElement {
             "accent-soft",
             "accent-strong",
             "fg-on-accent",
+            "hover",
           ].map((token) => (
             <Example key={token} label={`--color-${token}`}>
               <div
@@ -280,6 +281,11 @@ export default function DesignSystemPage(): ReactElement {
             >
               Unavailable in offline mode
             </p>
+          </Example>
+          <Example label="Hover (bg-hover, surface-2 lift)">
+            <span className="bg-hover text-fg rounded-sm px-2 py-1 text-sm">
+              Hovered row
+            </span>
           </Example>
           <Example label="Selected (bg-accent-soft + text-fg)">
             <span className="bg-accent-soft text-fg rounded-sm px-2 py-1 text-sm">
