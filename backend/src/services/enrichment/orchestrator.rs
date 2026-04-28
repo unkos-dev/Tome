@@ -1125,7 +1125,23 @@ mod tests {
         let cfg = config_with_mock_sources(&ol.uri(), &gb.uri(), &hc.uri(), Some("test-token"));
 
         let outcome = run_once(&pool, &cfg, m_id).await.unwrap();
-        assert!(outcome.applied >= 1, "expected at least one Apply");
+        // The break-after-Apply guard inside apply_canonical_batch must
+        // prevent agreeing siblings from re-applying — exactly one Apply,
+        // exactly one writeback row.
+        assert_eq!(
+            outcome.applied, 1,
+            "agreement should Apply once, not once per agreeing source"
+        );
+        let writeback_rows: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM writeback_jobs WHERE manifestation_id = $1")
+                .bind(m_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            writeback_rows, 1,
+            "expected exactly one writeback row, got {writeback_rows}"
+        );
 
         let canon: Option<String> = sqlx::query_scalar(
             "SELECT w.title FROM works w \
@@ -1431,6 +1447,238 @@ mod tests {
         assert!(
             cache_after > cache_before,
             "dry_run must populate api_cache (before={cache_before}, after={cache_after})"
+        );
+    }
+
+    // ── Phase-direct tests (UNK-96 follow-up) ────────────────────────────
+    //
+    // The phase decomposition makes it cheap to exercise tail-of-distribution
+    // scenarios that would otherwise need three configured wiremock servers
+    // and a full `run_once` integration call.
+
+    /// Every source returned an error → no journal rows, all failures
+    /// summarised with correct retry_after / terminal flags.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn apply_journal_batch_collects_all_source_failures(pool: PgPool) {
+        use reqwest::StatusCode;
+
+        let pool = ingestion_pool_for(&pool).await;
+        // No DB row needed — apply_journal_batch only touches the DB on the
+        // Ok arm; the manifestation_id is bound only inside upsert_journal_row.
+        let m_id = Uuid::new_v4();
+
+        let results = vec![
+            SourceRun {
+                source_id: "openlibrary".into(),
+                outcome: Err(SourceError::Timeout),
+            },
+            SourceRun {
+                source_id: "googlebooks".into(),
+                outcome: Err(SourceError::Http(StatusCode::NOT_FOUND)),
+            },
+            SourceRun {
+                source_id: "hardcover".into(),
+                outcome: Err(SourceError::RateLimited {
+                    retry_after: Some(Duration::from_secs(60)),
+                }),
+            },
+        ];
+
+        let mut tx = pool.begin().await.unwrap();
+        let (per_field, failures) = apply_journal_batch(&mut tx, m_id, &results).await.unwrap();
+        tx.commit().await.unwrap();
+
+        assert!(
+            per_field.is_empty(),
+            "no journal rows should be written when every source errored"
+        );
+        assert_eq!(failures.len(), 3);
+
+        let ol = failures
+            .iter()
+            .find(|f| f.source_id == "openlibrary")
+            .unwrap();
+        assert!(ol.retry_after.is_none(), "Timeout has no retry_after");
+        assert!(!ol.terminal, "Timeout is retryable");
+
+        let gb = failures
+            .iter()
+            .find(|f| f.source_id == "googlebooks")
+            .unwrap();
+        assert!(gb.retry_after.is_none(), "Http(404) has no retry_after");
+        assert!(gb.terminal, "non-429 4xx must be terminal");
+
+        let hc = failures
+            .iter()
+            .find(|f| f.source_id == "hardcover")
+            .unwrap();
+        assert_eq!(
+            hc.retry_after,
+            Some(Duration::from_secs(60)),
+            "RateLimited retry_after must round-trip"
+        );
+        assert!(!hc.terminal, "RateLimited is not terminal");
+    }
+
+    /// Two sources agree on a hash → first Apply fires, the inner loop
+    /// `break`s, no second Apply, exactly one writeback enqueue.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn apply_canonical_batch_breaks_after_first_apply_on_agreement(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
+        let isbn = "9780553283686";
+        let marker = Uuid::new_v4().simple().to_string();
+        let (work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
+
+        let agreed = SourceResult {
+            field_name: "publisher".into(),
+            raw_value: serde_json::json!(format!("Agreed Publisher {marker}")),
+            match_type: "isbn".into(),
+        };
+
+        let mut tx = pool.begin().await.unwrap();
+        let id_ol = upsert_journal_row(&mut tx, m_id, "openlibrary", &agreed)
+            .await
+            .unwrap();
+        let id_gb = upsert_journal_row(&mut tx, m_id, "googlebooks", &agreed)
+            .await
+            .unwrap();
+        let hash = value_hash::value_hash(&agreed.field_name, &agreed.raw_value);
+        let mut per_field: PerFieldRows = std::collections::HashMap::new();
+        per_field.insert(
+            "publisher".into(),
+            vec![
+                (
+                    "openlibrary".into(),
+                    PolicyInputRow {
+                        id: id_ol,
+                        value_hash: hash.clone(),
+                    },
+                ),
+                (
+                    "googlebooks".into(),
+                    PolicyInputRow {
+                        id: id_gb,
+                        value_hash: hash.clone(),
+                    },
+                ),
+            ],
+        );
+
+        let snapshot = Snapshot {
+            manifestation_id: m_id,
+            work_id,
+            lookup_key: None,
+            canonical: CanonicalState::default(),
+        };
+
+        let outcome = apply_canonical_batch(&mut tx, &snapshot, &per_field)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(
+            outcome.applied, 1,
+            "agreement should Apply once; break must prevent the second source from re-applying"
+        );
+        assert_eq!(outcome.staged, 0);
+        assert_eq!(outcome.skipped_locked, 0);
+
+        let writeback_rows: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM writeback_jobs WHERE manifestation_id = $1")
+                .bind(m_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            writeback_rows, 1,
+            "exactly one writeback row expected; got {writeback_rows}"
+        );
+    }
+
+    /// A pending row from a prior run with a different value_hash must
+    /// downgrade AutoFill to Propose — even when canonical is empty and the
+    /// new run has only one row.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn apply_canonical_batch_merges_prior_pending_into_decision(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
+        let isbn = "9780747532699";
+        let marker = Uuid::new_v4().simple().to_string();
+        let (work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
+
+        let prior = SourceResult {
+            field_name: "publisher".into(),
+            raw_value: serde_json::json!(format!("Prior Publisher {marker}")),
+            match_type: "isbn".into(),
+        };
+        let new = SourceResult {
+            field_name: "publisher".into(),
+            raw_value: serde_json::json!(format!("New Publisher {marker}")),
+            match_type: "isbn".into(),
+        };
+
+        let mut tx = pool.begin().await.unwrap();
+        // Simulate the prior run's pending row.
+        upsert_journal_row(&mut tx, m_id, "openlibrary", &prior)
+            .await
+            .unwrap();
+        // The current run's row.
+        let id_new = upsert_journal_row(&mut tx, m_id, "googlebooks", &new)
+            .await
+            .unwrap();
+        let new_hash = value_hash::value_hash(&new.field_name, &new.raw_value);
+        let mut per_field: PerFieldRows = std::collections::HashMap::new();
+        per_field.insert(
+            "publisher".into(),
+            vec![(
+                "googlebooks".into(),
+                PolicyInputRow {
+                    id: id_new,
+                    value_hash: new_hash,
+                },
+            )],
+        );
+
+        let snapshot = Snapshot {
+            manifestation_id: m_id,
+            work_id,
+            lookup_key: None,
+            canonical: CanonicalState::default(),
+        };
+
+        let outcome = apply_canonical_batch(&mut tx, &snapshot, &per_field)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(
+            outcome.applied, 0,
+            "disagreement with stored pending must prevent AutoFill"
+        );
+        assert_eq!(
+            outcome.staged, 1,
+            "the new run's row should land in Stage when prior pending disagrees"
+        );
+
+        let canon_publisher: Option<String> =
+            sqlx::query_scalar("SELECT publisher FROM manifestations WHERE id = $1")
+                .bind(m_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(
+            canon_publisher.is_none(),
+            "canonical publisher must remain empty"
+        );
+
+        let writeback_rows: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM writeback_jobs WHERE manifestation_id = $1")
+                .bind(m_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            writeback_rows, 0,
+            "Stage decision must not enqueue a writeback"
         );
     }
 }
