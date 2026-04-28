@@ -286,10 +286,7 @@ mod tests {
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(
-            count, 0,
-            "manifestation delete cascades into reading_state"
-        );
+        assert_eq!(count, 0, "manifestation delete cascades into reading_state");
     }
 
     #[sqlx::test(migrations = "./migrations")]
