@@ -173,16 +173,47 @@ pub async fn run_once(
     // + rematch hook all commit or roll back together.
     let mut tx = pool.begin().await?;
 
-    let mut per_field: std::collections::HashMap<String, Vec<(String, PolicyInputRow)>> =
-        std::collections::HashMap::new();
+    let (per_field, failures) = apply_journal_batch(&mut tx, manifestation_id, &results).await?;
+    let canonical = apply_canonical_batch(&mut tx, &snapshot, &per_field).await?;
+
+    tx.commit().await?;
+
+    Ok(RunOutcome {
+        manifestation_id,
+        applied: canonical.applied,
+        staged: canonical.staged,
+        skipped_locked: canonical.skipped_locked,
+        source_failures: failures,
+        duplicate_suspected: canonical.duplicate_suspected,
+    })
+}
+
+#[derive(Default)]
+struct CanonicalBatchOutcome {
+    applied: usize,
+    staged: usize,
+    skipped_locked: usize,
+    duplicate_suspected: bool,
+}
+
+type PerFieldRows = std::collections::HashMap<String, Vec<(String, PolicyInputRow)>>;
+
+/// Upsert one `metadata_versions` row per source result and bucket the
+/// resulting `(source_id, PolicyInputRow)` pairs by field.  Source-level
+/// errors are summarised into `failures` (no journal row written).
+async fn apply_journal_batch(
+    tx: &mut Transaction<'_, Postgres>,
+    manifestation_id: Uuid,
+    results: &[SourceRun],
+) -> sqlx::Result<(PerFieldRows, Vec<SourceFailure>)> {
+    let mut per_field: PerFieldRows = std::collections::HashMap::new();
     let mut failures = Vec::new();
 
-    for r in &results {
+    for r in results {
         match &r.outcome {
             Ok(source_results) => {
                 for sr in source_results {
-                    let id =
-                        upsert_journal_row(&mut tx, manifestation_id, &r.source_id, sr).await?;
+                    let id = upsert_journal_row(tx, manifestation_id, &r.source_id, sr).await?;
                     per_field.entry(sr.field_name.clone()).or_default().push((
                         r.source_id.clone(),
                         PolicyInputRow {
@@ -196,24 +227,32 @@ pub async fn run_once(
         }
     }
 
-    let mut applied = 0usize;
-    let mut staged = 0usize;
-    let mut skipped_locked = 0usize;
-    let mut duplicate_suspected = false;
+    Ok((per_field, failures))
+}
 
-    for (field, rows) in &per_field {
-        let on_work = is_work_field(field);
-        let entity = if on_work {
+/// For each field, compute confidence per upserted row, decide via
+/// [`policy::decide`], apply canonical updates inside the same transaction,
+/// and trigger ISBN rematch + writeback enqueue when applicable.
+async fn apply_canonical_batch(
+    tx: &mut Transaction<'_, Postgres>,
+    snapshot: &Snapshot,
+    per_field: &PerFieldRows,
+) -> anyhow::Result<CanonicalBatchOutcome> {
+    let manifestation_id = snapshot.manifestation_id;
+    let mut outcome = CanonicalBatchOutcome::default();
+
+    for (field, rows) in per_field {
+        let entity = if is_work_field(field) {
             EntityType::Work
         } else {
             EntityType::Manifestation
         };
-        let locked = field_lock::is_locked_tx(&mut tx, manifestation_id, entity, field).await?;
+        let locked = field_lock::is_locked_tx(tx, manifestation_id, entity, field).await?;
 
         let canonical_empty = snapshot.canonical.is_empty_for(field);
 
         // Existing pending rows from prior runs (other value_hashes).
-        let existing_pending = load_existing_pending(&mut tx, manifestation_id, field).await?;
+        let existing_pending = load_existing_pending(tx, manifestation_id, field).await?;
 
         // quorum counts distinct rows in *this* run with the same hash.
         for (source_id, incoming) in rows {
@@ -227,13 +266,13 @@ pub async fn run_once(
             let match_type: String =
                 sqlx::query_scalar("SELECT match_type FROM metadata_versions WHERE id = $1")
                     .bind(incoming.id)
-                    .fetch_one(&mut *tx)
+                    .fetch_one(&mut **tx)
                     .await?;
             let confidence_score = confidence::score(source_id, &match_type, quorum);
             sqlx::query("UPDATE metadata_versions SET confidence_score = $1 WHERE id = $2")
                 .bind(confidence_score)
                 .bind(incoming.id)
-                .execute(&mut *tx)
+                .execute(&mut **tx)
                 .await?;
             tracing::debug!(
                 %field, source_id, quorum, %match_type, confidence_score,
@@ -252,17 +291,16 @@ pub async fn run_once(
 
             match decision {
                 Decision::Apply(version_id) => {
-                    apply_field(&mut tx, &snapshot, field, version_id).await?;
-                    applied += 1;
+                    apply_field(tx, snapshot, field, version_id).await?;
+                    outcome.applied += 1;
                     info!(
                         %manifestation_id, %field, %version_id, source_id,
                         "enrichment: metadata.applied"
                     );
                     if field == "isbn_10" || field == "isbn_13" {
-                        let outcome =
-                            work::rematch_on_isbn_change(&mut tx, manifestation_id).await?;
-                        if matches!(outcome, work::RematchOutcome::Suspected { .. }) {
-                            duplicate_suspected = true;
+                        let rematch = work::rematch_on_isbn_change(tx, manifestation_id).await?;
+                        if matches!(rematch, work::RematchOutcome::Suspected { .. }) {
+                            outcome.duplicate_suspected = true;
                             warn!(
                                 %manifestation_id,
                                 "enrichment: work.duplicate_suspected"
@@ -273,34 +311,25 @@ pub async fn run_once(
                     // and file-side reflection either both commit or both
                     // roll back.  Worker deduplicates if two fields flip on
                     // the same manifestation in <1s; not the emitter's job.
-                    enqueue_writeback(&mut tx, manifestation_id, field).await?;
+                    enqueue_writeback(tx, manifestation_id, field).await?;
                     // Avoid re-applying on the same run when two sources agree.
                     break;
                 }
                 Decision::Stage => {
-                    staged += 1;
+                    outcome.staged += 1;
                     tracing::debug!(
                         %manifestation_id, %field, source_id,
                         "enrichment: metadata.staged"
                     );
                 }
                 Decision::NoOp => {
-                    skipped_locked += 1;
+                    outcome.skipped_locked += 1;
                 }
             }
         }
     }
 
-    tx.commit().await?;
-
-    Ok(RunOutcome {
-        manifestation_id,
-        applied,
-        staged,
-        skipped_locked,
-        source_failures: failures,
-        duplicate_suspected,
-    })
+    Ok(outcome)
 }
 
 /// Load the current canonical + lookup state for a manifestation.
