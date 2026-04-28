@@ -292,10 +292,6 @@ async fn apply_canonical_batch(
             match decision {
                 Decision::Apply(version_id) => {
                     if !apply_field(tx, snapshot, field, version_id).await? {
-                        // Journal value unusable (non-string, malformed
-                        // date) — try the next source for this field
-                        // instead of inflating counters and enqueuing a
-                        // writeback for a change that did not happen.
                         continue;
                     }
                     outcome.applied += 1;
@@ -315,7 +311,13 @@ async fn apply_canonical_batch(
                                 );
                             }
                             work::RematchOutcome::AutoMerged { from, to } => {
-                                info!(
+                                // warn! (not info!) — auto-merge is a
+                                // destructive structural change: the `from`
+                                // work is deleted and the manifestation is
+                                // re-parented. Matches `Suspected`'s tier so
+                                // both rematch outcomes are visible to
+                                // operators filtering at warn level.
+                                warn!(
                                     %manifestation_id, %from, %to,
                                     "enrichment: work.auto_merged"
                                 );
@@ -822,8 +824,10 @@ fn summarise_failure(source_id: &str, err: &SourceError) -> SourceFailure {
     };
     SourceFailure {
         source_id: source_id.to_string(),
-        // {err:#} preserves the full anyhow `.chain()` of context for
-        // SourceError::Other; otherwise only the leaf message survives.
+        // {err:#} activates anyhow's chain formatter on
+        // SourceError::Other (transparent over anyhow::Error), preserving
+        // the full context chain. Other variants are simple `#[error("…")]`
+        // strings — same output as `{err}`.
         error: format!("{err:#}"),
         retry_after,
         terminal,
@@ -1457,7 +1461,10 @@ mod tests {
     // and a full `run_once` integration call.
 
     /// Every source returned an error → no journal rows, all failures
-    /// summarised with correct retry_after / terminal flags.
+    /// summarised with correct retry_after / terminal flags. The
+    /// `SourceError::Other` case also verifies that
+    /// `summarise_failure`'s `{err:#}` formatting preserves the full
+    /// anyhow `.chain()` of context.
     #[sqlx::test(migrations = "./migrations")]
     async fn apply_journal_batch_collects_all_source_failures(pool: PgPool) {
         use reqwest::StatusCode;
@@ -1465,7 +1472,14 @@ mod tests {
         let pool = ingestion_pool_for(&pool).await;
         // No DB row needed — apply_journal_batch only touches the DB on the
         // Ok arm; the manifestation_id is bound only inside upsert_journal_row.
+        // If a future change adds a failure-side write (e.g. a
+        // `source_failures` table), this test will need a real fixture row
+        // to avoid an FK violation.
         let m_id = Uuid::new_v4();
+
+        let chained = anyhow::anyhow!("leaf parse error")
+            .context("decoding response body")
+            .context("during google_books fetch");
 
         let results = vec![
             SourceRun {
@@ -1482,6 +1496,10 @@ mod tests {
                     retry_after: Some(Duration::from_secs(60)),
                 }),
             },
+            SourceRun {
+                source_id: "chained".into(),
+                outcome: Err(SourceError::Other(chained)),
+            },
         ];
 
         let mut tx = pool.begin().await.unwrap();
@@ -1492,7 +1510,7 @@ mod tests {
             per_field.is_empty(),
             "no journal rows should be written when every source errored"
         );
-        assert_eq!(failures.len(), 3);
+        assert_eq!(failures.len(), 4);
 
         let ol = failures
             .iter()
@@ -1518,6 +1536,26 @@ mod tests {
             "RateLimited retry_after must round-trip"
         );
         assert!(!hc.terminal, "RateLimited is not terminal");
+
+        // anyhow chain preservation — `err.to_string()` would have only
+        // surfaced the leaf; `{err:#}` walks `.chain()` and joins the
+        // outer context. Each layer must appear in the stored error.
+        let chained = failures.iter().find(|f| f.source_id == "chained").unwrap();
+        assert!(
+            chained.error.contains("leaf parse error"),
+            "leaf must survive: {}",
+            chained.error
+        );
+        assert!(
+            chained.error.contains("decoding response body"),
+            "middle context must survive: {}",
+            chained.error
+        );
+        assert!(
+            chained.error.contains("during google_books fetch"),
+            "outer context must survive: {}",
+            chained.error
+        );
     }
 
     /// Two sources agree on a hash → first Apply fires, the inner loop
@@ -1679,6 +1717,253 @@ mod tests {
         assert_eq!(
             writeback_rows, 0,
             "Stage decision must not enqueue a writeback"
+        );
+    }
+
+    /// Positive control for `apply_canonical_batch_merges_prior_pending_into_decision`:
+    /// the same shape (single source, empty canonical) MUST Apply when no
+    /// disagreeing prior pending row exists. If this test fails, the
+    /// prior-pending Stage assertion above is passing vacuously.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn apply_canonical_batch_applies_when_no_prior_pending(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
+        let isbn = "9780747538103";
+        let marker = Uuid::new_v4().simple().to_string();
+        let (work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
+
+        let new = SourceResult {
+            field_name: "publisher".into(),
+            raw_value: serde_json::json!(format!("Solo Publisher {marker}")),
+            match_type: "isbn".into(),
+        };
+
+        let mut tx = pool.begin().await.unwrap();
+        let id_new = upsert_journal_row(&mut tx, m_id, "googlebooks", &new)
+            .await
+            .unwrap();
+        let new_hash = value_hash::value_hash(&new.field_name, &new.raw_value);
+        let mut per_field: PerFieldRows = std::collections::HashMap::new();
+        per_field.insert(
+            "publisher".into(),
+            vec![(
+                "googlebooks".into(),
+                PolicyInputRow {
+                    id: id_new,
+                    value_hash: new_hash,
+                },
+            )],
+        );
+
+        let snapshot = Snapshot {
+            manifestation_id: m_id,
+            work_id,
+            lookup_key: None,
+            canonical: CanonicalState::default(),
+        };
+
+        let outcome = apply_canonical_batch(&mut tx, &snapshot, &per_field)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(
+            outcome.applied, 1,
+            "single source + empty canonical + no prior pending MUST Apply"
+        );
+        assert_eq!(outcome.staged, 0);
+    }
+
+    /// `apply_field` returning `Ok(false)` for a non-string JSON value
+    /// must skip without inflating counters or enqueuing writebacks; the
+    /// inner loop must `continue` to the next source for the same field.
+    ///
+    /// Both rows are inserted directly with a forged shared `value_hash`
+    /// to defeat `policy::decide`'s disagreement check —
+    /// `upsert_journal_row` would compute distinct hashes from the
+    /// distinct raw values, and `load_existing_pending` re-reads those
+    /// real hashes. The forge is necessary to land both sources in the
+    /// `Decision::Apply` branch so the continue-on-Ok(false) branch is
+    /// actually exercised.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn apply_canonical_batch_skips_non_string_value_and_continues(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
+        let isbn = "9780743273565";
+        let marker = Uuid::new_v4().simple().to_string();
+        let (work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
+
+        let good_value = format!("Good Publisher {marker}");
+        let shared_hash: Vec<u8> = vec![0u8; 32];
+
+        // Bad row: array (non-string) → apply_field returns Ok(false).
+        let id_bad: Uuid = sqlx::query_scalar(
+            "INSERT INTO metadata_versions \
+                (manifestation_id, source, field_name, new_value, value_hash, match_type, confidence_score) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+             RETURNING id",
+        )
+        .bind(m_id)
+        .bind("openlibrary")
+        .bind("publisher")
+        .bind(serde_json::json!(["Bad Publisher"]))
+        .bind(&shared_hash)
+        .bind("isbn")
+        .bind(0.85_f32)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        // Good row: string → apply_field returns Ok(true).
+        let id_good: Uuid = sqlx::query_scalar(
+            "INSERT INTO metadata_versions \
+                (manifestation_id, source, field_name, new_value, value_hash, match_type, confidence_score) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+             RETURNING id",
+        )
+        .bind(m_id)
+        .bind("googlebooks")
+        .bind("publisher")
+        .bind(serde_json::json!(good_value.clone()))
+        .bind(&shared_hash)
+        .bind("isbn")
+        .bind(0.85_f32)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let mut per_field: PerFieldRows = std::collections::HashMap::new();
+        per_field.insert(
+            "publisher".into(),
+            vec![
+                (
+                    "openlibrary".into(),
+                    PolicyInputRow {
+                        id: id_bad,
+                        value_hash: shared_hash.clone(),
+                    },
+                ),
+                (
+                    "googlebooks".into(),
+                    PolicyInputRow {
+                        id: id_good,
+                        value_hash: shared_hash,
+                    },
+                ),
+            ],
+        );
+
+        let snapshot = Snapshot {
+            manifestation_id: m_id,
+            work_id,
+            lookup_key: None,
+            canonical: CanonicalState::default(),
+        };
+
+        let mut tx = pool.begin().await.unwrap();
+        let outcome = apply_canonical_batch(&mut tx, &snapshot, &per_field)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(
+            outcome.applied, 1,
+            "bad-value source must be skipped; good source must apply"
+        );
+
+        let canon: Option<String> =
+            sqlx::query_scalar("SELECT publisher FROM manifestations WHERE id = $1")
+                .bind(m_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            canon.as_deref(),
+            Some(good_value.as_str()),
+            "canonical publisher must come from the good source"
+        );
+
+        let writeback_rows: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM writeback_jobs WHERE manifestation_id = $1")
+                .bind(m_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            writeback_rows, 1,
+            "exactly one writeback row for the successful apply"
+        );
+    }
+
+    /// `apply_field` returning `Ok(false)` for a malformed `pub_date`
+    /// (the `parse_iso_date` branch — distinct internal control flow
+    /// from the non-string skip) must also leave canonical unchanged
+    /// with no counter bump and no writeback.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn apply_canonical_batch_skips_malformed_pub_date(pool: PgPool) {
+        let pool = ingestion_pool_for(&pool).await;
+        let isbn = "9780812550702";
+        let marker = Uuid::new_v4().simple().to_string();
+        let (work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
+
+        let bad = SourceResult {
+            field_name: "pub_date".into(),
+            // String, but parse_iso_date will reject it.
+            raw_value: serde_json::json!("not-an-iso-date"),
+            match_type: "isbn".into(),
+        };
+
+        let mut tx = pool.begin().await.unwrap();
+        let id_bad = upsert_journal_row(&mut tx, m_id, "openlibrary", &bad)
+            .await
+            .unwrap();
+        let hash = value_hash::value_hash(&bad.field_name, &bad.raw_value);
+        let mut per_field: PerFieldRows = std::collections::HashMap::new();
+        per_field.insert(
+            "pub_date".into(),
+            vec![(
+                "openlibrary".into(),
+                PolicyInputRow {
+                    id: id_bad,
+                    value_hash: hash,
+                },
+            )],
+        );
+
+        let snapshot = Snapshot {
+            manifestation_id: m_id,
+            work_id,
+            lookup_key: None,
+            canonical: CanonicalState::default(),
+        };
+
+        let outcome = apply_canonical_batch(&mut tx, &snapshot, &per_field)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        assert_eq!(
+            outcome.applied, 0,
+            "malformed pub_date must not count as applied"
+        );
+        assert_eq!(outcome.staged, 0);
+        assert_eq!(outcome.skipped_locked, 0);
+
+        let pub_date: Option<time::Date> =
+            sqlx::query_scalar("SELECT pub_date FROM manifestations WHERE id = $1")
+                .bind(m_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(pub_date.is_none(), "canonical pub_date must remain unset");
+
+        let writeback_rows: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM writeback_jobs WHERE manifestation_id = $1")
+                .bind(m_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            writeback_rows, 0,
+            "no writeback should be enqueued for a skipped apply"
         );
     }
 }
