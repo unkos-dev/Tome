@@ -114,6 +114,7 @@ Release PR:
 - `backend/` — Rust + Axum API server. See `backend/CLAUDE.md` for Rust-specific rules.
 - `frontend/` — React + Vite + TypeScript UI. See `frontend/CLAUDE.md` for frontend rules.
 - `docs/` — Starlight documentation site.
+- `adr/` — Architecture Decision Records.
 - `Dockerfile` — Multi-stage production build.
 
 ---
@@ -154,6 +155,19 @@ convention) — agents that read CLAUDE.md will honor this section, but the
 SKILL.md default is not enforced automatically.
 
 > Optimized tool-use workflow for agents: see [SDL.md](./SDL.md).
+
+## ADRs (Architecture Decision Records)
+
+Long-form rationale for architectural decisions lives in `adr/` as
+MADR-shape files. The `adr` skill handles the full workflow:
+Socratic capture → draft → checklist review.
+
+- **Naming**: `YYYY-MM-DD-short-kebab-slug.md` — the skill's default; no numeric prefixes.
+- **Invoke**: use the `adr` skill (`Skill("adr")`).
+- **Proactive triggers**: write an ADR before introducing a new crate or npm package,
+  establishing a new cross-stack pattern (API conventions, error handling, data-access
+  layer, auth model), or making a non-obvious choice between real alternatives.
+  If you would write a long "why" code comment — that reasoning belongs in an ADR.
 
 ## graphify
 
