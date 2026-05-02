@@ -15590,8 +15590,8 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L181",
       "weight": 1.0,
-      "_src": "models_reading_state_rls_isolates_users",
-      "_tgt": "src_db_acquire_with_rls",
+      "_src": "src_db_acquire_with_rls",
+      "_tgt": "models_reading_state_rls_isolates_users",
       "source": "src_db_acquire_with_rls",
       "target": "models_reading_state_rls_isolates_users"
     },
@@ -16958,8 +16958,8 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L23",
       "weight": 1.0,
-      "_src": "models_reading_state_fixture",
-      "_tgt": "src_test_support_app_pool_for",
+      "_src": "src_test_support_app_pool_for",
+      "_tgt": "models_reading_state_fixture",
       "source": "src_test_support_app_pool_for",
       "target": "models_reading_state_fixture"
     },
@@ -16970,8 +16970,8 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L132",
       "weight": 1.0,
-      "_src": "models_reading_state_boundaries_zero_and_hundred_accepted",
-      "_tgt": "src_test_support_app_pool_for",
+      "_src": "src_test_support_app_pool_for",
+      "_tgt": "models_reading_state_boundaries_zero_and_hundred_accepted",
       "source": "src_test_support_app_pool_for",
       "target": "models_reading_state_boundaries_zero_and_hundred_accepted"
     },
@@ -16982,8 +16982,8 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L176",
       "weight": 1.0,
-      "_src": "models_reading_state_rls_isolates_users",
-      "_tgt": "src_test_support_app_pool_for",
+      "_src": "src_test_support_app_pool_for",
+      "_tgt": "models_reading_state_rls_isolates_users",
       "source": "src_test_support_app_pool_for",
       "target": "models_reading_state_rls_isolates_users"
     },
@@ -17642,8 +17642,8 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L21",
       "weight": 1.0,
-      "_src": "models_reading_state_fixture",
-      "_tgt": "src_test_support_ingestion_pool_for",
+      "_src": "src_test_support_ingestion_pool_for",
+      "_tgt": "models_reading_state_fixture",
       "source": "src_test_support_ingestion_pool_for",
       "target": "models_reading_state_fixture"
     },
@@ -17654,8 +17654,8 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L131",
       "weight": 1.0,
-      "_src": "models_reading_state_boundaries_zero_and_hundred_accepted",
-      "_tgt": "src_test_support_ingestion_pool_for",
+      "_src": "src_test_support_ingestion_pool_for",
+      "_tgt": "models_reading_state_boundaries_zero_and_hundred_accepted",
       "source": "src_test_support_ingestion_pool_for",
       "target": "models_reading_state_boundaries_zero_and_hundred_accepted"
     },
@@ -17666,8 +17666,8 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L174",
       "weight": 1.0,
-      "_src": "models_reading_state_rls_isolates_users",
-      "_tgt": "src_test_support_ingestion_pool_for",
+      "_src": "src_test_support_ingestion_pool_for",
+      "_tgt": "models_reading_state_rls_isolates_users",
       "source": "src_test_support_ingestion_pool_for",
       "target": "models_reading_state_rls_isolates_users"
     },
@@ -18278,8 +18278,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1472",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_journal_batch_collects_all_source_failures",
-      "_tgt": "src_test_support_ingestion_pool_for",
+      "_src": "src_test_support_ingestion_pool_for",
+      "_tgt": "enrichment_orchestrator_apply_journal_batch_collects_all_source_failures",
       "source": "src_test_support_ingestion_pool_for",
       "target": "enrichment_orchestrator_apply_journal_batch_collects_all_source_failures"
     },
@@ -18290,8 +18290,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1565",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
-      "_tgt": "src_test_support_ingestion_pool_for",
+      "_src": "src_test_support_ingestion_pool_for",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
       "source": "src_test_support_ingestion_pool_for",
       "target": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement"
     },
@@ -18302,8 +18302,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1641",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
-      "_tgt": "src_test_support_ingestion_pool_for",
+      "_src": "src_test_support_ingestion_pool_for",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
       "source": "src_test_support_ingestion_pool_for",
       "target": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision"
     },
@@ -18314,8 +18314,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1729",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
-      "_tgt": "src_test_support_ingestion_pool_for",
+      "_src": "src_test_support_ingestion_pool_for",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
       "source": "src_test_support_ingestion_pool_for",
       "target": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending"
     },
@@ -18326,8 +18326,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1789",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues",
-      "_tgt": "src_test_support_ingestion_pool_for",
+      "_src": "src_test_support_ingestion_pool_for",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues",
       "source": "src_test_support_ingestion_pool_for",
       "target": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues"
     },
@@ -18338,8 +18338,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1902",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
-      "_tgt": "src_test_support_ingestion_pool_for",
+      "_src": "src_test_support_ingestion_pool_for",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
       "source": "src_test_support_ingestion_pool_for",
       "target": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date"
     },
@@ -19190,8 +19190,8 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L22",
       "weight": 1.0,
-      "_src": "models_reading_state_fixture",
-      "_tgt": "src_test_support_insert_work_and_manifestation",
+      "_src": "src_test_support_insert_work_and_manifestation",
+      "_tgt": "models_reading_state_fixture",
       "source": "src_test_support_insert_work_and_manifestation",
       "target": "models_reading_state_fixture"
     },
@@ -19202,8 +19202,8 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L133",
       "weight": 1.0,
-      "_src": "models_reading_state_boundaries_zero_and_hundred_accepted",
-      "_tgt": "src_test_support_insert_work_and_manifestation",
+      "_src": "src_test_support_insert_work_and_manifestation",
+      "_tgt": "models_reading_state_boundaries_zero_and_hundred_accepted",
       "source": "src_test_support_insert_work_and_manifestation",
       "target": "models_reading_state_boundaries_zero_and_hundred_accepted"
     },
@@ -19214,8 +19214,8 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L175",
       "weight": 1.0,
-      "_src": "models_reading_state_rls_isolates_users",
-      "_tgt": "src_test_support_insert_work_and_manifestation",
+      "_src": "src_test_support_insert_work_and_manifestation",
+      "_tgt": "models_reading_state_rls_isolates_users",
       "source": "src_test_support_insert_work_and_manifestation",
       "target": "models_reading_state_rls_isolates_users"
     },
@@ -19370,8 +19370,8 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L24",
       "weight": 1.0,
-      "_src": "models_reading_state_fixture",
-      "_tgt": "src_test_support_create_adult_and_basic_auth",
+      "_src": "src_test_support_create_adult_and_basic_auth",
+      "_tgt": "models_reading_state_fixture",
       "source": "src_test_support_create_adult_and_basic_auth",
       "target": "models_reading_state_fixture"
     },
@@ -19382,8 +19382,8 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L135",
       "weight": 1.0,
-      "_src": "models_reading_state_boundaries_zero_and_hundred_accepted",
-      "_tgt": "src_test_support_create_adult_and_basic_auth",
+      "_src": "src_test_support_create_adult_and_basic_auth",
+      "_tgt": "models_reading_state_boundaries_zero_and_hundred_accepted",
       "source": "src_test_support_create_adult_and_basic_auth",
       "target": "models_reading_state_boundaries_zero_and_hundred_accepted"
     },
@@ -19394,8 +19394,8 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L177",
       "weight": 1.0,
-      "_src": "models_reading_state_rls_isolates_users",
-      "_tgt": "src_test_support_create_adult_and_basic_auth",
+      "_src": "src_test_support_create_adult_and_basic_auth",
+      "_tgt": "models_reading_state_rls_isolates_users",
       "source": "src_test_support_create_adult_and_basic_auth",
       "target": "models_reading_state_rls_isolates_users"
     },
@@ -33399,9 +33399,9 @@
       "weight": 1.0,
       "_src": "backend_src_models_reading_state_rs",
       "_tgt": "models_reading_state_fixture",
+      "confidence_score": 1.0,
       "source": "backend_src_models_reading_state_rs",
-      "target": "models_reading_state_fixture",
-      "confidence_score": 1.0
+      "target": "models_reading_state_fixture"
     },
     {
       "relation": "contains",
@@ -33411,9 +33411,9 @@
       "weight": 1.0,
       "_src": "backend_src_models_reading_state_rs",
       "_tgt": "models_reading_state_both_null_is_valid_sentinel",
+      "confidence_score": 1.0,
       "source": "backend_src_models_reading_state_rs",
-      "target": "models_reading_state_both_null_is_valid_sentinel",
-      "confidence_score": 1.0
+      "target": "models_reading_state_both_null_is_valid_sentinel"
     },
     {
       "relation": "contains",
@@ -33423,9 +33423,9 @@
       "weight": 1.0,
       "_src": "backend_src_models_reading_state_rs",
       "_tgt": "models_reading_state_both_set_is_valid",
+      "confidence_score": 1.0,
       "source": "backend_src_models_reading_state_rs",
-      "target": "models_reading_state_both_set_is_valid",
-      "confidence_score": 1.0
+      "target": "models_reading_state_both_set_is_valid"
     },
     {
       "relation": "contains",
@@ -33435,9 +33435,9 @@
       "weight": 1.0,
       "_src": "backend_src_models_reading_state_rs",
       "_tgt": "models_reading_state_progress_with_null_timestamp_rejected",
+      "confidence_score": 1.0,
       "source": "backend_src_models_reading_state_rs",
-      "target": "models_reading_state_progress_with_null_timestamp_rejected",
-      "confidence_score": 1.0
+      "target": "models_reading_state_progress_with_null_timestamp_rejected"
     },
     {
       "relation": "contains",
@@ -33447,9 +33447,9 @@
       "weight": 1.0,
       "_src": "backend_src_models_reading_state_rs",
       "_tgt": "models_reading_state_null_progress_with_timestamp_rejected",
+      "confidence_score": 1.0,
       "source": "backend_src_models_reading_state_rs",
-      "target": "models_reading_state_null_progress_with_timestamp_rejected",
-      "confidence_score": 1.0
+      "target": "models_reading_state_null_progress_with_timestamp_rejected"
     },
     {
       "relation": "contains",
@@ -33459,9 +33459,9 @@
       "weight": 1.0,
       "_src": "backend_src_models_reading_state_rs",
       "_tgt": "models_reading_state_progress_below_zero_rejected",
+      "confidence_score": 1.0,
       "source": "backend_src_models_reading_state_rs",
-      "target": "models_reading_state_progress_below_zero_rejected",
-      "confidence_score": 1.0
+      "target": "models_reading_state_progress_below_zero_rejected"
     },
     {
       "relation": "contains",
@@ -33471,9 +33471,9 @@
       "weight": 1.0,
       "_src": "backend_src_models_reading_state_rs",
       "_tgt": "models_reading_state_progress_above_hundred_rejected",
+      "confidence_score": 1.0,
       "source": "backend_src_models_reading_state_rs",
-      "target": "models_reading_state_progress_above_hundred_rejected",
-      "confidence_score": 1.0
+      "target": "models_reading_state_progress_above_hundred_rejected"
     },
     {
       "relation": "contains",
@@ -33483,9 +33483,9 @@
       "weight": 1.0,
       "_src": "backend_src_models_reading_state_rs",
       "_tgt": "models_reading_state_boundaries_zero_and_hundred_accepted",
+      "confidence_score": 1.0,
       "source": "backend_src_models_reading_state_rs",
-      "target": "models_reading_state_boundaries_zero_and_hundred_accepted",
-      "confidence_score": 1.0
+      "target": "models_reading_state_boundaries_zero_and_hundred_accepted"
     },
     {
       "relation": "contains",
@@ -33495,9 +33495,9 @@
       "weight": 1.0,
       "_src": "backend_src_models_reading_state_rs",
       "_tgt": "models_reading_state_duplicate_user_manifestation_rejected",
+      "confidence_score": 1.0,
       "source": "backend_src_models_reading_state_rs",
-      "target": "models_reading_state_duplicate_user_manifestation_rejected",
-      "confidence_score": 1.0
+      "target": "models_reading_state_duplicate_user_manifestation_rejected"
     },
     {
       "relation": "contains",
@@ -33507,9 +33507,9 @@
       "weight": 1.0,
       "_src": "backend_src_models_reading_state_rs",
       "_tgt": "models_reading_state_rls_isolates_users",
+      "confidence_score": 1.0,
       "source": "backend_src_models_reading_state_rs",
-      "target": "models_reading_state_rls_isolates_users",
-      "confidence_score": 1.0
+      "target": "models_reading_state_rls_isolates_users"
     },
     {
       "relation": "contains",
@@ -33519,9 +33519,9 @@
       "weight": 1.0,
       "_src": "backend_src_models_reading_state_rs",
       "_tgt": "models_reading_state_user_delete_cascades",
+      "confidence_score": 1.0,
       "source": "backend_src_models_reading_state_rs",
-      "target": "models_reading_state_user_delete_cascades",
-      "confidence_score": 1.0
+      "target": "models_reading_state_user_delete_cascades"
     },
     {
       "relation": "contains",
@@ -33531,9 +33531,9 @@
       "weight": 1.0,
       "_src": "backend_src_models_reading_state_rs",
       "_tgt": "models_reading_state_manifestation_delete_cascades",
+      "confidence_score": 1.0,
       "source": "backend_src_models_reading_state_rs",
-      "target": "models_reading_state_manifestation_delete_cascades",
-      "confidence_score": 1.0
+      "target": "models_reading_state_manifestation_delete_cascades"
     },
     {
       "relation": "contains",
@@ -33543,9 +33543,9 @@
       "weight": 1.0,
       "_src": "backend_src_models_reading_state_rs",
       "_tgt": "models_reading_state_updated_at_trigger_advances_on_update",
+      "confidence_score": 1.0,
       "source": "backend_src_models_reading_state_rs",
-      "target": "models_reading_state_updated_at_trigger_advances_on_update",
-      "confidence_score": 1.0
+      "target": "models_reading_state_updated_at_trigger_advances_on_update"
     },
     {
       "relation": "calls",
@@ -33553,11 +33553,11 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L30",
       "weight": 1.0,
-      "_src": "models_reading_state_both_null_is_valid_sentinel",
-      "_tgt": "models_reading_state_fixture",
+      "_src": "models_reading_state_fixture",
+      "_tgt": "models_reading_state_both_null_is_valid_sentinel",
+      "confidence_score": 1.0,
       "source": "models_reading_state_fixture",
-      "target": "models_reading_state_both_null_is_valid_sentinel",
-      "confidence_score": 1.0
+      "target": "models_reading_state_both_null_is_valid_sentinel"
     },
     {
       "relation": "calls",
@@ -33565,11 +33565,11 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L41",
       "weight": 1.0,
-      "_src": "models_reading_state_both_set_is_valid",
-      "_tgt": "models_reading_state_fixture",
+      "_src": "models_reading_state_fixture",
+      "_tgt": "models_reading_state_both_set_is_valid",
+      "confidence_score": 1.0,
       "source": "models_reading_state_fixture",
-      "target": "models_reading_state_both_set_is_valid",
-      "confidence_score": 1.0
+      "target": "models_reading_state_both_set_is_valid"
     },
     {
       "relation": "calls",
@@ -33577,11 +33577,11 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L57",
       "weight": 1.0,
-      "_src": "models_reading_state_progress_with_null_timestamp_rejected",
-      "_tgt": "models_reading_state_fixture",
+      "_src": "models_reading_state_fixture",
+      "_tgt": "models_reading_state_progress_with_null_timestamp_rejected",
+      "confidence_score": 1.0,
       "source": "models_reading_state_fixture",
-      "target": "models_reading_state_progress_with_null_timestamp_rejected",
-      "confidence_score": 1.0
+      "target": "models_reading_state_progress_with_null_timestamp_rejected"
     },
     {
       "relation": "calls",
@@ -33589,11 +33589,11 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L75",
       "weight": 1.0,
-      "_src": "models_reading_state_null_progress_with_timestamp_rejected",
-      "_tgt": "models_reading_state_fixture",
+      "_src": "models_reading_state_fixture",
+      "_tgt": "models_reading_state_null_progress_with_timestamp_rejected",
+      "confidence_score": 1.0,
       "source": "models_reading_state_fixture",
-      "target": "models_reading_state_null_progress_with_timestamp_rejected",
-      "confidence_score": 1.0
+      "target": "models_reading_state_null_progress_with_timestamp_rejected"
     },
     {
       "relation": "calls",
@@ -33601,11 +33601,11 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L93",
       "weight": 1.0,
-      "_src": "models_reading_state_progress_below_zero_rejected",
-      "_tgt": "models_reading_state_fixture",
+      "_src": "models_reading_state_fixture",
+      "_tgt": "models_reading_state_progress_below_zero_rejected",
+      "confidence_score": 1.0,
       "source": "models_reading_state_fixture",
-      "target": "models_reading_state_progress_below_zero_rejected",
-      "confidence_score": 1.0
+      "target": "models_reading_state_progress_below_zero_rejected"
     },
     {
       "relation": "calls",
@@ -33613,11 +33613,11 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L112",
       "weight": 1.0,
-      "_src": "models_reading_state_progress_above_hundred_rejected",
-      "_tgt": "models_reading_state_fixture",
+      "_src": "models_reading_state_fixture",
+      "_tgt": "models_reading_state_progress_above_hundred_rejected",
+      "confidence_score": 1.0,
       "source": "models_reading_state_fixture",
-      "target": "models_reading_state_progress_above_hundred_rejected",
-      "confidence_score": 1.0
+      "target": "models_reading_state_progress_above_hundred_rejected"
     },
     {
       "relation": "calls",
@@ -33625,11 +33625,11 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L153",
       "weight": 1.0,
-      "_src": "models_reading_state_duplicate_user_manifestation_rejected",
-      "_tgt": "models_reading_state_fixture",
+      "_src": "models_reading_state_fixture",
+      "_tgt": "models_reading_state_duplicate_user_manifestation_rejected",
+      "confidence_score": 1.0,
       "source": "models_reading_state_fixture",
-      "target": "models_reading_state_duplicate_user_manifestation_rejected",
-      "confidence_score": 1.0
+      "target": "models_reading_state_duplicate_user_manifestation_rejected"
     },
     {
       "relation": "calls",
@@ -33637,11 +33637,11 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L234",
       "weight": 1.0,
-      "_src": "models_reading_state_user_delete_cascades",
-      "_tgt": "models_reading_state_fixture",
+      "_src": "models_reading_state_fixture",
+      "_tgt": "models_reading_state_user_delete_cascades",
+      "confidence_score": 1.0,
       "source": "models_reading_state_fixture",
-      "target": "models_reading_state_user_delete_cascades",
-      "confidence_score": 1.0
+      "target": "models_reading_state_user_delete_cascades"
     },
     {
       "relation": "calls",
@@ -33649,11 +33649,11 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L264",
       "weight": 1.0,
-      "_src": "models_reading_state_manifestation_delete_cascades",
-      "_tgt": "models_reading_state_fixture",
+      "_src": "models_reading_state_fixture",
+      "_tgt": "models_reading_state_manifestation_delete_cascades",
+      "confidence_score": 1.0,
       "source": "models_reading_state_fixture",
-      "target": "models_reading_state_manifestation_delete_cascades",
-      "confidence_score": 1.0
+      "target": "models_reading_state_manifestation_delete_cascades"
     },
     {
       "relation": "calls",
@@ -33661,11 +33661,11 @@
       "source_file": "backend/src/models/reading_state.rs",
       "source_location": "L294",
       "weight": 1.0,
-      "_src": "models_reading_state_updated_at_trigger_advances_on_update",
-      "_tgt": "models_reading_state_fixture",
+      "_src": "models_reading_state_fixture",
+      "_tgt": "models_reading_state_updated_at_trigger_advances_on_update",
+      "confidence_score": 1.0,
       "source": "models_reading_state_fixture",
-      "target": "models_reading_state_updated_at_trigger_advances_on_update",
-      "confidence_score": 1.0
+      "target": "models_reading_state_updated_at_trigger_advances_on_update"
     },
     {
       "relation": "calls",
@@ -35138,8 +35138,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L303",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch",
-      "_tgt": "models_work_rematch_on_isbn_change",
+      "_src": "models_work_rematch_on_isbn_change",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch",
       "source": "models_work_rematch_on_isbn_change",
       "target": "enrichment_orchestrator_apply_canonical_batch"
     },
@@ -39722,8 +39722,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1507",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_journal_batch_collects_all_source_failures",
-      "_tgt": "writeback_path_rename_commit",
+      "_src": "writeback_path_rename_commit",
+      "_tgt": "enrichment_orchestrator_apply_journal_batch_collects_all_source_failures",
       "source": "writeback_path_rename_commit",
       "target": "enrichment_orchestrator_apply_journal_batch_collects_all_source_failures"
     },
@@ -39734,8 +39734,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1615",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
-      "_tgt": "writeback_path_rename_commit",
+      "_src": "writeback_path_rename_commit",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
       "source": "writeback_path_rename_commit",
       "target": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement"
     },
@@ -39746,8 +39746,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1689",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
-      "_tgt": "writeback_path_rename_commit",
+      "_src": "writeback_path_rename_commit",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
       "source": "writeback_path_rename_commit",
       "target": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision"
     },
@@ -39758,8 +39758,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1767",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
-      "_tgt": "writeback_path_rename_commit",
+      "_src": "writeback_path_rename_commit",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
       "source": "writeback_path_rename_commit",
       "target": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending"
     },
@@ -39770,8 +39770,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1865",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues",
-      "_tgt": "writeback_path_rename_commit",
+      "_src": "writeback_path_rename_commit",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues",
       "source": "writeback_path_rename_commit",
       "target": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues"
     },
@@ -39782,8 +39782,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1941",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
-      "_tgt": "writeback_path_rename_commit",
+      "_src": "writeback_path_rename_commit",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
       "source": "writeback_path_rename_commit",
       "target": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date"
     },
@@ -49586,8 +49586,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L250",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch",
-      "_tgt": "enrichment_field_lock_is_locked_tx",
+      "_src": "enrichment_field_lock_is_locked_tx",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch",
       "source": "enrichment_field_lock_is_locked_tx",
       "target": "enrichment_orchestrator_apply_canonical_batch"
     },
@@ -51422,8 +51422,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L221",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_journal_batch",
-      "_tgt": "enrichment_value_hash_value_hash",
+      "_src": "enrichment_value_hash_value_hash",
+      "_tgt": "enrichment_orchestrator_apply_journal_batch",
       "source": "enrichment_value_hash_value_hash",
       "target": "enrichment_orchestrator_apply_journal_batch"
     },
@@ -51446,8 +51446,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1583",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
-      "_tgt": "enrichment_value_hash_value_hash",
+      "_src": "enrichment_value_hash_value_hash",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
       "source": "enrichment_value_hash_value_hash",
       "target": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement"
     },
@@ -51458,8 +51458,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1666",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
-      "_tgt": "enrichment_value_hash_value_hash",
+      "_src": "enrichment_value_hash_value_hash",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
       "source": "enrichment_value_hash_value_hash",
       "target": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision"
     },
@@ -51470,8 +51470,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1744",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
-      "_tgt": "enrichment_value_hash_value_hash",
+      "_src": "enrichment_value_hash_value_hash",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
       "source": "enrichment_value_hash_value_hash",
       "target": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending"
     },
@@ -51482,8 +51482,8 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1918",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
-      "_tgt": "enrichment_value_hash_value_hash",
+      "_src": "enrichment_value_hash_value_hash",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
       "source": "enrichment_value_hash_value_hash",
       "target": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date"
     },
@@ -53355,9 +53355,9 @@
       "weight": 1.0,
       "_src": "backend_src_services_enrichment_orchestrator_rs",
       "_tgt": "enrichment_orchestrator_canonicalbatchoutcome",
+      "confidence_score": 1.0,
       "source": "backend_src_services_enrichment_orchestrator_rs",
-      "target": "enrichment_orchestrator_canonicalbatchoutcome",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_canonicalbatchoutcome"
     },
     {
       "relation": "contains",
@@ -53367,9 +53367,9 @@
       "weight": 1.0,
       "_src": "backend_src_services_enrichment_orchestrator_rs",
       "_tgt": "enrichment_orchestrator_apply_journal_batch",
+      "confidence_score": 1.0,
       "source": "backend_src_services_enrichment_orchestrator_rs",
-      "target": "enrichment_orchestrator_apply_journal_batch",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_journal_batch"
     },
     {
       "relation": "contains",
@@ -53379,9 +53379,9 @@
       "weight": 1.0,
       "_src": "backend_src_services_enrichment_orchestrator_rs",
       "_tgt": "enrichment_orchestrator_apply_canonical_batch",
+      "confidence_score": 1.0,
       "source": "backend_src_services_enrichment_orchestrator_rs",
-      "target": "enrichment_orchestrator_apply_canonical_batch",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch"
     },
     {
       "relation": "contains",
@@ -53739,9 +53739,9 @@
       "weight": 1.0,
       "_src": "backend_src_services_enrichment_orchestrator_rs",
       "_tgt": "enrichment_orchestrator_apply_journal_batch_collects_all_source_failures",
+      "confidence_score": 1.0,
       "source": "backend_src_services_enrichment_orchestrator_rs",
-      "target": "enrichment_orchestrator_apply_journal_batch_collects_all_source_failures",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_journal_batch_collects_all_source_failures"
     },
     {
       "relation": "contains",
@@ -53751,9 +53751,9 @@
       "weight": 1.0,
       "_src": "backend_src_services_enrichment_orchestrator_rs",
       "_tgt": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
+      "confidence_score": 1.0,
       "source": "backend_src_services_enrichment_orchestrator_rs",
-      "target": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement"
     },
     {
       "relation": "contains",
@@ -53763,9 +53763,9 @@
       "weight": 1.0,
       "_src": "backend_src_services_enrichment_orchestrator_rs",
       "_tgt": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
+      "confidence_score": 1.0,
       "source": "backend_src_services_enrichment_orchestrator_rs",
-      "target": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision"
     },
     {
       "relation": "contains",
@@ -53775,9 +53775,9 @@
       "weight": 1.0,
       "_src": "backend_src_services_enrichment_orchestrator_rs",
       "_tgt": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
+      "confidence_score": 1.0,
       "source": "backend_src_services_enrichment_orchestrator_rs",
-      "target": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending"
     },
     {
       "relation": "contains",
@@ -53787,9 +53787,9 @@
       "weight": 1.0,
       "_src": "backend_src_services_enrichment_orchestrator_rs",
       "_tgt": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues",
+      "confidence_score": 1.0,
       "source": "backend_src_services_enrichment_orchestrator_rs",
-      "target": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues"
     },
     {
       "relation": "contains",
@@ -53799,9 +53799,9 @@
       "weight": 1.0,
       "_src": "backend_src_services_enrichment_orchestrator_rs",
       "_tgt": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
+      "confidence_score": 1.0,
       "source": "backend_src_services_enrichment_orchestrator_rs",
-      "target": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date"
     },
     {
       "relation": "contains",
@@ -53869,11 +53869,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L252",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch",
-      "_tgt": "enrichment_orchestrator_canonicalstate_is_empty_for",
+      "_src": "enrichment_orchestrator_canonicalstate_is_empty_for",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_canonicalstate_is_empty_for",
-      "target": "enrichment_orchestrator_apply_canonical_batch",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch"
     },
     {
       "relation": "calls",
@@ -53991,9 +53991,9 @@
       "weight": 1.0,
       "_src": "enrichment_orchestrator_run_once",
       "_tgt": "enrichment_orchestrator_apply_journal_batch",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_run_once",
-      "target": "enrichment_orchestrator_apply_journal_batch",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_journal_batch"
     },
     {
       "relation": "calls",
@@ -54003,9 +54003,9 @@
       "weight": 1.0,
       "_src": "enrichment_orchestrator_run_once",
       "_tgt": "enrichment_orchestrator_apply_canonical_batch",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_run_once",
-      "target": "enrichment_orchestrator_apply_canonical_batch",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch"
     },
     {
       "relation": "calls",
@@ -54183,9 +54183,9 @@
       "weight": 1.0,
       "_src": "enrichment_orchestrator_apply_journal_batch",
       "_tgt": "enrichment_orchestrator_upsert_journal_row",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_apply_journal_batch",
-      "target": "enrichment_orchestrator_upsert_journal_row",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_upsert_journal_row"
     },
     {
       "relation": "calls",
@@ -54195,9 +54195,9 @@
       "weight": 1.0,
       "_src": "enrichment_orchestrator_apply_journal_batch",
       "_tgt": "enrichment_orchestrator_summarise_failure",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_apply_journal_batch",
-      "target": "enrichment_orchestrator_summarise_failure",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_summarise_failure"
     },
     {
       "relation": "calls",
@@ -54205,11 +54205,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1506",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_journal_batch_collects_all_source_failures",
-      "_tgt": "enrichment_orchestrator_apply_journal_batch",
+      "_src": "enrichment_orchestrator_apply_journal_batch",
+      "_tgt": "enrichment_orchestrator_apply_journal_batch_collects_all_source_failures",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_apply_journal_batch",
-      "target": "enrichment_orchestrator_apply_journal_batch_collects_all_source_failures",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_journal_batch_collects_all_source_failures"
     },
     {
       "relation": "calls",
@@ -54219,9 +54219,9 @@
       "weight": 1.0,
       "_src": "enrichment_orchestrator_apply_canonical_batch",
       "_tgt": "enrichment_orchestrator_is_work_field",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_apply_canonical_batch",
-      "target": "enrichment_orchestrator_is_work_field",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_is_work_field"
     },
     {
       "relation": "calls",
@@ -54231,9 +54231,9 @@
       "weight": 1.0,
       "_src": "enrichment_orchestrator_apply_canonical_batch",
       "_tgt": "enrichment_orchestrator_load_existing_pending",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_apply_canonical_batch",
-      "target": "enrichment_orchestrator_load_existing_pending",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_load_existing_pending"
     },
     {
       "relation": "calls",
@@ -54243,9 +54243,9 @@
       "weight": 1.0,
       "_src": "enrichment_orchestrator_apply_canonical_batch",
       "_tgt": "enrichment_orchestrator_apply_field",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_apply_canonical_batch",
-      "target": "enrichment_orchestrator_apply_field",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_field"
     },
     {
       "relation": "calls",
@@ -54255,9 +54255,9 @@
       "weight": 1.0,
       "_src": "enrichment_orchestrator_apply_canonical_batch",
       "_tgt": "enrichment_orchestrator_enqueue_writeback",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_apply_canonical_batch",
-      "target": "enrichment_orchestrator_enqueue_writeback",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_enqueue_writeback"
     },
     {
       "relation": "calls",
@@ -54265,11 +54265,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1612",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
-      "_tgt": "enrichment_orchestrator_apply_canonical_batch",
+      "_src": "enrichment_orchestrator_apply_canonical_batch",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_apply_canonical_batch",
-      "target": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement"
     },
     {
       "relation": "calls",
@@ -54277,11 +54277,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1686",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
-      "_tgt": "enrichment_orchestrator_apply_canonical_batch",
+      "_src": "enrichment_orchestrator_apply_canonical_batch",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_apply_canonical_batch",
-      "target": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision"
     },
     {
       "relation": "calls",
@@ -54289,11 +54289,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1764",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
-      "_tgt": "enrichment_orchestrator_apply_canonical_batch",
+      "_src": "enrichment_orchestrator_apply_canonical_batch",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_apply_canonical_batch",
-      "target": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending"
     },
     {
       "relation": "calls",
@@ -54301,11 +54301,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1862",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues",
-      "_tgt": "enrichment_orchestrator_apply_canonical_batch",
+      "_src": "enrichment_orchestrator_apply_canonical_batch",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_apply_canonical_batch",
-      "target": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues"
     },
     {
       "relation": "calls",
@@ -54313,11 +54313,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1938",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
-      "_tgt": "enrichment_orchestrator_apply_canonical_batch",
+      "_src": "enrichment_orchestrator_apply_canonical_batch",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_apply_canonical_batch",
-      "target": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date"
     },
     {
       "relation": "calls",
@@ -54517,11 +54517,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1577",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
-      "_tgt": "enrichment_orchestrator_upsert_journal_row",
+      "_src": "enrichment_orchestrator_upsert_journal_row",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_upsert_journal_row",
-      "target": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement"
     },
     {
       "relation": "calls",
@@ -54529,11 +54529,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1659",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
-      "_tgt": "enrichment_orchestrator_upsert_journal_row",
+      "_src": "enrichment_orchestrator_upsert_journal_row",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_upsert_journal_row",
-      "target": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision"
     },
     {
       "relation": "calls",
@@ -54541,11 +54541,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1741",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
-      "_tgt": "enrichment_orchestrator_upsert_journal_row",
+      "_src": "enrichment_orchestrator_upsert_journal_row",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_upsert_journal_row",
-      "target": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending"
     },
     {
       "relation": "calls",
@@ -54553,11 +54553,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1915",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
-      "_tgt": "enrichment_orchestrator_upsert_journal_row",
+      "_src": "enrichment_orchestrator_upsert_journal_row",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_upsert_journal_row",
-      "target": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date"
     },
     {
       "relation": "calls",
@@ -54625,11 +54625,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L775",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_field",
-      "_tgt": "enrichment_orchestrator_is_cover_field",
+      "_src": "enrichment_orchestrator_is_cover_field",
+      "_tgt": "enrichment_orchestrator_apply_field",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_is_cover_field",
-      "target": "enrichment_orchestrator_apply_field",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_field"
     },
     {
       "relation": "contains",
@@ -55045,11 +55045,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1568",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
-      "_tgt": "enrichment_orchestrator_insert_enrich_fixture",
+      "_src": "enrichment_orchestrator_insert_enrich_fixture",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_insert_enrich_fixture",
-      "target": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_breaks_after_first_apply_on_agreement"
     },
     {
       "relation": "calls",
@@ -55057,11 +55057,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1644",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
-      "_tgt": "enrichment_orchestrator_insert_enrich_fixture",
+      "_src": "enrichment_orchestrator_insert_enrich_fixture",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_insert_enrich_fixture",
-      "target": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_merges_prior_pending_into_decision"
     },
     {
       "relation": "calls",
@@ -55069,11 +55069,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1732",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
-      "_tgt": "enrichment_orchestrator_insert_enrich_fixture",
+      "_src": "enrichment_orchestrator_insert_enrich_fixture",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_insert_enrich_fixture",
-      "target": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_applies_when_no_prior_pending"
     },
     {
       "relation": "calls",
@@ -55081,11 +55081,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1792",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues",
-      "_tgt": "enrichment_orchestrator_insert_enrich_fixture",
+      "_src": "enrichment_orchestrator_insert_enrich_fixture",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_insert_enrich_fixture",
-      "target": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_skips_non_string_value_and_continues"
     },
     {
       "relation": "calls",
@@ -55093,11 +55093,11 @@
       "source_file": "backend/src/services/enrichment/orchestrator.rs",
       "source_location": "L1905",
       "weight": 1.0,
-      "_src": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
-      "_tgt": "enrichment_orchestrator_insert_enrich_fixture",
+      "_src": "enrichment_orchestrator_insert_enrich_fixture",
+      "_tgt": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
+      "confidence_score": 1.0,
       "source": "enrichment_orchestrator_insert_enrich_fixture",
-      "target": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date",
-      "confidence_score": 1.0
+      "target": "enrichment_orchestrator_apply_canonical_batch_skips_malformed_pub_date"
     },
     {
       "relation": "contains",
