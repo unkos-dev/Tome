@@ -110,8 +110,7 @@ describe("fouc.js", () => {
 
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(warn).toHaveBeenCalled();
-    const firstCall: unknown[] = warn.mock.calls[0] as unknown[] | undefined ?? [];
-    const msg = firstCall[0];
+    const msg: unknown = warn.mock.calls[0]?.[0];
     expect(typeof msg).toBe("string");
     expect(msg).toMatch(/FOUC/);
   });
