@@ -206,7 +206,7 @@ fn map_role(role: Option<&str>) -> String {
 #[cfg(test)]
 #[allow(
     clippy::float_cmp,
-    reason = "test code: f32 literals like 0.3 are exact IEEE 754 representations for this precision"
+    reason = "test code: both sides are the same f32 literal propagated through identical rounding, so bitwise comparison is reliable"
 )]
 mod tests {
     use super::*;

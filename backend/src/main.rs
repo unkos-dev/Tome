@@ -110,6 +110,23 @@ where
         .with_state(state)
 }
 
+#[allow(
+    clippy::option_if_let_else,
+    reason = "nested match is more readable than chained Result::map_or_else for two-level fallback"
+)]
+fn resolve_log_filter(configured_level: &str) -> (EnvFilter, Option<String>) {
+    match EnvFilter::try_from_default_env() {
+        Ok(f) => (f, None),
+        Err(_) => match configured_level.parse::<EnvFilter>() {
+            Ok(f) => (f, None),
+            Err(e) => (
+                EnvFilter::new("info"),
+                Some(format!("{configured_level:?}: {e}")),
+            ),
+        },
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let mut config =
@@ -142,13 +159,14 @@ async fn main() -> anyhow::Result<()> {
             })?);
     }
 
-    let log_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        config
-            .log_level
-            .parse()
-            .unwrap_or_else(|_| EnvFilter::new("info"))
-    });
+    let (log_filter, log_level_parse_err) = resolve_log_filter(&config.log_level);
     tracing_subscriber::fmt().with_env_filter(log_filter).init();
+    if let Some(err) = log_level_parse_err {
+        tracing::warn!(
+            error = %err,
+            "REVERIE_LOG_LEVEL unparseable; falling back to info. Set RUST_LOG or fix REVERIE_LOG_LEVEL to silence."
+        );
+    }
 
     if config.operator_contact.is_none() {
         tracing::warn!(
