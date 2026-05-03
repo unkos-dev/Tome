@@ -272,6 +272,7 @@ async fn shutdown_signal(cancel_token: tokio_util::sync::CancellationToken) {
 
 #[cfg(test)]
 mod tests {
+    use super::resolve_log_filter;
     use crate::test_support;
 
     #[tokio::test]
@@ -280,5 +281,37 @@ mod tests {
         let response = server.get("/health").await;
         response.assert_status_ok();
         response.assert_text("ok");
+    }
+
+    // resolve_log_filter consults RUST_LOG via try_from_default_env first and
+    // only falls back to the configured_level argument when RUST_LOG is unset
+    // or unparseable. Setting RUST_LOG inside a test would leak across the
+    // process; instead the tests below assume RUST_LOG is unset in `cargo
+    // test`, which is the project default. If a future contributor adds
+    // RUST_LOG to the test runner env, these will start exercising the
+    // env-takes-precedence path instead and may need adjusting.
+
+    #[test]
+    fn resolve_log_filter_returns_no_error_for_valid_configured_level() {
+        let (_filter, err) = resolve_log_filter("debug");
+        assert!(
+            err.is_none(),
+            "valid configured level should not produce a parse error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_log_filter_surfaces_error_for_invalid_configured_level() {
+        // EnvFilter parsing rejects directives where the level segment after `=`
+        // is not one of trace/debug/info/warn/error/off (or a numeric verbosity).
+        // "info=bogus" is a level-name typo — exactly the operator-error class
+        // this test guards against.
+        let bad = "info=bogus";
+        let (_filter, err) = resolve_log_filter(bad);
+        let err = err.expect("invalid configured level should produce a parse error");
+        assert!(
+            err.contains(bad),
+            "error message should name the bad value, got: {err}"
+        );
     }
 }
