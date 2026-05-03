@@ -1,4 +1,4 @@
-//! Transforms OpfData into structured metadata ready for DB storage.
+//! Transforms `OpfData` into structured metadata ready for DB storage.
 
 use crate::services::epub::opf_layer;
 
@@ -44,7 +44,7 @@ pub fn extract(opf: &opf_layer::OpfData) -> ExtractedMetadata {
         .map(sanitiser::sanitise)
         .filter(|s| !s.is_empty());
     // TODO: article stripping ("The", "A", "An") deferred — lowercasing only for now
-    let sort_title = title.as_deref().map(|t| t.to_lowercase());
+    let sort_title = title.as_deref().map(str::to_lowercase);
     let description = opf
         .description
         .as_deref()
@@ -191,7 +191,7 @@ fn generate_sort_name(name: &str) -> String {
     }
 }
 
-/// Map OPF role codes to author_role enum values.
+/// Map OPF role codes to `author_role` enum values.
 fn map_role(role: Option<&str>) -> String {
     match role {
         Some("aut") => "author".into(),

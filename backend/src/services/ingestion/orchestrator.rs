@@ -40,35 +40,32 @@ pub async fn run_watcher(
 
     loop {
         tokio::select! {
-            _ = cancel.cancelled() => {
+            () = cancel.cancelled() => {
                 tracing::info!("orchestrator shutting down");
                 break;
             }
             batch = rx.recv() => {
-                match batch {
-                    Some(_paths) => {
-                        // Watcher detected files — do a full scan of the ingestion dir.
-                        // We scan rather than use the watcher's paths because walkdir
-                        // gives us the complete picture (handles late-arriving files).
-                        let result = scan_once(&config, &pool).await;
-                        match result {
-                            Ok(r) => {
-                                tracing::info!(
-                                    processed = r.processed,
-                                    failed = r.failed,
-                                    skipped = r.skipped,
-                                    "batch complete"
-                                );
-                            }
-                            Err(e) => {
-                                tracing::error!(error = %e, "batch processing failed");
-                            }
+                if let Some(_paths) = batch {
+                    // Watcher detected files — do a full scan of the ingestion dir.
+                    // We scan rather than use the watcher's paths because walkdir
+                    // gives us the complete picture (handles late-arriving files).
+                    let result = scan_once(&config, &pool).await;
+                    match result {
+                        Ok(r) => {
+                            tracing::info!(
+                                processed = r.processed,
+                                failed = r.failed,
+                                skipped = r.skipped,
+                                "batch complete"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "batch processing failed");
                         }
                     }
-                    None => {
-                        tracing::warn!("watcher channel closed, stopping orchestrator");
-                        break;
-                    }
+                } else {
+                    tracing::warn!("watcher channel closed, stopping orchestrator");
+                    break;
                 }
             }
         }
@@ -77,12 +74,12 @@ pub async fn run_watcher(
     Ok(())
 }
 
-/// Advisory lock ID for serializing ingestion scans. Prevents concurrent scan_once
+/// Advisory lock ID for serializing ingestion scans. Prevents concurrent `scan_once`
 /// calls (watcher + manual POST) from racing on duplicate checks and file copies.
 const SCAN_ADVISORY_LOCK_ID: i64 = 0x52657665_00000004; // "Reve" + step 4
 
 /// One-shot ingestion scan: walk the ingestion directory, filter by format priority,
-/// copy to library, and track via ingestion_jobs.
+/// copy to library, and track via `ingestion_jobs`.
 ///
 /// Acquires a database advisory lock to serialize concurrent scans. A second scan
 /// that arrives while one is in progress will block until the first completes.
@@ -131,7 +128,7 @@ async fn scan_once_inner(config: &Config, pool: &PgPool) -> Result<ScanResult, a
                     }
                 })
                 .filter(|e| e.file_type().is_file())
-                .map(|e| e.into_path())
+                .map(walkdir::DirEntry::into_path)
                 .collect::<Vec<PathBuf>>()
         })
         .await?
@@ -329,18 +326,17 @@ async fn process_file(
     // ManifestationFormat — this is the safety net for any code path that
     // bypasses that filter.
     let ext = vars.get("ext").cloned().unwrap_or_default();
-    let format = match ext.parse::<ManifestationFormat>() {
-        Ok(fmt) => fmt,
-        Err(_) => {
-            let dest = dest_path_str.clone();
-            let _ = tokio::task::spawn_blocking(move || {
-                if let Err(e) = std::fs::remove_file(&dest) {
-                    tracing::warn!(path = %dest, error = %e, "failed to remove orphaned library file after format check");
-                }
-            })
-            .await;
-            return ProcessResult::Failed(format!("unsupported format: {ext}"));
-        }
+    let format = if let Ok(fmt) = ext.parse::<ManifestationFormat>() {
+        fmt
+    } else {
+        let dest = dest_path_str.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            if let Err(e) = std::fs::remove_file(&dest) {
+                tracing::warn!(path = %dest, error = %e, "failed to remove orphaned library file after format check");
+            }
+        })
+        .await;
+        return ProcessResult::Failed(format!("unsupported format: {ext}"));
     };
 
     // Step 4.5: EPUB structural validation and auto-repair.
@@ -420,7 +416,9 @@ async fn process_file(
             let new_full = library_path.join(&new_relative);
 
             // Attempt rename if path changed
-            if new_full.display().to_string() != dest_path_str {
+            if new_full.display().to_string() == dest_path_str {
+                dest_path_str.clone()
+            } else {
                 let old_path = dest_path_str.clone();
                 let new_full_clone = new_full.clone();
                 let rename_result = tokio::task::spawn_blocking(move || {
@@ -460,8 +458,6 @@ async fn process_file(
                         dest_path_str.clone()
                     }
                 }
-            } else {
-                dest_path_str.clone()
             }
         } else {
             dest_path_str.clone()
@@ -583,27 +579,26 @@ async fn commit_ingest(
     // 3. Write drafts — OPF or heuristic-fallback (Step 7 task 5).
     //    The heuristic row gives the canonical title_version_id pointer even
     //    when no OPF metadata exists, preserving the ingest invariant.
-    let metadata_for_drafts: ExtractedMetadata = match extracted.as_ref() {
-        Some(meta) => meta.clone(),
-        None => {
-            let title = vars
-                .get("Title")
-                .cloned()
-                .unwrap_or_else(|| "Unknown".into());
-            ExtractedMetadata {
-                title: Some(title.clone()),
-                sort_title: Some(title),
-                description: None,
-                language: None,
-                creators: Vec::new(),
-                publisher: None,
-                pub_date: None,
-                isbn: None,
-                subjects: Vec::new(),
-                series: None,
-                inversion: None,
-                confidence: 0.2,
-            }
+    let metadata_for_drafts: ExtractedMetadata = if let Some(meta) = extracted.as_ref() {
+        meta.clone()
+    } else {
+        let title = vars
+            .get("Title")
+            .cloned()
+            .unwrap_or_else(|| "Unknown".into());
+        ExtractedMetadata {
+            title: Some(title.clone()),
+            sort_title: Some(title),
+            description: None,
+            language: None,
+            creators: Vec::new(),
+            publisher: None,
+            pub_date: None,
+            isbn: None,
+            subjects: Vec::new(),
+            series: None,
+            inversion: None,
+            confidence: 0.2,
         }
     };
     let draft_ids = draft::write_drafts(&mut tx, manifestation_id, &metadata_for_drafts).await?;
@@ -619,8 +614,7 @@ async fn commit_ingest(
     let (isbn_10, isbn_13) = extracted
         .as_ref()
         .and_then(|m| m.isbn.as_ref())
-        .map(|i| (i.isbn_10.clone(), i.isbn_13.clone()))
-        .unwrap_or((None, None));
+        .map_or((None, None), |i| (i.isbn_10.clone(), i.isbn_13.clone()));
     let publisher = extracted.as_ref().and_then(|m| m.publisher.clone());
     let pub_date = extracted.as_ref().and_then(|m| m.pub_date);
 
@@ -1032,7 +1026,7 @@ mod tests {
         // Quarantine directory must contain a sidecar file for the corrupt EPUB
         let quarantine_entries: Vec<_> = std::fs::read_dir(quarantine.path())
             .unwrap()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         assert!(
             !quarantine_entries.is_empty(),
@@ -1089,7 +1083,7 @@ mod tests {
 
     /// Every non-NULL canonical field set by ingestion must have a matching
     /// `*_version_id` pointer referencing a real `metadata_versions` row with
-    /// `source='opf'`.  Without this invariant, metadata_versions is optional
+    /// `source='opf'`.  Without this invariant, `metadata_versions` is optional
     /// instead of authoritative.
     #[sqlx::test(migrations = "./migrations")]
     async fn ingest_sets_version_pointers_for_all_canonical_fields(pool: PgPool) {

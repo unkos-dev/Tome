@@ -107,7 +107,7 @@ pub async fn preview(
                 .filter(|(_, _, r)| r.value_hash == incoming.value_hash)
                 .count() as u32;
             let mut pending_set: Vec<PolicyInputRow> = existing_pending.clone();
-            for (_, _, other) in rows.iter() {
+            for (_, _, other) in rows {
                 if other.value_hash != incoming.value_hash {
                     pending_set.push(other.clone());
                 }

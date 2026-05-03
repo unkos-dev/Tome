@@ -247,7 +247,7 @@ pub(super) async fn emit_new(
     cursor: Option<String>,
 ) -> Result<Vec<u8>, AppError> {
     let self_path = format!("{self_parent}/new");
-    let page_size = state.config.opds.page_size as i64;
+    let page_size = i64::from(state.config.opds.page_size);
 
     let mut tx = db::acquire_with_rls(&state.pool, user_id)
         .await
@@ -391,7 +391,7 @@ pub(super) async fn emit_author_books(
     cursor: Option<String>,
 ) -> Result<Vec<u8>, AppError> {
     let self_path = format!("{self_parent}/authors/{author_id}");
-    let page_size = state.config.opds.page_size as i64;
+    let page_size = i64::from(state.config.opds.page_size);
 
     let mut tx = db::acquire_with_rls(&state.pool, user_id)
         .await
@@ -531,7 +531,7 @@ pub(super) async fn emit_series_books(
     // pathological, and a single oversized feed beats silently dropping
     // high-position entries under cursor pagination whose (created_at, id)
     // key doesn't match the series ORDER BY.
-    let series_limit = (state.config.opds.page_size as i64) * 10;
+    let series_limit = i64::from(state.config.opds.page_size) * 10;
 
     let mut tx = db::acquire_with_rls(&state.pool, user_id)
         .await
@@ -598,7 +598,7 @@ pub(super) async fn emit_search(
     q: &str,
 ) -> Result<Vec<u8>, AppError> {
     let self_path = format!("{self_parent}/search");
-    let page_size = state.config.opds.page_size as i64;
+    let page_size = i64::from(state.config.opds.page_size);
 
     let mut fb = FeedBuilder::new(
         base,

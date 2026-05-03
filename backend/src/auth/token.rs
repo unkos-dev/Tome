@@ -10,7 +10,7 @@ fn sha256_hex(input: &[u8]) -> String {
 }
 
 /// Generate a cryptographically random device token (32 bytes, base64url).
-/// Returns (plaintext_token, sha256_hex_hash).
+/// Returns (`plaintext_token`, `sha256_hex_hash`).
 pub fn generate_device_token() -> (String, String) {
     let mut bytes = [0u8; 32];
     rand::fill(&mut bytes);

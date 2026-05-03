@@ -125,8 +125,7 @@ async fn callback(
     let display_name = claims
         .name()
         .and_then(|n: &openidconnect::LocalizedClaim<openidconnect::EndUserName>| n.get(None))
-        .map(|n: &openidconnect::EndUserName| n.as_str())
-        .unwrap_or(subject);
+        .map_or(subject, |n: &openidconnect::EndUserName| n.as_str());
     let email = claims
         .email()
         .map(|e: &openidconnect::EndUserEmail| e.as_str());
@@ -136,7 +135,7 @@ async fn callback(
         .authenticate(OidcCredentials {
             subject: subject.to_owned(),
             display_name: display_name.to_owned(),
-            email: email.map(|e| e.to_owned()),
+            email: email.map(std::borrow::ToOwned::to_owned),
         })
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("auth backend error: {e}")))?

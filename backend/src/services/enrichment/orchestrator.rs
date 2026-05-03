@@ -281,7 +281,7 @@ async fn apply_canonical_batch(
 
             // Combine pending from this run with stored pending rows.
             let mut pending_set: Vec<PolicyInputRow> = existing_pending.clone();
-            for (_, other) in rows.iter() {
+            for (_, other) in rows {
                 if other.id != incoming.id {
                     pending_set.push(other.clone());
                 }
@@ -480,11 +480,11 @@ pub async fn fan_out(
                 Some(run) => done.push(run),
                 None => break,
             },
-            _ = &mut deadline => {
+            () = &mut deadline => {
                 // Budget expired: synthesise a Timeout outcome for every
                 // source that hasn't reported yet so the failure surfaces
                 // to `finish`.  In-flight futures are dropped (cancelled).
-                for id in enabled_ids.iter() {
+                for id in &enabled_ids {
                     if !done.iter().any(|r| &r.source_id == id) {
                         done.push(SourceRun {
                             source_id: id.clone(),
@@ -908,7 +908,7 @@ mod tests {
             _ctx: &LookupCtx<'_>,
             _key: &LookupKey,
         ) -> Result<Vec<SourceResult>, SourceError> {
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            tokio::time::sleep(Duration::from_mins(1)).await;
             Ok(Vec::new())
         }
     }
@@ -1016,13 +1016,13 @@ mod tests {
             googlebooks_base_url: gb_uri.into(),
             googlebooks_api_key: None,
             hardcover_base_url: hc_uri.into(),
-            hardcover_api_token: hc_token.map(|s| s.into()),
+            hardcover_api_token: hc_token.map(std::convert::Into::into),
             operator_contact: None,
         }
     }
 
     /// Insert (work + manifestation) with the given ISBN-13 and return both IDs.
-    /// Canonical fields start empty so AutoFill is exercised.
+    /// Canonical fields start empty so `AutoFill` is exercised.
     async fn insert_enrich_fixture(pool: &PgPool, isbn_13: &str, marker: &str) -> (Uuid, Uuid) {
         let work_id: Uuid = sqlx::query_scalar(
             "INSERT INTO works (title, sort_title) VALUES ('', '') RETURNING id",
@@ -1251,7 +1251,7 @@ mod tests {
         );
     }
 
-    /// One source returns `publisher` (AutoFill by default) on an empty
+    /// One source returns `publisher` (`AutoFill` by default) on an empty
     /// canonical → Apply fires and `publisher` is written to the
     /// manifestation.
     #[sqlx::test(migrations = "./migrations")]
@@ -1308,7 +1308,7 @@ mod tests {
 
     /// When the `title` field is locked, the journal row is still written
     /// (so admins can see what the source proposed) but canonical and
-    /// title_version_id are NOT updated.
+    /// `title_version_id` are NOT updated.
     #[sqlx::test(migrations = "./migrations")]
     async fn orchestrator_locked_field_writes_journal_but_not_canonical(pool: PgPool) {
         let app_pool = app_pool_for(&pool).await;
@@ -1461,7 +1461,7 @@ mod tests {
     // and a full `run_once` integration call.
 
     /// Every source returned an error → no journal rows, all failures
-    /// summarised with correct retry_after / terminal flags. The
+    /// summarised with correct `retry_after` / terminal flags. The
     /// `SourceError::Other` case also verifies that
     /// `summarise_failure`'s `{err:#}` formatting preserves the full
     /// anyhow `.chain()` of context.
@@ -1493,7 +1493,7 @@ mod tests {
             SourceRun {
                 source_id: "hardcover".into(),
                 outcome: Err(SourceError::RateLimited {
-                    retry_after: Some(Duration::from_secs(60)),
+                    retry_after: Some(Duration::from_mins(1)),
                 }),
             },
             SourceRun {
@@ -1532,7 +1532,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             hc.retry_after,
-            Some(Duration::from_secs(60)),
+            Some(Duration::from_mins(1)),
             "RateLimited retry_after must round-trip"
         );
         assert!(!hc.terminal, "RateLimited is not terminal");
@@ -1633,8 +1633,8 @@ mod tests {
         );
     }
 
-    /// A pending row from a prior run with a different value_hash must
-    /// downgrade AutoFill to Propose — even when canonical is empty and the
+    /// A pending row from a prior run with a different `value_hash` must
+    /// downgrade `AutoFill` to Propose — even when canonical is empty and the
     /// new run has only one row.
     #[sqlx::test(migrations = "./migrations")]
     async fn apply_canonical_batch_merges_prior_pending_into_decision(pool: PgPool) {

@@ -39,7 +39,7 @@ pub fn match_modifier(match_type: &str) -> f32 {
 /// * 0 or 1 source → 1.00 (no boost)
 /// * 2 sources      → 1.10
 /// * 3+ sources     → 1.20
-pub fn agreement_boost(quorum: u32) -> f32 {
+pub const fn agreement_boost(quorum: u32) -> f32 {
     match quorum {
         0 | 1 => 1.00,
         2 => 1.10,

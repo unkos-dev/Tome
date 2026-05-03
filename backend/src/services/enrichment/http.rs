@@ -81,7 +81,7 @@ impl std::error::Error for HopError {}
 /// Denied IPv6 ranges:
 /// * `::1`         — loopback
 /// * `fe80::/10`   — link-local
-/// * `fc00::/7`    — unique local (fc00:: and fd00::)
+/// * `fc00::/7`    — unique local (`fc00::` and `fd00::`)
 /// * `ff00::/8`    — multicast
 /// * `::`          — unspecified
 ///
@@ -158,7 +158,7 @@ pub fn ip_is_denied(ip: IpAddr) -> bool {
 
 /// Extract the inner IPv4 address from an IPv4-mapped IPv6 address
 /// (`::ffff:x.x.x.x`), or `None` for any other IPv6 address.
-fn to_ipv4_mapped(v6: Ipv6Addr) -> Option<std::net::Ipv4Addr> {
+const fn to_ipv4_mapped(v6: Ipv6Addr) -> Option<std::net::Ipv4Addr> {
     // IPv4-mapped: first 80 bits zero, next 16 bits all-ones (0xFFFF), then 32-bit IPv4.
     let segs = v6.segments();
     if segs[0] == 0
@@ -286,7 +286,7 @@ impl Resolve for SsrfResolver {
 ///   rejected before reqwest dials them.
 ///
 /// `user_agent` is forwarded on every request.  Upstream providers
-/// (e.g. OpenLibrary) grant identified clients a higher rate-limit tier.
+/// (e.g. `OpenLibrary`) grant identified clients a higher rate-limit tier.
 pub fn api_client(user_agent: &str) -> reqwest::Client {
     reqwest::Client::builder()
         .user_agent(user_agent)
@@ -467,7 +467,7 @@ mod tests {
 
     /// The custom DNS resolver must reject hostnames whose entire resolution
     /// set falls in a denied IP range — closes the TOCTOU window between
-    /// validate_hop and reqwest's connection-time resolution.
+    /// `validate_hop` and reqwest's connection-time resolution.
     #[tokio::test]
     async fn ssrf_resolver_rejects_localhost() {
         use reqwest::dns::{Name, Resolve};

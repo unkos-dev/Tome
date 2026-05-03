@@ -30,15 +30,15 @@ pub fn validate(handle: &ZipHandle, issues: &mut Vec<Issue>) -> Option<String> {
         candidate.as_ref().and_then(|c| {
             // C4: validate path safety using the shared helper (covers percent-encoded
             // traversal and backslashes in addition to plain `..` and leading `/`).
-            if !super::is_safe_path(c) {
+            if super::is_safe_path(c) {
+                Some(c.clone())
+            } else {
                 issues.push(Issue {
                     layer: Layer::Container,
                     severity: Severity::Irrecoverable,
                     kind: IssueKind::UnsafeOpfPath { path: c.clone() },
                 });
                 None
-            } else {
-                Some(c.clone())
             }
         })
     }

@@ -1,4 +1,4 @@
-//! OpenSearch descriptors. Separate endpoints per scope so a reader paired
+//! `OpenSearch` descriptors. Separate endpoints per scope so a reader paired
 //! at `/opds/shelves/{id}` gets a search URL scoped to that shelf.
 
 use axum::Router;
@@ -35,8 +35,10 @@ async fn library_opensearch(
     let base = base_url(&state)?.clone();
     let template = base
         .join("/opds/library/search?q={searchTerms}")
-        .map(|u| u.to_string())
-        .unwrap_or_else(|_| "/opds/library/search?q={searchTerms}".into());
+        .map_or_else(
+            |_| "/opds/library/search?q={searchTerms}".into(),
+            |u| u.to_string(),
+        );
     let body = build_opensearch_xml("Reverie", "Search Reverie library", &template);
     Ok(build_response(body))
 }
@@ -69,8 +71,10 @@ async fn shelf_opensearch(
         .join(&format!(
             "/opds/shelves/{shelf_id}/search?q={{searchTerms}}"
         ))
-        .map(|u| u.to_string())
-        .unwrap_or_else(|_| format!("/opds/shelves/{shelf_id}/search?q={{searchTerms}}"));
+        .map_or_else(
+            |_| format!("/opds/shelves/{shelf_id}/search?q={{searchTerms}}"),
+            |u| u.to_string(),
+        );
     let body = build_opensearch_xml("Reverie Shelf", "Search shelf contents", &template);
     Ok(build_response(body))
 }

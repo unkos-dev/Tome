@@ -106,22 +106,38 @@ pub fn validate(
                     .attributes()
                     .flatten()
                     .find(|a| a.key.as_ref() == b"property")
-                    .and_then(|a| std::str::from_utf8(&a.value).ok().map(|s| s.to_string()));
+                    .and_then(|a| {
+                        std::str::from_utf8(&a.value)
+                            .ok()
+                            .map(std::string::ToString::to_string)
+                    });
                 let content_attr = e
                     .attributes()
                     .flatten()
                     .find(|a| a.key.as_ref() == b"content")
-                    .and_then(|a| std::str::from_utf8(&a.value).ok().map(|s| s.to_string()));
+                    .and_then(|a| {
+                        std::str::from_utf8(&a.value)
+                            .ok()
+                            .map(std::string::ToString::to_string)
+                    });
                 let id_attr = e
                     .attributes()
                     .flatten()
                     .find(|a| a.key.as_ref() == b"id")
-                    .and_then(|a| std::str::from_utf8(&a.value).ok().map(|s| s.to_string()));
+                    .and_then(|a| {
+                        std::str::from_utf8(&a.value)
+                            .ok()
+                            .map(std::string::ToString::to_string)
+                    });
                 let refines_attr = e
                     .attributes()
                     .flatten()
                     .find(|a| a.key.as_ref() == b"refines")
-                    .and_then(|a| std::str::from_utf8(&a.value).ok().map(|s| s.to_string()));
+                    .and_then(|a| {
+                        std::str::from_utf8(&a.value)
+                            .ok()
+                            .map(std::string::ToString::to_string)
+                    });
 
                 if let Some(ref prop) = prop {
                     if prop == "belongs-to-collection" {
@@ -173,17 +189,29 @@ pub fn validate(
                     .attributes()
                     .flatten()
                     .find(|a| a.key.as_ref() == b"property")
-                    .and_then(|a| std::str::from_utf8(&a.value).ok().map(|s| s.to_string()));
+                    .and_then(|a| {
+                        std::str::from_utf8(&a.value)
+                            .ok()
+                            .map(std::string::ToString::to_string)
+                    });
                 let name_attr = e
                     .attributes()
                     .flatten()
                     .find(|a| a.key.as_ref() == b"name")
-                    .and_then(|a| std::str::from_utf8(&a.value).ok().map(|s| s.to_string()));
+                    .and_then(|a| {
+                        std::str::from_utf8(&a.value)
+                            .ok()
+                            .map(std::string::ToString::to_string)
+                    });
                 let content = e
                     .attributes()
                     .flatten()
                     .find(|a| a.key.as_ref() == b"content")
-                    .and_then(|a| std::str::from_utf8(&a.value).ok().map(|s| s.to_string()));
+                    .and_then(|a| {
+                        std::str::from_utf8(&a.value)
+                            .ok()
+                            .map(std::string::ToString::to_string)
+                    });
 
                 // Accessibility meta via property attribute
                 if let Some(ref prop) = prop
@@ -228,7 +256,11 @@ pub fn validate(
                         let k = a.key.as_ref();
                         k == b"opf:role" || k == b"role"
                     })
-                    .and_then(|a| std::str::from_utf8(&a.value).ok().map(|s| s.to_string()));
+                    .and_then(|a| {
+                        std::str::from_utf8(&a.value)
+                            .ok()
+                            .map(std::string::ToString::to_string)
+                    });
 
                 let e = e.into_owned();
                 let text = reader
@@ -266,14 +298,14 @@ pub fn validate(
 
                     if let (Some(id), Some(href)) = (attrs.get("id"), attrs.get("href")) {
                         // C4: validate href path safety via shared helper.
-                        if !super::is_safe_path(href) {
+                        if super::is_safe_path(href) {
+                            manifest.insert(id.clone(), href.clone());
+                        } else {
                             issues.push(Issue {
                                 layer: Layer::Opf,
                                 severity: Severity::Degraded,
                                 kind: IssueKind::UnsafeManifestHref { href: href.clone() },
                             });
-                        } else {
-                            manifest.insert(id.clone(), href.clone());
                         }
                     }
                 }
@@ -484,11 +516,11 @@ mod tests {
 
     #[test]
     fn empty_metadata_returns_none_fields() {
-        let opf = br#"<package>
+        let opf = br"<package>
             <metadata/>
             <manifest/>
             <spine/>
-        </package>"#;
+        </package>";
         let handle = make_handle(opf);
         let mut issues = Vec::new();
         let result = validate(&handle, Some("OEBPS/content.opf"), &mut issues);

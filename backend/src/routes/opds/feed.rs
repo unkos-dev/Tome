@@ -49,10 +49,10 @@ pub enum FeedKind {
 }
 
 impl FeedKind {
-    pub fn content_type(self) -> &'static str {
+    pub const fn content_type(self) -> &'static str {
         match self {
-            FeedKind::Navigation => NAVIGATION_TYPE,
-            FeedKind::Acquisition => ACQUISITION_TYPE,
+            Self::Navigation => NAVIGATION_TYPE,
+            Self::Acquisition => ACQUISITION_TYPE,
         }
     }
 }
@@ -123,7 +123,7 @@ impl FeedBuilder {
             .write_event(Event::End(BytesEnd::new("author")))
             .expect("write author close");
 
-        let mut this = FeedBuilder {
+        let mut this = Self {
             writer,
             base_url: base_url.clone(),
             kind,
@@ -306,7 +306,7 @@ impl FeedBuilder {
         self.write_link(REL_NEXT, href, Some(ACQUISITION_TYPE), None);
     }
 
-    /// `rel="search"` pointing at the OpenSearch descriptor.
+    /// `rel="search"` pointing at the `OpenSearch` descriptor.
     pub fn add_search_link(&mut self, opensearch_xml_href: &str) {
         self.write_link(
             REL_SEARCH,

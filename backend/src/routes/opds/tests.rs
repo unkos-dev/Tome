@@ -516,7 +516,7 @@ async fn cover_cache_populates_and_serves(pool: PgPool) {
     assert!(cache_dir.exists(), "cache dir should be created");
     let entries: Vec<_> = std::fs::read_dir(&cache_dir)
         .unwrap()
-        .filter_map(|r| r.ok())
+        .filter_map(std::result::Result::ok)
         .collect();
     assert!(!entries.is_empty(), "expected at least one cached cover");
 

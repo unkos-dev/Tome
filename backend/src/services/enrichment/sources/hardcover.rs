@@ -29,7 +29,7 @@ fn limiter() -> &'static Limiter {
     L.get_or_init(|| RateLimiter::direct(Quota::per_second(NonZeroU32::new(1).expect("1 > 0"))))
 }
 
-const ISBN_QUERY: &str = r#"
+const ISBN_QUERY: &str = r"
 query BooksByIsbn($isbn: String!) {
   books(where: { isbns: { isbn: { _eq: $isbn } } }, limit: 1) {
     title
@@ -43,9 +43,9 @@ query BooksByIsbn($isbn: String!) {
     cached_tags
   }
 }
-"#;
+";
 
-const TITLE_AUTHOR_QUERY: &str = r#"
+const TITLE_AUTHOR_QUERY: &str = r"
 query SearchByTitleAuthor($title: String!, $author: String!) {
   books(where: { title: { _ilike: $title }, contributions: { author: { name: { _ilike: $author } } } }, limit: 1) {
     title
@@ -59,7 +59,7 @@ query SearchByTitleAuthor($title: String!, $author: String!) {
     cached_tags
   }
 }
-"#;
+";
 
 pub struct Hardcover {
     base_url: String,
@@ -308,7 +308,7 @@ mod tests {
     use wiremock::matchers::{body_partial_json, method};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn ctx<'a>(http: &'a reqwest::Client) -> LookupCtx<'a> {
+    fn ctx(http: &reqwest::Client) -> LookupCtx<'_> {
         LookupCtx { http, cached: None }
     }
 

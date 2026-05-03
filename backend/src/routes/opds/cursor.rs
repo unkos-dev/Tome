@@ -56,7 +56,7 @@ impl Cursor {
         let created_at =
             OffsetDateTime::parse(ts, &Rfc3339).map_err(|_| CursorError::InvalidTimestamp)?;
         let id = Uuid::parse_str(uuid).map_err(|_| CursorError::InvalidUuid)?;
-        Ok(Cursor { created_at, id })
+        Ok(Self { created_at, id })
     }
 }
 

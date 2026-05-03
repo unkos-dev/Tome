@@ -44,9 +44,20 @@ pub async fn watch(
 
     loop {
         // If we have pending paths, wait for more events or debounce timeout
-        if !pending.is_empty() {
+        if pending.is_empty() {
+            // No pending paths — wait for first event or cancellation
             tokio::select! {
-                _ = cancel.cancelled() => {
+                () = cancel.cancelled() => {
+                    tracing::info!("watcher cancelled (idle)");
+                    break;
+                }
+                Some(paths) = notify_rx.recv() => {
+                    pending.extend(paths);
+                }
+            }
+        } else {
+            tokio::select! {
+                () = cancel.cancelled() => {
                     tracing::info!("watcher cancelled, flushing pending batch");
                     if !pending.is_empty() {
                         let _ = tx.send(std::mem::take(&mut pending)).await;
@@ -56,7 +67,7 @@ pub async fn watch(
                 Some(paths) = notify_rx.recv() => {
                     pending.extend(paths);
                 }
-                _ = tokio::time::sleep(debounce) => {
+                () = tokio::time::sleep(debounce) => {
                     // Debounce complete — send batch
                     pending.sort();
                     pending.dedup();
@@ -66,17 +77,6 @@ pub async fn watch(
                         tracing::warn!("batch receiver dropped, stopping watcher");
                         break;
                     }
-                }
-            }
-        } else {
-            // No pending paths — wait for first event or cancellation
-            tokio::select! {
-                _ = cancel.cancelled() => {
-                    tracing::info!("watcher cancelled (idle)");
-                    break;
-                }
-                Some(paths) = notify_rx.recv() => {
-                    pending.extend(paths);
                 }
             }
         }

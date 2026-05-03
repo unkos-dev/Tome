@@ -28,7 +28,7 @@ pub fn select_by_priority(files: &[PathBuf], priority: &[ManifestationFormat]) -
             let Some(ext) = candidate
                 .extension()
                 .and_then(|e| e.to_str())
-                .map(|e| e.to_lowercase())
+                .map(str::to_lowercase)
             else {
                 continue;
             };

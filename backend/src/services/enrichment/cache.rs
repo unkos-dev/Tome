@@ -20,11 +20,11 @@ pub enum ApiCacheKind {
 }
 
 impl ApiCacheKind {
-    fn as_str(self) -> &'static str {
+    const fn as_str(self) -> &'static str {
         match self {
-            ApiCacheKind::Hit => "hit",
-            ApiCacheKind::Miss => "miss",
-            ApiCacheKind::Error => "error",
+            Self::Hit => "hit",
+            Self::Miss => "miss",
+            Self::Error => "error",
         }
     }
 }

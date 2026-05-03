@@ -51,7 +51,7 @@ pub async fn spawn_queue(
 
     loop {
         tokio::select! {
-            _ = cancel.cancelled() => {
+            () = cancel.cancelled() => {
                 info!("enrichment queue shutting down");
                 revert_in_progress(&pool).await?;
                 return Ok(());
@@ -89,7 +89,7 @@ pub async fn spawn_queue(
 /// when the queue is empty (or every row is still in its backoff window).
 async fn claim_next(pool: &PgPool) -> sqlx::Result<Option<(Uuid, i32)>> {
     let row: Option<(Uuid, i32)> = sqlx::query_as(
-        r#"WITH eligible AS (
+        r"WITH eligible AS (
              SELECT id, enrichment_attempt_count
              FROM manifestations
              WHERE enrichment_status IN ('pending', 'failed')
@@ -117,7 +117,7 @@ async fn claim_next(pool: &PgPool) -> sqlx::Result<Option<(Uuid, i32)>> {
                   enrichment_attempt_count = m.enrichment_attempt_count + 1
              FROM eligible
             WHERE m.id = eligible.id
-           RETURNING m.id, m.enrichment_attempt_count"#,
+           RETURNING m.id, m.enrichment_attempt_count",
     )
     .fetch_optional(pool)
     .await?;

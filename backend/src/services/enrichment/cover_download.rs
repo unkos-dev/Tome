@@ -38,7 +38,7 @@ pub enum CoverFormat {
 }
 
 impl CoverFormat {
-    fn extension(self) -> &'static str {
+    const fn extension(self) -> &'static str {
         match self {
             Self::Jpeg => "jpg",
             Self::Png => "png",

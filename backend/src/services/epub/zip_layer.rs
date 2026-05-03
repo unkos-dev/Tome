@@ -7,7 +7,7 @@ use super::{
     Severity,
 };
 
-/// Lightweight handle returned by zip_layer so upper layers can re-open the archive.
+/// Lightweight handle returned by `zip_layer` so upper layers can re-open the archive.
 pub struct ZipHandle {
     /// Raw bytes of the entire archive (read once; ZIP seeks into this).
     pub bytes: Vec<u8>,
@@ -25,18 +25,17 @@ pub fn validate(path: &Path, issues: &mut Vec<Issue>) -> Result<ZipHandle, super
 
     'zip: {
         let cursor = std::io::Cursor::new(&bytes[..]);
-        let mut archive = match ZipArchive::new(cursor) {
-            Ok(a) => a,
-            Err(_) => {
-                issues.push(Issue {
-                    layer: Layer::Zip,
-                    severity: Severity::Irrecoverable,
-                    kind: IssueKind::CorruptEntry {
-                        entry_name: "<archive>".to_string(),
-                    },
-                });
-                break 'zip;
-            }
+        let mut archive = if let Ok(a) = ZipArchive::new(cursor) {
+            a
+        } else {
+            issues.push(Issue {
+                layer: Layer::Zip,
+                severity: Severity::Irrecoverable,
+                kind: IssueKind::CorruptEntry {
+                    entry_name: "<archive>".to_string(),
+                },
+            });
+            break 'zip;
         };
 
         let mut aggregate_size: u64 = 0;
@@ -45,18 +44,17 @@ pub fn validate(path: &Path, issues: &mut Vec<Issue>) -> Result<ZipHandle, super
             // D1: use match instead of `?` so corrupt entries push an Irrecoverable
             // issue and break out of the labeled block rather than propagating Err
             // up to the caller (which would misclassify as "degraded").
-            let file = match archive.by_index(i) {
-                Ok(f) => f,
-                Err(_) => {
-                    issues.push(Issue {
-                        layer: Layer::Zip,
-                        severity: Severity::Irrecoverable,
-                        kind: IssueKind::CorruptEntry {
-                            entry_name: format!("entry[{i}]"),
-                        },
-                    });
-                    break 'zip;
-                }
+            let file = if let Ok(f) = archive.by_index(i) {
+                f
+            } else {
+                issues.push(Issue {
+                    layer: Layer::Zip,
+                    severity: Severity::Irrecoverable,
+                    kind: IssueKind::CorruptEntry {
+                        entry_name: format!("entry[{i}]"),
+                    },
+                });
+                break 'zip;
             };
             let name = file.name().to_string();
 

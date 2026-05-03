@@ -240,7 +240,7 @@ mod tests {
     use std::fs;
     use tempfile::TempDir;
 
-    /// Build a TestServer with `security` replacing the defaults in
+    /// Build a `TestServer` with `security` replacing the defaults in
     /// `test_config()`. The `csp_api_header` / `csp_html_header` strings are
     /// caller-responsibility — simulate what `main()` would compute.
     fn test_server_with_security(security: SecurityConfig) -> TestServer {
@@ -258,7 +258,7 @@ mod tests {
         TestServer::new(build_router(state, auth_backend))
     }
 
-    /// Materialise a minimal dist/ tree in a TempDir: `index.html`,
+    /// Materialise a minimal dist/ tree in a `TempDir`: `index.html`,
     /// `csp-hashes.json`, `assets/`. Used by SPA-serving tests.
     fn fixture_dist(index_html_body: &[u8]) -> TempDir {
         let tmp = TempDir::new().unwrap();

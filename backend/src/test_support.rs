@@ -245,10 +245,10 @@ pub mod db {
         (user.id, format!("Basic {basic}"))
     }
 
-    /// Build the full router with both pools wired through AppState.
-    /// AppState.pool comes from `app_pool` (reverie_app — for the route
-    /// handlers' acquire_with_rls); AppState.ingestion_pool comes from
-    /// `ingestion_pool` (reverie_ingestion — matches the queue + dry_run).
+    /// Build the full router with both pools wired through `AppState`.
+    /// AppState.pool comes from `app_pool` (`reverie_app` — for the route
+    /// handlers' `acquire_with_rls`); `AppState.ingestion_pool` comes from
+    /// `ingestion_pool` (`reverie_ingestion` — matches the queue + `dry_run`).
     pub fn server_with_real_pools(
         app_pool: &PgPool,
         ingestion_pool: &PgPool,
@@ -482,7 +482,7 @@ pub mod db {
 /// configured to point at the mock. Lets tests drive the full callback
 /// flow (PKCE/CSRF/nonce validation → token exchange → ID token signature
 /// verification → user upsert → session login) without going through a
-/// real IdP.
+/// real `IdP`.
 pub mod oidc_mock {
     use openidconnect::core::{
         CoreClient, CoreIdToken, CoreIdTokenClaims, CoreJsonWebKey, CoreJsonWebKeySet,
@@ -519,7 +519,7 @@ pub mod oidc_mock {
     impl MockOidcProvider {
         /// Boot a `MockServer` and serve a freshly-generated JWKS at `/jwks`.
         /// `client_id` is the OIDC `aud` claim — must match `OIDC_CLIENT_ID`
-        /// in the AppState's config (`test_config()` uses an empty string;
+        /// in the `AppState`'s config (`test_config()` uses an empty string;
         /// pass `""` here to match).
         pub async fn start(client_id: &str) -> Self {
             // 2048-bit RSA — fast enough for a per-test keygen and matches

@@ -1,3 +1,12 @@
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::print_stdout,
+        clippy::print_stderr,
+    )
+)]
 mod auth;
 mod config;
 mod db;

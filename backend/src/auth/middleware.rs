@@ -20,7 +20,7 @@ pub struct CurrentUser {
 
 impl CurrentUser {
     /// Return `Err(Forbidden)` unless the user is an admin.
-    pub fn require_admin(&self) -> Result<(), AppError> {
+    pub const fn require_admin(&self) -> Result<(), AppError> {
         if matches!(self.role, Role::Admin) {
             Ok(())
         } else {
@@ -32,7 +32,7 @@ impl CurrentUser {
     /// Used to gate metadata/enrichment endpoints that should not be visible
     /// to children.
     #[allow(dead_code)] // wired up by Step 7 tasks 25/26 (metadata + enrichment routes)
-    pub fn require_not_child(&self) -> Result<(), AppError> {
+    pub const fn require_not_child(&self) -> Result<(), AppError> {
         if self.is_child {
             Err(AppError::Forbidden)
         } else {
@@ -50,7 +50,7 @@ impl CurrentUser {
 /// Basic header is present but credentials are malformed or don't match any
 /// active token. Side-effect: schedules an async `update_last_used` write
 /// (SQL-side debounced to at most one UPDATE per token per 5 minutes).
-pub(crate) async fn verify_basic(
+pub async fn verify_basic(
     state: &AppState,
     parts: &Parts,
 ) -> Result<Option<CurrentUser>, AppError> {
@@ -119,7 +119,7 @@ impl FromRequestParts<AppState> for CurrentUser {
             <AuthCtx as FromRequestParts<AppState>>::from_request_parts(parts, state).await
             && let Some(u) = auth_session.user
         {
-            return Ok(CurrentUser {
+            return Ok(Self {
                 user_id: u.id,
                 role: u.role,
                 is_child: u.is_child,

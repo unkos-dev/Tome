@@ -169,7 +169,11 @@ fn rewrite_opf_remove_broken_spine(opf_bytes: &[u8], broken_refs: &[String]) -> 
                     .attributes()
                     .flatten()
                     .find(|a| a.key.as_ref() == b"idref")
-                    .and_then(|a| std::str::from_utf8(&a.value).ok().map(|s| s.to_string()));
+                    .and_then(|a| {
+                        std::str::from_utf8(&a.value)
+                            .ok()
+                            .map(std::string::ToString::to_string)
+                    });
                 if idref
                     .as_deref()
                     .is_some_and(|id| broken_refs.iter().any(|r| r == id))
@@ -183,7 +187,11 @@ fn rewrite_opf_remove_broken_spine(opf_bytes: &[u8], broken_refs: &[String]) -> 
                     .attributes()
                     .flatten()
                     .find(|a| a.key.as_ref() == b"idref")
-                    .and_then(|a| std::str::from_utf8(&a.value).ok().map(|s| s.to_string()));
+                    .and_then(|a| {
+                        std::str::from_utf8(&a.value)
+                            .ok()
+                            .map(std::string::ToString::to_string)
+                    });
                 if skip_depth > 0
                     || idref
                         .as_deref()

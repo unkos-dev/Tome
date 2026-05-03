@@ -527,7 +527,7 @@ mod tests {
 
     #[test]
     fn transform_replaces_dc_description() {
-        let input = sample_epub3(r#"<dc:description>Old blurb</dc:description>"#);
+        let input = sample_epub3(r"<dc:description>Old blurb</dc:description>");
         let target = Target {
             description: Some("New blurb"),
             ..Default::default()
@@ -557,7 +557,7 @@ mod tests {
 
     #[test]
     fn transform_replaces_dc_publisher() {
-        let input = sample_epub3(r#"<dc:publisher>Old House</dc:publisher>"#);
+        let input = sample_epub3(r"<dc:publisher>Old House</dc:publisher>");
         let target = Target {
             publisher: Some("New House"),
             ..Default::default()
@@ -572,7 +572,7 @@ mod tests {
 
     #[test]
     fn transform_replaces_dc_date() {
-        let input = sample_epub3(r#"<dc:date>1990-01-01</dc:date>"#);
+        let input = sample_epub3(r"<dc:date>1990-01-01</dc:date>");
         let target = Target {
             pub_date: Some("2026-04-19"),
             ..Default::default()

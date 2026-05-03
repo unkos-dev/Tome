@@ -22,11 +22,7 @@ pub fn validate(handle: &ZipHandle, opf_data: Option<&OpfData>, issues: &mut Vec
     }
 
     // Determine base path from OPF path (for resolving relative hrefs)
-    let opf_dir = opf
-        .opf_path
-        .rfind('/')
-        .map(|i| &opf.opf_path[..i])
-        .unwrap_or("");
+    let opf_dir = opf.opf_path.rfind('/').map_or("", |i| &opf.opf_path[..i]);
 
     for idref in &opf.spine_idrefs {
         let Some(href) = opf.manifest.get(idref) else {
@@ -46,7 +42,7 @@ pub fn validate(handle: &ZipHandle, opf_data: Option<&OpfData>, issues: &mut Vec
     }
 }
 
-pub(crate) fn validate_xhtml_document(bytes: &[u8], entry_name: &str, issues: &mut Vec<Issue>) {
+pub fn validate_xhtml_document(bytes: &[u8], entry_name: &str, issues: &mut Vec<Issue>) {
     // Conservative encoding repair rule:
     // Only transcode if ALL THREE conditions hold:
     // (a) XML declaration or BOM explicitly declares a non-UTF-8 encoding

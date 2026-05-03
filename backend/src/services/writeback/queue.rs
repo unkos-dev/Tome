@@ -10,7 +10,7 @@
 //!      load-bearing correctness gate.  Two workers racing the same
 //!      manifestation both survive `NOT EXISTS` under READ COMMITTED
 //!      (which can't see a peer's uncommitted UPDATE), but when the
-//!      second worker's UPDATE would create a duplicate in_progress
+//!      second worker's UPDATE would create a duplicate `in_progress`
 //!      tuple, Postgres waits on the first worker's uncommitted index
 //!      entry, then fails with SQLSTATE 23505.  `claim_next` translates
 //!      that into `Ok(None)`.
@@ -65,7 +65,7 @@ pub async fn spawn_worker(
 
     loop {
         tokio::select! {
-            _ = cancel.cancelled() => {
+            () = cancel.cancelled() => {
                 info!("writeback queue shutting down");
                 revert_in_progress(&pool).await?;
                 return Ok(());
@@ -101,9 +101,9 @@ pub async fn spawn_worker(
 /// `(manifestation_id) WHERE status = 'in_progress'` is the load-bearing
 /// serialisation primitive; the `NOT EXISTS` clause in the CTE is a
 /// common-path optimisation that avoids a unique-violation round-trip.
-pub(crate) async fn claim_next(pool: &PgPool) -> sqlx::Result<Option<(Uuid, i32)>> {
+pub async fn claim_next(pool: &PgPool) -> sqlx::Result<Option<(Uuid, i32)>> {
     let result = sqlx::query_as::<_, (Uuid, i32)>(
-        r#"WITH eligible AS (
+        r"WITH eligible AS (
              SELECT wj.id, wj.attempt_count
              FROM writeback_jobs wj
              WHERE wj.status IN ('pending', 'failed')
@@ -136,7 +136,7 @@ pub(crate) async fn claim_next(pool: &PgPool) -> sqlx::Result<Option<(Uuid, i32)
                   attempt_count = wj.attempt_count + 1
              FROM eligible
             WHERE wj.id = eligible.id
-           RETURNING wj.id, wj.attempt_count"#,
+           RETURNING wj.id, wj.attempt_count",
     )
     .fetch_optional(pool)
     .await;
@@ -312,7 +312,7 @@ async fn mark_failed(
 
 /// Revert any `in_progress` rows back to `pending`.  Called on shutdown
 /// AND on worker startup (crash recovery).
-pub(crate) async fn revert_in_progress(pool: &PgPool) -> sqlx::Result<()> {
+pub async fn revert_in_progress(pool: &PgPool) -> sqlx::Result<()> {
     let res = sqlx::query(
         "UPDATE writeback_jobs SET status = 'pending' \
          WHERE status = 'in_progress'",
@@ -576,7 +576,7 @@ mod tests {
                 Ok(1) => successes += 1,
                 Ok(n) => panic!("unexpected rows_affected: {n}"),
                 Err(sqlx::Error::Database(db_err)) if db_err.is_unique_violation() => {
-                    unique_violations += 1
+                    unique_violations += 1;
                 }
                 Err(e) => panic!("unexpected error: {e}"),
             }
@@ -605,7 +605,7 @@ mod tests {
     /// Jobs on distinct manifestations can run in parallel — i.e. the
     /// manifestation-aware NOT EXISTS clause does NOT cross-block them.
     /// Verified by checking that neither row appears in the other's
-    /// in_progress EXISTS check at the SQL level.  Parallel-test safe.
+    /// `in_progress` EXISTS check at the SQL level.  Parallel-test safe.
     #[sqlx::test(migrations = "./migrations")]
     async fn two_workers_distinct_manifestations_parallelise(pool: PgPool) {
         let app_pool = app_pool_for(&pool).await;
@@ -643,7 +643,7 @@ mod tests {
         );
     }
 
-    /// Retry-backoff: attempt_count=2 → 30 minute window.  Verified via
+    /// Retry-backoff: `attempt_count=2` → 30 minute window.  Verified via
     /// a SELECT mirroring the CTE's eligibility predicate, so parallel
     /// tests do not steal the claim.
     #[sqlx::test(migrations = "./migrations")]
@@ -844,7 +844,7 @@ mod tests {
 
     /// `finish(Ok(Skipped))` transitions to `skipped` and records the
     /// skip reason in `error`.  Skipped bypasses retry regardless of
-    /// attempt_count.
+    /// `attempt_count`.
     #[sqlx::test(migrations = "./migrations")]
     async fn finish_marks_skipped_on_skipped_outcome(pool: PgPool) {
         let app_pool = app_pool_for(&pool).await;

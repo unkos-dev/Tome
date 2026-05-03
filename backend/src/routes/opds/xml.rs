@@ -1,7 +1,7 @@
 //! XML 1.0 character sanitisation. quick-xml auto-escapes the five entities
 //! (`&`, `<`, `>`, `"`, `'`) when you call `BytesText::new` or
 //! `push_attribute`, but it does NOT strip codepoints outside the XML 1.0
-//! `Char` production. Strict clients (Moon+ Reader, KyBook 3) reject a feed
+//! `Char` production. Strict clients (Moon+ Reader, `KyBook` 3) reject a feed
 //! containing those, so every DB-sourced string — whether rendered as a text
 //! node or as an attribute value — must pass through [`sanitise_xml_text`]
 //! before reaching quick-xml.

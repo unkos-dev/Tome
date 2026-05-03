@@ -59,8 +59,8 @@ pub fn default_policy(field: &str) -> FieldPolicy {
 /// 3. If base is [`FieldPolicy::AutoFill`] and any row in `existing_pending`
 ///    disagrees (different `value_hash`) → downgrade to [`FieldPolicy::Propose`].
 /// 4. Dispatch:
-///    - AutoFill + `canonical_is_empty` → [`Decision::Apply`].
-///    - AutoFill + canonical already set → [`Decision::Stage`].
+///    - `AutoFill` + `canonical_is_empty` → [`Decision::Apply`].
+///    - `AutoFill` + canonical already set → [`Decision::Stage`].
 ///    - Propose → [`Decision::Stage`].
 ///    - Lock → [`Decision::NoOp`] (unreachable here, handled in step 1).
 pub fn decide(

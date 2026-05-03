@@ -47,7 +47,7 @@ pub async fn list_for_user(pool: &PgPool, user_id: Uuid) -> Result<Vec<DeviceTok
     .await
 }
 
-/// Revoke a token. Scoped to user_id to prevent cross-user revocation.
+/// Revoke a token. Scoped to `user_id` to prevent cross-user revocation.
 pub async fn revoke(pool: &PgPool, id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
     let result = sqlx::query(
         "UPDATE device_tokens SET revoked_at = now() \

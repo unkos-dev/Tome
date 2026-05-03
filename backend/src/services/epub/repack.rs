@@ -205,12 +205,12 @@ mod tests {
             ),
             (
                 "OEBPS/content.opf",
-                br#"<package><metadata><dc:title>Old</dc:title></metadata></package>"#,
+                br"<package><metadata><dc:title>Old</dc:title></metadata></package>",
                 zip::CompressionMethod::Deflated,
             ),
         ]);
         let (dir, path) = write_to_temp(&bytes);
-        let replacement = br#"<package><metadata><dc:title>New</dc:title></metadata></package>"#;
+        let replacement = br"<package><metadata><dc:title>New</dc:title></metadata></package>";
         let temp = with_modifications(
             &path,
             dir.path(),

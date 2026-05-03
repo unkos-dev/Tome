@@ -227,7 +227,7 @@ mod tests {
     use wiremock::matchers::{method, path, query_param_contains};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn ctx<'a>(http: &'a reqwest::Client) -> LookupCtx<'a> {
+    fn ctx(http: &reqwest::Client) -> LookupCtx<'_> {
         LookupCtx { http, cached: None }
     }
 

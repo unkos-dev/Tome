@@ -13,11 +13,7 @@ pub fn validate(handle: &ZipHandle, opf_data: Option<&OpfData>, issues: &mut Vec
         return; // No cover declared — not an error
     };
 
-    let opf_dir = opf
-        .opf_path
-        .rfind('/')
-        .map(|i| &opf.opf_path[..i])
-        .unwrap_or("");
+    let opf_dir = opf.opf_path.rfind('/').map_or("", |i| &opf.opf_path[..i]);
     let entry_path = if opf_dir.is_empty() {
         href.clone()
     } else {
@@ -28,7 +24,7 @@ pub fn validate(handle: &ZipHandle, opf_data: Option<&OpfData>, issues: &mut Vec
         issues.push(Issue {
             layer: Layer::Cover,
             severity: Severity::Degraded,
-            kind: IssueKind::MissingCover { href: href.clone() },
+            kind: IssueKind::MissingCover { href },
         });
         return;
     };
@@ -41,7 +37,7 @@ pub fn validate(handle: &ZipHandle, opf_data: Option<&OpfData>, issues: &mut Vec
             issues.push(Issue {
                 layer: Layer::Cover,
                 severity: Severity::Degraded,
-                kind: IssueKind::UndecodableCover { href: href.clone() },
+                kind: IssueKind::UndecodableCover { href },
             });
         }
     }
@@ -53,7 +49,7 @@ pub fn validate(handle: &ZipHandle, opf_data: Option<&OpfData>, issues: &mut Vec
 /// `pub(crate)` so `services::covers::extract` can mirror Step 5 detection
 /// semantics exactly — any divergence between the validation pass and the
 /// OPDS cover serve would be a silent correctness hazard.
-pub(crate) fn find_cover_href(opf: &OpfData) -> Option<String> {
+pub fn find_cover_href(opf: &OpfData) -> Option<String> {
     for id in &["cover-image", "cover", "Cover", "Cover-Image"] {
         if let Some(href) = opf.manifest.get(*id) {
             return Some(href.clone());
@@ -121,8 +117,7 @@ mod tests {
         validate(&handle, Some(&opf), &mut issues);
         assert!(
             issues.is_empty(),
-            "expected no issues for valid cover: {:?}",
-            issues
+            "expected no issues for valid cover: {issues:?}"
         );
     }
 

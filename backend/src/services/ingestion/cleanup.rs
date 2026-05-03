@@ -32,7 +32,7 @@ pub fn cleanup_batch(
         .unwrap_or(ingestion_root.to_path_buf());
     let mut dirs: Vec<PathBuf> = paths
         .iter()
-        .filter_map(|p| p.parent().map(|d| d.to_path_buf()))
+        .filter_map(|p| p.parent().map(std::path::Path::to_path_buf))
         .collect();
     dirs.sort();
     dirs.dedup();
@@ -41,7 +41,7 @@ pub fn cleanup_batch(
 
     let mut removed_dirs = 0;
     for dir in &dirs {
-        let canonical_dir = dir.canonicalize().unwrap_or(dir.to_path_buf());
+        let canonical_dir = dir.canonicalize().unwrap_or(dir.clone());
         if canonical_dir == canonical_root {
             continue;
         }

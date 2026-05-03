@@ -243,7 +243,7 @@ impl Config {
         })
     }
 
-    /// `User-Agent` string for outbound metadata API requests.  OpenLibrary
+    /// `User-Agent` string for outbound metadata API requests.  `OpenLibrary`
     /// grants identified requests a 3 req/s rate-limit tier (vs. 1 req/s
     /// anonymous) when a contact email or URL is present in the UA.
     pub fn user_agent(&self) -> String {
@@ -902,7 +902,7 @@ mod tests {
                 let config = Config::from_env().unwrap();
                 assert!(config.opds.enabled);
                 assert_eq!(
-                    config.opds.public_url.as_ref().map(|u| u.as_str()),
+                    config.opds.public_url.as_ref().map(url::Url::as_str),
                     Some("https://reverie.example.com/")
                 );
             },
