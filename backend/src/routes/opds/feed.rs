@@ -9,6 +9,21 @@
 //! Namespaces: OPDS 1.2 uses the default (unprefixed) namespace for Atom
 //! elements. Only `opds:`, `dc:`, and `opensearch:` are explicitly prefixed.
 //! Do NOT declare `xmlns:atom` — treat Atom as the default.
+//!
+//! # Why `expect_used` is allowed here
+//!
+//! Every `expect()` call in this module writes to a `Writer<Cursor<Vec<u8>>>`.
+//! `std::io::Cursor<Vec<u8>>` is an infallible sink — there is no I/O and
+//! writes cannot fail except on OOM (which is a process abort, not a Result).
+//! The `Rfc3339` format calls are on `OffsetDateTime` values produced by
+//! `now_utc()` or parsed from trusted DB fields, both of which are always
+//! representable as Rfc3339. Making every builder method return `Result`
+//! would cascade error-handling into every call site for an error path that
+//! physically cannot occur.
+#![allow(
+    clippy::expect_used,
+    reason = "all expects write to Cursor<Vec<u8>> (infallible) or format OffsetDateTime as Rfc3339 (always representable)"
+)]
 
 use quick_xml::Writer;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};

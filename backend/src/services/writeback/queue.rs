@@ -329,6 +329,10 @@ pub async fn revert_in_progress(pool: &PgPool) -> sqlx::Result<()> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::let_underscore_must_use,
+    reason = "test code: discarding transaction rollback Results in test helpers is intentional; the crate-root cfg_attr only covers unwrap_used/expect_used"
+)]
 mod tests {
     use super::*;
     use crate::config::{CleanupMode, CoverConfig, EnrichmentConfig, WritebackConfig};

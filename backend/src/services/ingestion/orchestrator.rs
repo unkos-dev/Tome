@@ -95,11 +95,15 @@ pub async fn scan_once(config: &Config, pool: &PgPool) -> Result<ScanResult, any
 
     let result = scan_once_inner(config, pool).await;
 
-    // Release the advisory lock explicitly (also released on connection drop)
-    let _ = sqlx::query("SELECT pg_advisory_unlock($1)")
+    // Release the advisory lock explicitly (also released on connection drop).
+    // Log a warning if the unlock fails — the lock will still release on connection drop.
+    if let Err(e) = sqlx::query("SELECT pg_advisory_unlock($1)")
         .bind(SCAN_ADVISORY_LOCK_ID)
         .execute(&mut *lock_conn)
-        .await;
+        .await
+    {
+        tracing::warn!(error = %e, "failed to explicitly release advisory scan lock; will release on connection drop");
+    }
 
     result
 }
@@ -330,12 +334,15 @@ async fn process_file(
         fmt
     } else {
         let dest = dest_path_str.clone();
-        let _ = tokio::task::spawn_blocking(move || {
+        if let Err(e) = tokio::task::spawn_blocking(move || {
             if let Err(e) = std::fs::remove_file(&dest) {
                 tracing::warn!(path = %dest, error = %e, "failed to remove orphaned library file after format check");
             }
         })
-        .await;
+        .await
+        {
+            tracing::warn!(error = %e, "cleanup spawn_blocking panicked after format check");
+        }
         return ProcessResult::Failed(format!("unsupported format: {ext}"));
     };
 
@@ -366,7 +373,7 @@ async fn process_file(
                 match report.outcome {
                     ValidationOutcome::Quarantined => {
                         let lib_file_str = lib_file.display().to_string();
-                        let _ = tokio::task::spawn_blocking(move || {
+                        if let Err(e) = tokio::task::spawn_blocking(move || {
                             if let Err(e) = std::fs::remove_file(&lib_file_str) {
                                 tracing::warn!(
                                     path = %lib_file_str,
@@ -375,7 +382,10 @@ async fn process_file(
                                 );
                             }
                         })
-                        .await;
+                        .await
+                        {
+                            tracing::warn!(error = %e, "cleanup spawn_blocking panicked for quarantined EPUB removal");
+                        }
                         let reason = issues
                             .iter()
                             .map(|i| format!("{:?}", i.kind))
@@ -430,7 +440,11 @@ async fn process_file(
                     std::fs::rename(&old_path, &resolved)?;
                     // Try to clean up empty parent dirs of old path
                     if let Some(old_parent) = Path::new(&old_path).parent() {
-                        let _ = std::fs::remove_dir(old_parent); // only removes if empty
+                        // Best-effort: only succeeds if the directory is empty.
+                        // Failure (non-empty dir, permissions) is expected and ignored.
+                        if let Err(e) = std::fs::remove_dir(old_parent) {
+                            tracing::debug!(path = %old_parent.display(), error = %e, "could not remove old parent dir (non-empty or permissions); expected");
+                        }
                     }
                     Ok::<String, std::io::Error>(resolved.display().to_string())
                 })
@@ -486,7 +500,7 @@ async fn process_file(
         Err(e) => {
             tracing::error!(error = %e, "ingest DB commit failed");
             let dest = final_path_str.clone();
-            let _ = tokio::task::spawn_blocking(move || {
+            if let Err(e) = tokio::task::spawn_blocking(move || {
                 if let Err(rm_err) = std::fs::remove_file(&dest) {
                     tracing::warn!(
                         path = %dest,
@@ -495,7 +509,10 @@ async fn process_file(
                     );
                 }
             })
-            .await;
+            .await
+            {
+                tracing::warn!(error = %e, "cleanup spawn_blocking panicked after DB error");
+            }
             return ProcessResult::Failed(format!("DB insert failed: {e}"));
         }
     };
@@ -645,12 +662,15 @@ async fn quarantine_async(source: &Path, quarantine_path: &Path, reason: &str) {
     let source = source.to_path_buf();
     let qpath = quarantine_path.to_path_buf();
     let reason = reason.to_string();
-    let _ = tokio::task::spawn_blocking(move || {
+    if let Err(e) = tokio::task::spawn_blocking(move || {
         if let Err(e) = quarantine::quarantine_file(&source, &qpath, &reason) {
             tracing::error!(error = %e, "quarantine failed");
         }
     })
-    .await;
+    .await
+    {
+        tracing::error!(error = %e, "quarantine spawn_blocking panicked");
+    }
 }
 
 #[cfg(test)]

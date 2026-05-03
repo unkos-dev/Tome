@@ -1,5 +1,17 @@
 //! `OpenSearch` descriptors. Separate endpoints per scope so a reader paired
 //! at `/opds/shelves/{id}` gets a search URL scoped to that shelf.
+//!
+//! # Why `expect_used` is allowed here
+//!
+//! All `expect()` calls write to a `Writer<Cursor<Vec<u8>>>` or build a
+//! `Response` from static status/header values. `Cursor<Vec<u8>>` writes are
+//! infallible; `Response::builder()` with a valid `StatusCode` and a valid
+//! ASCII header value cannot fail. Making these return `Result` would cascade
+//! error-handling into every call site for error paths that cannot occur.
+#![allow(
+    clippy::expect_used,
+    reason = "all expects write to Cursor<Vec<u8>> (infallible) or build Response from static inputs (cannot fail)"
+)]
 
 use axum::Router;
 use axum::extract::{Path, State};

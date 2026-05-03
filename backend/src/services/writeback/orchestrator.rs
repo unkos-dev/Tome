@@ -596,7 +596,11 @@ fn compute_hex_sha256(path: &Path) -> Result<String, WritebackError> {
     let mut hex = String::with_capacity(digest.len() * 2);
     for b in digest {
         use std::fmt::Write;
-        let _ = write!(hex, "{b:02x}");
+        // fmt::Write on String is infallible — the only error path on the trait
+        // is for types backed by I/O, which String is not.
+        if let Err(e) = write!(hex, "{b:02x}") {
+            tracing::warn!(error = ?e, "unexpected error writing to String (infallible)");
+        }
     }
     Ok(hex)
 }
@@ -633,6 +637,10 @@ fn move_cover_sidecar(pending_path: &str) -> std::io::Result<()> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::let_underscore_must_use,
+    reason = "test code: discarding fmt::Write result on String in test helper is intentional; fmt::Write on String is infallible"
+)]
 mod tests {
     use super::*;
     use crate::config::{CleanupMode, CoverConfig, EnrichmentConfig, WritebackConfig};

@@ -315,6 +315,10 @@ pub(super) async fn emit_new(
     }
 
     if has_more {
+        #[allow(
+            clippy::expect_used,
+            reason = "has_more is only true when page_rows is non-empty (split_page guarantees this invariant)"
+        )]
         let last = page_rows.last().expect("page non-empty when has_more");
         let last_created: OffsetDateTime = last.get("created_at");
         let last_id: Uuid = last.get("id");
@@ -455,6 +459,10 @@ pub(super) async fn emit_author_books(
         });
     }
     if has_more {
+        #[allow(
+            clippy::expect_used,
+            reason = "has_more is only true when page_rows is non-empty (split_page guarantees this invariant)"
+        )]
         let last = page_rows.last().expect("has_more implies non-empty");
         let next = super::cursor::Cursor {
             created_at: last.get("created_at"),

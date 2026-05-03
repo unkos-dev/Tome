@@ -180,7 +180,11 @@ fn rewrite_opf_remove_broken_spine(opf_bytes: &[u8], broken_refs: &[String]) -> 
                 {
                     continue;
                 }
-                let _ = output.write_event(quick_xml::events::Event::Empty(e.into_owned()));
+                // Writing to Vec<u8> is infallible; the Result is discarded intentionally.
+                if let Err(e) = output.write_event(quick_xml::events::Event::Empty(e.into_owned()))
+                {
+                    tracing::warn!(error = ?e, "opf rewrite: unexpected write error (infallible sink)");
+                }
             }
             Ok(quick_xml::events::Event::Start(e)) if e.name().as_ref() == b"itemref" => {
                 let idref = e
@@ -198,21 +202,27 @@ fn rewrite_opf_remove_broken_spine(opf_bytes: &[u8], broken_refs: &[String]) -> 
                         .is_some_and(|id| broken_refs.iter().any(|r| r == id))
                 {
                     skip_depth += 1;
-                } else {
-                    let _ = output.write_event(quick_xml::events::Event::Start(e.into_owned()));
+                } else if let Err(e) =
+                    output.write_event(quick_xml::events::Event::Start(e.into_owned()))
+                {
+                    tracing::warn!(error = ?e, "opf rewrite: unexpected write error (infallible sink)");
                 }
             }
             Ok(quick_xml::events::Event::End(e)) if e.name().as_ref() == b"itemref" => {
                 if skip_depth > 0 {
                     skip_depth -= 1;
-                } else {
-                    let _ = output.write_event(quick_xml::events::Event::End(e.into_owned()));
+                } else if let Err(e) =
+                    output.write_event(quick_xml::events::Event::End(e.into_owned()))
+                {
+                    tracing::warn!(error = ?e, "opf rewrite: unexpected write error (infallible sink)");
                 }
             }
             Ok(quick_xml::events::Event::Eof) => break,
             Ok(e) => {
                 if skip_depth == 0 {
-                    let _ = output.write_event(e.into_owned());
+                    if let Err(e) = output.write_event(e.into_owned()) {
+                        tracing::warn!(error = ?e, "opf rewrite: unexpected write error (infallible sink)");
+                    }
                 }
             }
             Err(_) => return opf_bytes.to_vec(),

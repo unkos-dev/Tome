@@ -111,40 +111,44 @@ where
 }
 
 #[tokio::main]
-async fn main() {
-    let mut config = Config::from_env().expect("invalid configuration");
+async fn main() -> anyhow::Result<()> {
+    let mut config =
+        Config::from_env().map_err(|e| anyhow::anyhow!("invalid configuration: {e}"))?;
 
     // Finalise CSP headers once at startup. API CSP has no dynamic inputs
     // besides the optional report endpoint. HTML CSP consumes the script-src
     // hash list produced by `vite build`'s csp-hash plugin and read back from
-    // the committed sidecar. Panicking at startup beats silently dropping
+    // the committed sidecar. Failing at startup beats silently dropping
     // the security header on every response.
     let api_csp = security::csp::build_api_csp(config.security.csp_report_endpoint.as_ref());
-    config.security.csp_api_header = Some(
-        axum::http::HeaderValue::from_str(&api_csp).unwrap_or_else(|e| {
-            panic!("API CSP is not a valid HTTP header value ({e}): {api_csp:?}")
-        }),
-    );
+    config.security.csp_api_header =
+        Some(axum::http::HeaderValue::from_str(&api_csp).map_err(|e| {
+            anyhow::anyhow!("API CSP is not a valid HTTP header value ({e}): {api_csp:?}")
+        })?);
     if let Some(dist_path) = config.security.frontend_dist_path.clone() {
-        let validated = security::dist_validation::validate_frontend_dist(&dist_path)
-            .expect("frontend dist validation failed — rebuild frontend (vite build)");
+        let validated =
+            security::dist_validation::validate_frontend_dist(&dist_path).map_err(|e| {
+                anyhow::anyhow!(
+                    "frontend dist validation failed — rebuild frontend (vite build): {e}"
+                )
+            })?;
         let html_csp = security::csp::build_html_csp(
             &validated.script_src_hashes,
             config.security.csp_report_endpoint.as_ref(),
         );
-        config.security.csp_html_header = Some(
-            axum::http::HeaderValue::from_str(&html_csp).unwrap_or_else(|e| {
-                panic!("HTML CSP is not a valid HTTP header value ({e}): {html_csp:?}")
-            }),
-        );
+        config.security.csp_html_header =
+            Some(axum::http::HeaderValue::from_str(&html_csp).map_err(|e| {
+                anyhow::anyhow!("HTML CSP is not a valid HTTP header value ({e}): {html_csp:?}")
+            })?);
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| config.log_level.parse().expect("invalid RUST_LOG value")),
-        )
-        .init();
+    let log_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        config
+            .log_level
+            .parse()
+            .unwrap_or_else(|_| EnvFilter::new("info"))
+    });
+    tracing_subscriber::fmt().with_env_filter(log_filter).init();
 
     if config.operator_contact.is_none() {
         tracing::warn!(
@@ -155,15 +159,15 @@ async fn main() {
 
     let pool = db::init_pool(&config.database_url, config.db_max_connections)
         .await
-        .expect("failed to connect to database");
+        .map_err(|e| anyhow::anyhow!("failed to connect to database: {e}"))?;
 
     let oidc_client = auth::oidc::init_oidc_client(&config)
         .await
-        .expect("failed to initialize OIDC client");
+        .map_err(|e| anyhow::anyhow!("failed to initialize OIDC client: {e}"))?;
 
     let ingestion_pool = db::init_pool(&config.ingestion_database_url, config.db_max_connections)
         .await
-        .expect("failed to connect ingestion pool");
+        .map_err(|e| anyhow::anyhow!("failed to connect ingestion pool: {e}"))?;
 
     let auth_backend = AuthBackend { pool: pool.clone() };
     let state = AppState {
@@ -207,7 +211,7 @@ async fn main() {
     let writeback_config = config.clone();
     let writeback_pool = db::init_writeback_pool(&config.database_url, config.db_max_connections)
         .await
-        .expect("failed to build writeback pool");
+        .map_err(|e| anyhow::anyhow!("failed to build writeback pool: {e}"))?;
     tokio::spawn(async move {
         if let Err(e) =
             services::writeback::spawn_worker(writeback_pool, writeback_config, writeback_token)
@@ -220,18 +224,24 @@ async fn main() {
     let addr = format!("0.0.0.0:{}", config.port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
-        .expect("failed to bind");
+        .map_err(|e| anyhow::anyhow!("failed to bind to {addr}: {e}"))?;
 
-    tracing::info!("listening on {}", listener.local_addr().unwrap());
+    tracing::info!("listening on {}", listener.local_addr()?);
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal(cancel_token))
         .await
-        .expect("server error");
+        .map_err(|e| anyhow::anyhow!("server error: {e}"))?;
+
+    Ok(())
 }
 
 async fn shutdown_signal(cancel_token: tokio_util::sync::CancellationToken) {
     let ctrl_c = tokio::signal::ctrl_c();
+    #[allow(
+        clippy::expect_used,
+        reason = "Signal registration happens once at startup; failure means the OS cannot deliver SIGTERM to this process at all, which is an unrecoverable condition on a Unix host — panicking here is correct"
+    )]
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .expect("failed to register SIGTERM handler");
     tokio::select! {

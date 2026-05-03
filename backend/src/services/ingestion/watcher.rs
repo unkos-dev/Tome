@@ -25,7 +25,9 @@ pub async fn watch(
                             let paths: Vec<PathBuf> =
                                 event.paths.into_iter().filter(|p| p.is_file()).collect();
                             if !paths.is_empty() {
-                                let _ = notify_tx.blocking_send(paths);
+                                if let Err(e) = notify_tx.blocking_send(paths) {
+                                    tracing::warn!(error = ?e, "watcher: notify channel closed; stopping event forwarding");
+                                }
                             }
                         }
                         _ => {}
@@ -60,7 +62,9 @@ pub async fn watch(
                 () = cancel.cancelled() => {
                     tracing::info!("watcher cancelled, flushing pending batch");
                     if !pending.is_empty() {
-                        let _ = tx.send(std::mem::take(&mut pending)).await;
+                        if let Err(e) = tx.send(std::mem::take(&mut pending)).await {
+                            tracing::warn!(error = ?e, "watcher: batch channel closed during cancellation flush");
+                        }
                     }
                     break;
                 }
@@ -88,6 +92,10 @@ pub async fn watch(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::let_underscore_must_use,
+    reason = "test code: discarding JoinHandle and Result in test harness scaffolding is intentional; the crate-root cfg_attr only covers unwrap_used/expect_used"
+)]
 mod tests {
     use super::*;
 

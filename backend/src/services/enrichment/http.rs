@@ -224,6 +224,10 @@ fn ssrf_resolver() -> Arc<SsrfResolver> {
     static RESOLVER: OnceLock<Arc<SsrfResolver>> = OnceLock::new();
     RESOLVER
         .get_or_init(|| {
+            #[allow(
+                clippy::expect_used,
+                reason = "SSRF resolver reads /etc/resolv.conf at first call; failure means the system resolver is misconfigured, which is an unrecoverable startup condition"
+            )]
             Arc::new(
                 SsrfResolver::new()
                     .expect("failed to initialise hickory resolver from /etc/resolv.conf"),
@@ -288,6 +292,10 @@ impl Resolve for SsrfResolver {
 /// `user_agent` is forwarded on every request.  Upstream providers
 /// (e.g. `OpenLibrary`) grant identified clients a higher rate-limit tier.
 pub fn api_client(user_agent: &str) -> reqwest::Client {
+    #[allow(
+        clippy::expect_used,
+        reason = "reqwest::Client::build() only fails if TLS backend init fails; rustls is a pure-Rust backend and should not fail in any normally configured environment"
+    )]
     reqwest::Client::builder()
         .user_agent(user_agent)
         .timeout(Duration::from_secs(10))
@@ -324,6 +332,10 @@ pub fn cover_client(redirect_limit: usize, timeout_secs: u64, user_agent: &str) 
         }
     });
 
+    #[allow(
+        clippy::expect_used,
+        reason = "reqwest::Client::build() only fails if TLS backend init fails; rustls is a pure-Rust backend and should not fail in any normally configured environment"
+    )]
     reqwest::Client::builder()
         .user_agent(user_agent)
         .timeout(Duration::from_secs(timeout_secs))

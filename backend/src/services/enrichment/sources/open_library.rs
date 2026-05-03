@@ -28,7 +28,13 @@ type Limiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 
 fn limiter() -> &'static Limiter {
     static L: OnceLock<Limiter> = OnceLock::new();
-    L.get_or_init(|| RateLimiter::direct(Quota::per_second(NonZeroU32::new(3).expect("3 > 0"))))
+    L.get_or_init(|| {
+        #[allow(
+            clippy::expect_used,
+            reason = "NonZeroU32::new(3) — the literal 3 is a compile-time constant that is always non-zero; this cannot fail"
+        )]
+        RateLimiter::direct(Quota::per_second(NonZeroU32::new(3).expect("3 > 0")))
+    })
 }
 
 pub struct OpenLibrary {

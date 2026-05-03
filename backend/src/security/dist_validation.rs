@@ -53,6 +53,10 @@ fn hash_regex() -> &'static Regex {
     // base64url-encoded hashes, so `-` / `_` are rejected here.
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| {
+        #[allow(
+            clippy::expect_used,
+            reason = "hard-coded regex literal is a compile-time constant; test coverage guarantees it is valid"
+        )]
         Regex::new(r"^sha(256|384|512)-[A-Za-z0-9+/]+={0,2}$")
             .expect("static CSP hash regex must compile")
     })
