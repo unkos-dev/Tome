@@ -1,6 +1,7 @@
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum_login::AuthSession;
+use base64ct::Encoding;
 use uuid::Uuid;
 
 use crate::auth::backend::AuthBackend;
@@ -64,7 +65,6 @@ pub async fn verify_basic(
         return Ok(None);
     };
 
-    use base64ct::Encoding;
     let mut buf = vec![0u8; credentials.len()];
     let decoded = base64ct::Base64::decode(credentials.as_bytes(), &mut buf)
         .map_err(|_| AppError::Unauthorized)?;

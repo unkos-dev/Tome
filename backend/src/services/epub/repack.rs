@@ -181,9 +181,8 @@ mod tests {
         for i in 0..ar.len() {
             let f = ar.by_index(i).unwrap();
             let expected = match f.name() {
-                MIMETYPE_ENTRY => zip::CompressionMethod::Stored,
+                MIMETYPE_ENTRY | "images/cover.jpg" => zip::CompressionMethod::Stored,
                 "OEBPS/content.opf" => zip::CompressionMethod::Deflated,
-                "images/cover.jpg" => zip::CompressionMethod::Stored,
                 other => panic!("unexpected entry {other}"),
             };
             assert_eq!(

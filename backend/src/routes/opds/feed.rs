@@ -153,10 +153,9 @@ impl FeedBuilder {
     /// Absolute URL for a path relative to `base_url`. Falls back to the raw
     /// input if the join fails (should never happen with well-formed paths).
     fn abs(&self, path: &str) -> String {
-        match self.base_url.join(path) {
-            Ok(u) => u.to_string(),
-            Err(_) => path.to_string(),
-        }
+        self.base_url
+            .join(path)
+            .map_or_else(|_| path.to_string(), |u| u.to_string())
     }
 
     fn write_link(&mut self, rel: &str, path: &str, mime: Option<&str>, title: Option<&str>) {
@@ -250,10 +249,10 @@ impl FeedBuilder {
                 .expect("author close");
         }
 
-        let identifier = match &entry.isbn {
-            Some(isbn) => format!("urn:isbn:{}", sanitise_xml_text(isbn)),
-            None => format!("urn:uuid:{}", entry.manifestation_id),
-        };
+        let identifier = entry.isbn.as_ref().map_or_else(
+            || format!("urn:uuid:{}", entry.manifestation_id),
+            |isbn| format!("urn:isbn:{}", sanitise_xml_text(isbn)),
+        );
         write_text_element(&mut self.writer, "dc:identifier", &identifier);
 
         if let Some(lang) = &entry.language {

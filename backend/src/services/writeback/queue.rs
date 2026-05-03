@@ -72,9 +72,8 @@ pub async fn spawn_worker(
             }
             _ = interval.tick() => {
                 loop {
-                    let permit = match semaphore.clone().try_acquire_owned() {
-                        Ok(p) => p,
-                        Err(_) => break,
+                    let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+                        break;
                     };
                     let claim = claim_next(&pool).await?;
                     let Some((id, attempt_count)) = claim else {
@@ -285,7 +284,7 @@ async fn mark_failed(
     config: &Config,
     error: Option<&str>,
 ) -> sqlx::Result<()> {
-    let max = config.writeback.max_attempts as i32;
+    let max = config.writeback.max_attempts.cast_signed();
     let exhausted = attempt_count >= max;
     let next_status = if exhausted { "skipped" } else { "failed" };
     if exhausted {

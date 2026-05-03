@@ -142,6 +142,7 @@ pub fn test_server() -> TestServer {
 /// the runtime roles (`reverie_app` / `reverie_ingestion`) build secondary
 /// pools against the same per-test DB via [`app_pool_for`] / [`ingestion_pool_for`].
 pub mod db {
+    use base64ct::Encoding as _;
     use sqlx::PgPool;
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
     use uuid::Uuid;
@@ -239,7 +240,7 @@ pub mod db {
         crate::models::device_token::create(app_pool, user.id, "admin-test", &hash)
             .await
             .expect("create token");
-        use base64ct::Encoding;
+
         let basic =
             base64ct::Base64::encode_string(format!("{}:{}", user.id, plaintext).as_bytes());
         (user.id, format!("Basic {basic}"))
@@ -352,7 +353,7 @@ pub mod db {
         crate::models::device_token::create(app_pool, user.id, "child-test", &hash)
             .await
             .expect("create token");
-        use base64ct::Encoding;
+
         let basic =
             base64ct::Base64::encode_string(format!("{}:{}", user.id, plaintext).as_bytes());
         (user.id, format!("Basic {basic}"))
@@ -377,7 +378,7 @@ pub mod db {
         crate::models::device_token::create(app_pool, user.id, "adult-test", &hash)
             .await
             .expect("create token");
-        use base64ct::Encoding;
+
         let basic =
             base64ct::Base64::encode_string(format!("{}:{}", user.id, plaintext).as_bytes());
         (user.id, format!("Basic {basic}"))

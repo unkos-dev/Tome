@@ -167,10 +167,7 @@ impl MetadataSource for Hardcover {
             .and_then(|d| d.get("books"))
             .and_then(Value::as_array)
             .and_then(|xs| xs.first());
-        Ok(match book {
-            Some(b) => map_book(b, match_type),
-            None => Vec::new(),
-        })
+        Ok(book.map_or_else(Vec::new, |b| map_book(b, match_type)))
     }
 }
 
@@ -191,6 +188,10 @@ fn to_source_error(e: reqwest::Error) -> SourceError {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "map_book maps 10+ Hardcover API fields to SourceResults; the per-field cases are mechanical and extracting would obscure the API→model mapping"
+)]
 fn map_book(book: &Value, match_type: &str) -> Vec<SourceResult> {
     let mut out = Vec::new();
 

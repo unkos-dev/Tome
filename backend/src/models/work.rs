@@ -140,7 +140,7 @@ pub async fn upgrade_stub(
         .bind(work_id)
         .bind(author_id)
         .bind(&creator.role)
-        .bind(i as i32)
+        .bind(i32::try_from(i).unwrap_or(i32::MAX))
         .bind(creators_version_id)
         .execute(&mut *conn)
         .await?;
@@ -302,9 +302,9 @@ pub async fn rematch_on_isbn_change(
         .await?;
 
         if other_manifestations == 0 && manual_drafts == 0 {
-            let matched = matches[0];
+            let target_work_id = matches[0];
             sqlx::query("UPDATE manifestations SET work_id = $1 WHERE id = $2")
-                .bind(matched)
+                .bind(target_work_id)
                 .bind(manifestation_id)
                 .execute(&mut *conn)
                 .await?;
@@ -314,7 +314,7 @@ pub async fn rematch_on_isbn_change(
                 .await?;
             return Ok(RematchOutcome::AutoMerged {
                 from: current_work_id,
-                to: matched,
+                to: target_work_id,
             });
         }
     }

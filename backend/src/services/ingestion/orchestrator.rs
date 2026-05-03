@@ -76,7 +76,7 @@ pub async fn run_watcher(
 
 /// Advisory lock ID for serializing ingestion scans. Prevents concurrent `scan_once`
 /// calls (watcher + manual POST) from racing on duplicate checks and file copies.
-const SCAN_ADVISORY_LOCK_ID: i64 = 0x52657665_00000004; // "Reve" + step 4
+const SCAN_ADVISORY_LOCK_ID: i64 = 0x5265_7665_0000_0004; // "Reve" + step 4
 
 /// One-shot ingestion scan: walk the ingestion directory, filter by format priority,
 /// copy to library, and track via `ingestion_jobs`.
@@ -108,6 +108,10 @@ pub async fn scan_once(config: &Config, pool: &PgPool) -> Result<ScanResult, any
     result
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "scan_once_inner orchestrates the full ingestion pipeline: walk → dedup → copy → DB; the steps have data dependencies that make splitting into helpers awkward without additional Arc-sharing"
+)]
 async fn scan_once_inner(config: &Config, pool: &PgPool) -> Result<ScanResult, anyhow::Error> {
     let ingestion_path = PathBuf::from(&config.ingestion_path);
     let library_path = PathBuf::from(&config.library_path);
@@ -231,6 +235,10 @@ enum ProcessResult {
     Failed(String),
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "process_file executes a sequential 8-step ingest pipeline (hash, dedup, copy, validate, rename, DB commit) where each step needs output from the previous; decomposing further requires passing a large context struct between helpers"
+)]
 async fn process_file(
     source: &Path,
     library_path: &Path,
@@ -330,9 +338,7 @@ async fn process_file(
     // ManifestationFormat — this is the safety net for any code path that
     // bypasses that filter.
     let ext = vars.get("ext").cloned().unwrap_or_default();
-    let format = if let Ok(fmt) = ext.parse::<ManifestationFormat>() {
-        fmt
-    } else {
+    let Ok(format) = ext.parse::<ManifestationFormat>() else {
         let dest = dest_path_str.clone();
         if let Err(e) = tokio::task::spawn_blocking(move || {
             if let Err(e) = std::fs::remove_file(&dest) {
@@ -548,6 +554,10 @@ async fn process_file(
 ///   5. upgrade stub work with pointers if newly created
 ///   6. UPDATE manifestation canonical values + pointer columns from draft IDs
 #[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::ref_option,
+    reason = "commit_ingest is called with &extracted and &accessibility_metadata from a site that holds owned Options; changing to Option<&T> would require .as_ref() at every call site with no readability benefit"
+)]
 async fn commit_ingest(
     pool: &PgPool,
     extracted: &Option<crate::services::metadata::extractor::ExtractedMetadata>,
@@ -586,7 +596,7 @@ async fn commit_ingest(
     .bind(format)
     .bind(final_path_str)
     .bind(&copy_result.sha256)
-    .bind(copy_result.file_size as i64)
+    .bind(copy_result.file_size.cast_signed())
     .bind(IngestionStatus::Complete)
     .bind(validation_status_str)
     .bind(accessibility_metadata)
@@ -596,28 +606,29 @@ async fn commit_ingest(
     // 3. Write drafts — OPF or heuristic-fallback (Step 7 task 5).
     //    The heuristic row gives the canonical title_version_id pointer even
     //    when no OPF metadata exists, preserving the ingest invariant.
-    let metadata_for_drafts: ExtractedMetadata = if let Some(meta) = extracted.as_ref() {
-        meta.clone()
-    } else {
-        let title = vars
-            .get("Title")
-            .cloned()
-            .unwrap_or_else(|| "Unknown".into());
-        ExtractedMetadata {
-            title: Some(title.clone()),
-            sort_title: Some(title),
-            description: None,
-            language: None,
-            creators: Vec::new(),
-            publisher: None,
-            pub_date: None,
-            isbn: None,
-            subjects: Vec::new(),
-            series: None,
-            inversion: None,
-            confidence: 0.2,
-        }
-    };
+    let metadata_for_drafts: ExtractedMetadata = extracted.as_ref().map_or_else(
+        || {
+            let title = vars
+                .get("Title")
+                .cloned()
+                .unwrap_or_else(|| "Unknown".into());
+            ExtractedMetadata {
+                title: Some(title.clone()),
+                sort_title: Some(title),
+                description: None,
+                language: None,
+                creators: Vec::new(),
+                publisher: None,
+                pub_date: None,
+                isbn: None,
+                subjects: Vec::new(),
+                series: None,
+                inversion: None,
+                confidence: 0.2,
+            }
+        },
+        ExtractedMetadata::clone,
+    );
     let draft_ids = draft::write_drafts(&mut tx, manifestation_id, &metadata_for_drafts).await?;
 
     // 4. Upgrade stub work with real values + pointers (create path only).
@@ -674,6 +685,10 @@ async fn quarantine_async(source: &Path, quarantine_path: &Path, reason: &str) {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::items_after_statements,
+    reason = "test code: local struct definitions inside test functions are idiomatic for sqlx::FromRow test helpers"
+)]
 mod tests {
     use super::*;
     use crate::config::CleanupMode;

@@ -45,8 +45,8 @@ pub fn default_policy(field: &str) -> FieldPolicy {
     match field {
         "title" | "sort_title" | "language" | "isbn_10" | "isbn_13" | "publisher" | "pub_date"
         | "cover" => FieldPolicy::AutoFill,
-        "description" | "series" | "series_position" | "creators" | "subjects" | "genres"
-        | "tags" => FieldPolicy::Propose,
+        // All other known fields ("description", "series", etc.) and any unknown
+        // fields default to Propose — cautious until a human promotes.
         _ => FieldPolicy::Propose,
     }
 }
@@ -88,8 +88,7 @@ pub fn decide(
 
     match policy {
         FieldPolicy::AutoFill if canonical_is_empty => Decision::Apply(incoming.id),
-        FieldPolicy::AutoFill => Decision::Stage,
-        FieldPolicy::Propose => Decision::Stage,
+        FieldPolicy::AutoFill | FieldPolicy::Propose => Decision::Stage,
         FieldPolicy::Lock => Decision::NoOp,
     }
 }

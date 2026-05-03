@@ -93,6 +93,10 @@ struct JobSnapshot {
     primary_author: Option<String>,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "run_once implements the full writeback pipeline: snapshot load → transform → pack → rename → post-validation → DB update; each step is a data-dependency on the previous"
+)]
 pub async fn run_once(
     pool: &PgPool,
     config: &Config,
@@ -231,7 +235,7 @@ pub async fn run_once(
     let post_validation = epub::validate_and_repair(&src_path);
     match finalise_post_writeback(
         &pre_report.outcome,
-        post_validation,
+        &post_validation,
         &src_path,
         &original_bytes,
         dest_dir,
@@ -311,12 +315,12 @@ pub async fn run_once(
 /// divergence on its next sweep.
 fn finalise_post_writeback(
     pre_outcome: &ValidationOutcome,
-    post_result: Result<ValidationReport, crate::services::epub::EpubError>,
+    post_result: &Result<ValidationReport, crate::services::epub::EpubError>,
     src_path: &Path,
     original_bytes: &[u8],
     dest_dir: &Path,
 ) -> Result<FinaliseAction, WritebackError> {
-    let err_msg = match &post_result {
+    let err_msg = match post_result {
         Err(e) => format!("post_writeback_validation_errored: {e}"),
         Ok(report) if is_regression(pre_outcome, &report.outcome) => format!(
             "post_writeback_validation_regressed: pre={:?} post={:?}",
@@ -343,9 +347,8 @@ async fn path_rename_step(
     src_path: PathBuf,
     pool: &PgPool,
 ) -> Result<PathBuf, WritebackError> {
-    let candidate = match render_target_path(snap, &config.library_path, &src_path)? {
-        Some(p) => p,
-        None => return Ok(src_path),
+    let Some(candidate) = render_target_path(snap, &config.library_path, &src_path)? else {
+        return Ok(src_path);
     };
 
     if let Some(parent) = candidate.parent() {
@@ -584,6 +587,10 @@ const fn is_regression(pre: &ValidationOutcome, post: &ValidationOutcome) -> boo
 fn compute_hex_sha256(path: &Path) -> Result<String, WritebackError> {
     let mut f = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
+    #[allow(
+        clippy::large_stack_arrays,
+        reason = "64 KiB I/O buffer; intentional for throughput"
+    )]
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = f.read(&mut buf)?;
@@ -1393,7 +1400,7 @@ mod tests {
 
         let action = finalise_post_writeback(
             &ValidationOutcome::Clean,
-            Ok(ok_report(ValidationOutcome::Clean)),
+            &Ok(ok_report(ValidationOutcome::Clean)),
             &path,
             &original,
             dir.path(),
@@ -1413,7 +1420,7 @@ mod tests {
 
         let action = finalise_post_writeback(
             &ValidationOutcome::Clean,
-            Ok(ok_report(ValidationOutcome::Quarantined)),
+            &Ok(ok_report(ValidationOutcome::Quarantined)),
             &path,
             &original,
             dir.path(),
@@ -1424,7 +1431,7 @@ mod tests {
             FinaliseAction::RolledBack(msg) => {
                 assert!(msg.contains("regressed"), "msg: {msg}");
             }
-            _ => panic!("expected RolledBack, got {action:?}"),
+            FinaliseAction::Commit => panic!("expected RolledBack, got Commit"),
         }
         assert_eq!(std::fs::read(&path).unwrap(), original, "rollback restored");
     }
@@ -1442,16 +1449,21 @@ mod tests {
         let err: Result<ValidationReport, EpubError> =
             Err(EpubError::Io(std::io::Error::other("simulated")));
 
-        let action =
-            finalise_post_writeback(&ValidationOutcome::Clean, err, &path, &original, dir.path())
-                .unwrap();
+        let action = finalise_post_writeback(
+            &ValidationOutcome::Clean,
+            &err,
+            &path,
+            &original,
+            dir.path(),
+        )
+        .unwrap();
 
         match action {
             FinaliseAction::RolledBack(msg) => {
                 assert!(msg.contains("errored"), "msg: {msg}");
                 assert!(msg.contains("simulated"), "msg: {msg}");
             }
-            _ => panic!("expected RolledBack, got {action:?}"),
+            FinaliseAction::Commit => panic!("expected RolledBack, got Commit"),
         }
         assert_eq!(
             std::fs::read(&path).unwrap(),

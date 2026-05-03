@@ -17,7 +17,11 @@ pub fn validate(handle: &ZipHandle, issues: &mut Vec<Issue>) -> Option<String> {
         extract_opf_path(&bytes, issues)
     } else {
         // Attempt regeneration: scan for .opf file
-        let candidate = handle.entries.iter().find(|e| e.ends_with(".opf")).cloned();
+        let candidate = handle
+            .entries
+            .iter()
+            .find(|e| e.to_ascii_lowercase().ends_with(".opf"))
+            .cloned();
 
         issues.push(Issue {
             layer: Layer::Container,

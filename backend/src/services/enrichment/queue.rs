@@ -59,9 +59,8 @@ pub async fn spawn_queue(
             _ = interval.tick() => {
                 // Drain as many pending rows as semaphore permits allow.
                 loop {
-                    let permit = match semaphore.clone().try_acquire_owned() {
-                        Ok(p) => p,
-                        Err(_) => break, // fully busy; next tick
+                    let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+                        break; // fully busy; next tick
                     };
                     let claim = claim_next(&pool).await?;
                     let Some((id, attempt_count)) = claim else {
@@ -189,7 +188,7 @@ async fn mark_failed(
     retry_after: Option<Duration>,
     error: Option<&str>,
 ) -> sqlx::Result<()> {
-    let max = config.enrichment.max_attempts as i32;
+    let max = config.enrichment.max_attempts.cast_signed();
     let next_status = if attempt_count >= max {
         "skipped"
     } else {
@@ -253,6 +252,12 @@ async fn revert_in_progress(pool: &PgPool) -> sqlx::Result<()> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    reason = "test code: casts in tests for known-small literal constants are intentional and not worth wrapping in try_from/cast_signed"
+)]
 mod tests {
     use super::*;
     use crate::test_support::db::ingestion_pool_for;

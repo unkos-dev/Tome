@@ -87,17 +87,17 @@ pub struct CanonicalState {
 
 impl CanonicalState {
     pub fn is_empty_for(&self, field: &str) -> bool {
-        fn blank(v: &Option<String>) -> bool {
-            v.as_deref().unwrap_or("").is_empty()
+        fn blank(v: Option<&str>) -> bool {
+            v.unwrap_or("").is_empty()
         }
         match field {
-            "title" => blank(&self.title),
-            "description" => blank(&self.description),
-            "language" => blank(&self.language),
-            "publisher" => blank(&self.publisher),
-            "pub_date" => blank(&self.pub_date),
-            "isbn_10" => blank(&self.isbn_10),
-            "isbn_13" => blank(&self.isbn_13),
+            "title" => blank(self.title.as_deref()),
+            "description" => blank(self.description.as_deref()),
+            "language" => blank(self.language.as_deref()),
+            "publisher" => blank(self.publisher.as_deref()),
+            "pub_date" => blank(self.pub_date.as_deref()),
+            "isbn_10" => blank(self.isbn_10.as_deref()),
+            "isbn_13" => blank(self.isbn_13.as_deref()),
             _ => true,
         }
     }
@@ -256,10 +256,12 @@ async fn apply_canonical_batch(
 
         // quorum counts distinct rows in *this* run with the same hash.
         for (source_id, incoming) in rows {
-            let quorum = rows
-                .iter()
-                .filter(|(_, r)| r.value_hash == incoming.value_hash)
-                .count() as u32;
+            let quorum = u32::try_from(
+                rows.iter()
+                    .filter(|(_, r)| r.value_hash == incoming.value_hash)
+                    .count(),
+            )
+            .unwrap_or(u32::MAX);
             // Pull the authoritative match_type back from the row we just
             // upserted — it may be 'isbn', 'title_author_fuzzy', or 'title'
             // depending on the source path.
@@ -391,7 +393,12 @@ pub async fn load_snapshot(pool: &PgPool, manifestation_id: Uuid) -> anyhow::Res
         isbn_13: isbn_13.clone(),
     };
 
-    let lookup_key = derive_lookup_key(&isbn_13, &isbn_10, &title, &first_author);
+    let lookup_key = derive_lookup_key(
+        isbn_13.as_deref(),
+        isbn_10.as_deref(),
+        title.as_deref(),
+        first_author.as_deref(),
+    );
 
     Ok(Snapshot {
         manifestation_id,
@@ -402,22 +409,22 @@ pub async fn load_snapshot(pool: &PgPool, manifestation_id: Uuid) -> anyhow::Res
 }
 
 fn derive_lookup_key(
-    isbn_13: &Option<String>,
-    isbn_10: &Option<String>,
-    title: &Option<String>,
-    author: &Option<String>,
+    isbn_13: Option<&str>,
+    isbn_10: Option<&str>,
+    title: Option<&str>,
+    author: Option<&str>,
 ) -> Option<LookupKey> {
-    if let Some(v) = isbn_13.as_deref()
+    if let Some(v) = isbn_13
         && let Some(k) = lookup_key::isbn_key(v)
     {
         return Some(LookupKey::Isbn(k));
     }
-    if let Some(v) = isbn_10.as_deref()
+    if let Some(v) = isbn_10
         && let Some(k) = lookup_key::isbn_key(v)
     {
         return Some(LookupKey::Isbn(k));
     }
-    if let (Some(t), Some(a)) = (title.as_deref(), author.as_deref())
+    if let (Some(t), Some(a)) = (title, author)
         && !t.is_empty()
         && !a.is_empty()
     {
@@ -641,6 +648,10 @@ async fn enqueue_writeback(
 /// value is unusable (non-string JSON, malformed `pub_date`) so the caller
 /// can try the next source instead of inflating counters and enqueuing a
 /// writeback for a change that did not happen.
+#[allow(
+    clippy::too_many_lines,
+    reason = "apply_field dispatches over 11 canonical axes each needing a typed UPDATE; the per-axis cases are mechanical and extracting them further would obscure the field→column mapping"
+)]
 async fn apply_field(
     tx: &mut Transaction<'_, Postgres>,
     snapshot: &Snapshot,

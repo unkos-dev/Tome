@@ -25,9 +25,7 @@ pub fn validate(path: &Path, issues: &mut Vec<Issue>) -> Result<ZipHandle, super
 
     'zip: {
         let cursor = std::io::Cursor::new(&bytes[..]);
-        let mut archive = if let Ok(a) = ZipArchive::new(cursor) {
-            a
-        } else {
+        let Ok(mut archive) = ZipArchive::new(cursor) else {
             issues.push(Issue {
                 layer: Layer::Zip,
                 severity: Severity::Irrecoverable,
@@ -44,9 +42,7 @@ pub fn validate(path: &Path, issues: &mut Vec<Issue>) -> Result<ZipHandle, super
             // D1: use match instead of `?` so corrupt entries push an Irrecoverable
             // issue and break out of the labeled block rather than propagating Err
             // up to the caller (which would misclassify as "degraded").
-            let file = if let Ok(f) = archive.by_index(i) {
-                f
-            } else {
+            let Ok(file) = archive.by_index(i) else {
                 issues.push(Issue {
                     layer: Layer::Zip,
                     severity: Severity::Irrecoverable,

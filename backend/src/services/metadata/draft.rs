@@ -22,6 +22,10 @@ pub type DraftIds = HashMap<String, Uuid>;
 ///
 /// * `conn` — open connection or transaction; this function does not begin or commit.
 /// * Returns the version IDs so the caller can wire canonical pointer columns.
+#[allow(
+    clippy::too_many_lines,
+    reason = "write_drafts inserts a draft row per canonical metadata axis; the per-axis cases are mechanical and cannot meaningfully be split without changing the function's transaction contract"
+)]
 pub async fn write_drafts(
     conn: &mut PgConnection,
     manifestation_id: Uuid,

@@ -182,27 +182,32 @@ fn parse_date(s: &str) -> Option<time::Date> {
 /// Single-word names are returned as-is.
 fn generate_sort_name(name: &str) -> String {
     let name = name.trim();
-    if let Some(last_space) = name.rfind(' ') {
-        let given = &name[..last_space];
-        let surname = &name[last_space + 1..];
-        format!("{surname}, {given}")
-    } else {
-        name.to_string()
-    }
+    name.rfind(' ').map_or_else(
+        || name.to_string(),
+        |last_space| {
+            let given = &name[..last_space];
+            let surname = &name[last_space + 1..];
+            format!("{surname}, {given}")
+        },
+    )
 }
 
 /// Map OPF role codes to `author_role` enum values.
 fn map_role(role: Option<&str>) -> String {
     match role {
-        Some("aut") => "author".into(),
         Some("edt") => "editor".into(),
         Some("trl") => "translator".into(),
         Some("nrt") => "narrator".into(),
+        // "aut", unknown OPF roles, and None all map to "author".
         _ => "author".into(),
     }
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "test code: f32 literals like 0.3 are exact IEEE 754 representations for this precision"
+)]
 mod tests {
     use super::*;
     use crate::services::epub::opf_layer::{Creator, OpfData, SeriesMeta};

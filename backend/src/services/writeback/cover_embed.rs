@@ -190,10 +190,9 @@ fn attr_str(start: &BytesStart<'_>, name: &[u8]) -> Option<String> {
 }
 
 fn local_name(name: &[u8]) -> &[u8] {
-    match name.iter().position(|&b| b == b':') {
-        Some(pos) => &name[pos + 1..],
-        None => name,
-    }
+    name.iter()
+        .position(|&b| b == b':')
+        .map_or(name, |pos| &name[pos + 1..])
 }
 
 // ── OPF rewriters ─────────────────────────────────────────────────────────
@@ -325,9 +324,8 @@ const fn media_for(
 ) -> (&'static str, &'static str, zip::CompressionMethod) {
     match fmt {
         image::ImageFormat::Jpeg => ("image/jpeg", "jpg", zip::CompressionMethod::Stored),
-        image::ImageFormat::Png => ("image/png", "png", zip::CompressionMethod::Deflated),
         image::ImageFormat::WebP => ("image/webp", "webp", zip::CompressionMethod::Stored),
-        // Default to png for anything else (image crate mostly returns above three).
+        // PNG and anything else the image crate produces both get PNG container.
         _ => ("image/png", "png", zip::CompressionMethod::Deflated),
     }
 }

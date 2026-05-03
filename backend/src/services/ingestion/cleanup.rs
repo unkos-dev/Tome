@@ -29,7 +29,7 @@ pub fn cleanup_batch(
     // Collect unique parent directories, ordered deepest-first for bottom-up removal
     let canonical_root = ingestion_root
         .canonicalize()
-        .unwrap_or(ingestion_root.to_path_buf());
+        .unwrap_or_else(|_| ingestion_root.to_path_buf());
     let mut dirs: Vec<PathBuf> = paths
         .iter()
         .filter_map(|p| p.parent().map(std::path::Path::to_path_buf))
@@ -41,7 +41,7 @@ pub fn cleanup_batch(
 
     let mut removed_dirs = 0;
     for dir in &dirs {
-        let canonical_dir = dir.canonicalize().unwrap_or(dir.clone());
+        let canonical_dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
         if canonical_dir == canonical_root {
             continue;
         }

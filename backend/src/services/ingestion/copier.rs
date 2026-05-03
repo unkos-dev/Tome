@@ -1,3 +1,5 @@
+use std::fmt::Write as _;
+
 use sha2::{Digest, Sha256};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -32,6 +34,10 @@ pub fn hash_file(path: &Path) -> Result<String, std::io::Error> {
     let file = std::fs::File::open(path)?;
     let mut reader = BufReader::with_capacity(BUF_SIZE, file);
     let mut hasher = Sha256::new();
+    #[allow(
+        clippy::large_stack_arrays,
+        reason = "64 KiB I/O buffer; heap-allocated BufReader wraps it so the size is intentional for throughput"
+    )]
     let mut buf = [0u8; BUF_SIZE];
     loop {
         let n = reader.read(&mut buf)?;
@@ -40,11 +46,13 @@ pub fn hash_file(path: &Path) -> Result<String, std::io::Error> {
         }
         hasher.update(&buf[..n]);
     }
-    Ok(hasher
-        .finalize()
+    let digest = hasher.finalize();
+    Ok(digest
         .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect())
+        .fold(String::with_capacity(digest.len() * 2), |mut s, b| {
+            write!(s, "{b:02x}").ok();
+            s
+        }))
 }
 
 /// Atomically copy `source` to `dest_dir/dest_relative`, verifying SHA-256 integrity.
@@ -83,6 +91,10 @@ pub fn copy_verified(
         let mut writer = BufWriter::new(&temp);
         let mut reader = BufReader::with_capacity(BUF_SIZE, std::fs::File::open(source)?);
         let mut dest_hasher = Sha256::new();
+        #[allow(
+            clippy::large_stack_arrays,
+            reason = "64 KiB I/O buffer; intentional for throughput"
+        )]
         let mut buf = [0u8; BUF_SIZE];
 
         loop {
@@ -94,11 +106,15 @@ pub fn copy_verified(
             dest_hasher.update(&buf[..n]);
         }
         writer.flush()?;
-        dest_hasher
-            .finalize()
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>()
+        {
+            let digest = dest_hasher.finalize();
+            digest
+                .iter()
+                .fold(String::with_capacity(digest.len() * 2), |mut s, b| {
+                    write!(s, "{b:02x}").ok();
+                    s
+                })
+        }
     };
 
     if source_hash != dest_hash {

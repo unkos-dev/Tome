@@ -12,7 +12,7 @@ use crate::models::manifestation_format::ManifestationFormat;
 pub fn select_by_priority(files: &[PathBuf], priority: &[ManifestationFormat]) -> Vec<PathBuf> {
     let mut groups: HashMap<(PathBuf, String), Vec<&PathBuf>> = HashMap::new();
     for file in files {
-        let parent = file.parent().unwrap_or(Path::new("")).to_path_buf();
+        let parent = file.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
         if let Some(stem) = file.file_stem().and_then(|s| s.to_str()) {
             groups
                 .entry((parent, stem.to_lowercase()))

@@ -52,13 +52,16 @@ pub struct OpfData {
 /// Extract the local name from a possibly-namespaced element name.
 /// e.g. b"dc:title" → b"title", b"title" → b"title"
 fn local_name(name: &[u8]) -> &[u8] {
-    match name.iter().position(|&b| b == b':') {
-        Some(pos) => &name[pos + 1..],
-        None => name,
-    }
+    name.iter()
+        .position(|&b| b == b':')
+        .map_or(name, |pos| &name[pos + 1..])
 }
 
 /// Validate the OPF file. Returns `None` if OPF cannot be read.
+#[allow(
+    clippy::too_many_lines,
+    reason = "OPF parser handles the full EPUB 2/3 metadata element set in one pass; the per-element cases are mechanical and cannot meaningfully be split without introducing a second parse pass"
+)]
 pub fn validate(
     handle: &ZipHandle,
     opf_path: Option<&str>,

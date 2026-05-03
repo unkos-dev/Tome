@@ -206,16 +206,15 @@ async fn library_search(
 
 // ── Pagination helpers shared by emit_new / emit_author_books ────────────
 
-fn parse_cursor(raw: Option<String>) -> Result<Option<super::cursor::Cursor>, AppError> {
-    raw.as_deref()
-        .map(super::cursor::Cursor::parse)
+fn parse_cursor(raw: Option<&str>) -> Result<Option<super::cursor::Cursor>, AppError> {
+    raw.map(super::cursor::Cursor::parse)
         .transpose()
         .map_err(|_| AppError::Validation("invalid cursor".into()))
 }
 
 fn push_cursor_predicate(
     qb: &mut QueryBuilder<'_, Postgres>,
-    cursor: &Option<super::cursor::Cursor>,
+    cursor: Option<&super::cursor::Cursor>,
 ) {
     if let Some(c) = cursor {
         qb.push(" AND (m.created_at, m.id) < (");
@@ -227,9 +226,11 @@ fn push_cursor_predicate(
 }
 
 fn split_page(rows: &[sqlx::postgres::PgRow], page_size: i64) -> (&[sqlx::postgres::PgRow], bool) {
-    let has_more = rows.len() as i64 > page_size;
+    // page_size is always a small positive config value (1–100), so these conversions are safe.
+    let page_size_usize = usize::try_from(page_size).unwrap_or(usize::MAX);
+    let has_more = rows.len() > page_size_usize;
     let page_rows = if has_more {
-        &rows[..page_size as usize]
+        &rows[..page_size_usize]
     } else {
         rows
     };
@@ -253,7 +254,7 @@ pub(super) async fn emit_new(
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-    let cursor = parse_cursor(cursor)?;
+    let cursor = parse_cursor(cursor.as_deref())?;
 
     let mut qb: QueryBuilder<'_, Postgres> = QueryBuilder::new(
         "SELECT m.id, m.created_at, m.updated_at, m.isbn_13, m.isbn_10, \
@@ -266,7 +267,7 @@ pub(super) async fn emit_new(
         qb.push(" AND ");
         push_scope(&mut qb, scope, "m");
     }
-    push_cursor_predicate(&mut qb, &cursor);
+    push_cursor_predicate(&mut qb, cursor.as_ref());
     qb.push(" ORDER BY m.created_at DESC, m.id DESC LIMIT ");
     qb.push_bind(page_size + 1);
 
@@ -401,7 +402,7 @@ pub(super) async fn emit_author_books(
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-    let cursor = parse_cursor(cursor)?;
+    let cursor = parse_cursor(cursor.as_deref())?;
 
     let mut qb: QueryBuilder<'_, Postgres> = QueryBuilder::new(
         "SELECT m.id, m.created_at, m.updated_at, m.isbn_13, m.isbn_10, \
@@ -416,7 +417,7 @@ pub(super) async fn emit_author_books(
         qb.push(" AND ");
         push_scope(&mut qb, scope, "m");
     }
-    push_cursor_predicate(&mut qb, &cursor);
+    push_cursor_predicate(&mut qb, cursor.as_ref());
     qb.push(" ORDER BY m.created_at DESC, m.id DESC LIMIT ");
     qb.push_bind(page_size + 1);
 
@@ -454,7 +455,9 @@ pub(super) async fn emit_author_books(
             description: r.get("description"),
             language: r.get("language"),
             tags: tags.get(&m_id).cloned().unwrap_or_default(),
-            isbn: r.get::<Option<String>, _>("isbn_13").or(r.get("isbn_10")),
+            isbn: r
+                .get::<Option<String>, _>("isbn_13")
+                .or_else(|| r.get("isbn_10")),
             updated_at,
         });
     }
@@ -590,7 +593,9 @@ pub(super) async fn emit_series_books(
             description: r.get("description"),
             language: r.get("language"),
             tags: tags.get(&m_id).cloned().unwrap_or_default(),
-            isbn: r.get::<Option<String>, _>("isbn_13").or(r.get("isbn_10")),
+            isbn: r
+                .get::<Option<String>, _>("isbn_13")
+                .or_else(|| r.get("isbn_10")),
             updated_at,
         });
     }
@@ -666,7 +671,9 @@ pub(super) async fn emit_search(
             description: r.get("description"),
             language: r.get("language"),
             tags: tags.get(&m_id).cloned().unwrap_or_default(),
-            isbn: r.get::<Option<String>, _>("isbn_13").or(r.get("isbn_10")),
+            isbn: r
+                .get::<Option<String>, _>("isbn_13")
+                .or_else(|| r.get("isbn_10")),
             updated_at,
         });
     }

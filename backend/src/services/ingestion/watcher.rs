@@ -24,10 +24,10 @@ pub async fn watch(
                         EventKind::Create(_) | EventKind::Modify(_) => {
                             let paths: Vec<PathBuf> =
                                 event.paths.into_iter().filter(|p| p.is_file()).collect();
-                            if !paths.is_empty() {
-                                if let Err(e) = notify_tx.blocking_send(paths) {
-                                    tracing::warn!(error = ?e, "watcher: notify channel closed; stopping event forwarding");
-                                }
+                            if !paths.is_empty()
+                                && let Err(e) = notify_tx.blocking_send(paths)
+                            {
+                                tracing::warn!(error = ?e, "watcher: notify channel closed; stopping event forwarding");
                             }
                         }
                         _ => {}
@@ -61,10 +61,10 @@ pub async fn watch(
             tokio::select! {
                 () = cancel.cancelled() => {
                     tracing::info!("watcher cancelled, flushing pending batch");
-                    if !pending.is_empty() {
-                        if let Err(e) = tx.send(std::mem::take(&mut pending)).await {
-                            tracing::warn!(error = ?e, "watcher: batch channel closed during cancellation flush");
-                        }
+                    if !pending.is_empty()
+                        && let Err(e) = tx.send(std::mem::take(&mut pending)).await
+                    {
+                        tracing::warn!(error = ?e, "watcher: batch channel closed during cancellation flush");
                     }
                     break;
                 }

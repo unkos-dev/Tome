@@ -126,6 +126,10 @@ pub enum ConfigError {
 }
 
 impl Config {
+    #[allow(
+        clippy::too_many_lines,
+        reason = "Config::from_env reads ~15 independent env vars with error propagation; extracting would produce boilerplate without improving readability"
+    )]
     pub fn from_env() -> Result<Self, ConfigError> {
         dotenvy::dotenv().ok();
 
@@ -247,10 +251,10 @@ impl Config {
     /// grants identified requests a 3 req/s rate-limit tier (vs. 1 req/s
     /// anonymous) when a contact email or URL is present in the UA.
     pub fn user_agent(&self) -> String {
-        match self.operator_contact.as_deref() {
-            Some(contact) => format!("Reverie/{} ({contact})", env!("CARGO_PKG_VERSION")),
-            None => format!("Reverie/{} (unidentified)", env!("CARGO_PKG_VERSION")),
-        }
+        self.operator_contact.as_deref().map_or_else(
+            || format!("Reverie/{} (unidentified)", env!("CARGO_PKG_VERSION")),
+            |contact| format!("Reverie/{} ({contact})", env!("CARGO_PKG_VERSION")),
+        )
     }
 }
 
@@ -470,37 +474,34 @@ fn parse_bool(var: &str, default: bool) -> Result<bool, ConfigError> {
     // lenient form accepted "1"/"0"/"yes"/"no" with case-insensitivity; it was
     // tightened in UNK-106 so operator-facing values have a single canonical
     // form. Pre-MVP: no operators to migrate.
-    match env::var(var) {
-        Ok(v) => match v.as_str() {
+    env::var(var)
+        .ok()
+        .map_or(Ok(default), |v| match v.as_str() {
             "true" => Ok(true),
             "false" => Ok(false),
             _ => Err(ConfigError::Invalid {
                 var: var.into(),
                 reason: format!("expected 'true' or 'false', got '{v}'"),
             }),
-        },
-        Err(_) => Ok(default),
-    }
+        })
 }
 
 fn parse_u32(var: &str, default: u32) -> Result<u32, ConfigError> {
-    match env::var(var) {
-        Ok(v) => v.parse::<u32>().map_err(|e| ConfigError::Invalid {
+    env::var(var).ok().map_or(Ok(default), |v| {
+        v.parse::<u32>().map_err(|e| ConfigError::Invalid {
             var: var.into(),
             reason: e.to_string(),
-        }),
-        Err(_) => Ok(default),
-    }
+        })
+    })
 }
 
 fn parse_u64(var: &str, default: u64) -> Result<u64, ConfigError> {
-    match env::var(var) {
-        Ok(v) => v.parse::<u64>().map_err(|e| ConfigError::Invalid {
+    env::var(var).ok().map_or(Ok(default), |v| {
+        v.parse::<u64>().map_err(|e| ConfigError::Invalid {
             var: var.into(),
             reason: e.to_string(),
-        }),
-        Err(_) => Ok(default),
-    }
+        })
+    })
 }
 
 #[cfg(test)]

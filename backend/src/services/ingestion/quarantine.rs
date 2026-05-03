@@ -22,10 +22,7 @@ pub fn quarantine_file(
         let ts = now.unix_timestamp();
         let stem = dest.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
         let ext = dest.extension().and_then(|e| e.to_str());
-        let new_name = match ext {
-            Some(e) => format!("{stem}_{ts}.{e}"),
-            None => format!("{stem}_{ts}"),
-        };
+        let new_name = ext.map_or_else(|| format!("{stem}_{ts}"), |e| format!("{stem}_{ts}.{e}"));
         dest = quarantine_dir.join(new_name);
     }
 
