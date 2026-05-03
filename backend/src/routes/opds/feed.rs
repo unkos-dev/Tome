@@ -9,6 +9,21 @@
 //! Namespaces: OPDS 1.2 uses the default (unprefixed) namespace for Atom
 //! elements. Only `opds:`, `dc:`, and `opensearch:` are explicitly prefixed.
 //! Do NOT declare `xmlns:atom` — treat Atom as the default.
+//!
+//! # Why `expect_used` is allowed here
+//!
+//! Every `expect()` call in this module writes to a `Writer<Cursor<Vec<u8>>>`.
+//! `std::io::Cursor<Vec<u8>>` is an infallible sink — there is no I/O and
+//! writes cannot fail except on OOM (which is a process abort, not a Result).
+//! The `Rfc3339` format calls are on `OffsetDateTime` values produced by
+//! `now_utc()` or parsed from trusted DB fields, both of which are always
+//! representable as Rfc3339. Making every builder method return `Result`
+//! would cascade error-handling into every call site for an error path that
+//! physically cannot occur.
+#![allow(
+    clippy::expect_used,
+    reason = "all expects write to Cursor<Vec<u8>> (infallible) or format OffsetDateTime as Rfc3339 (always representable)"
+)]
 
 use quick_xml::Writer;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, BytesText, Event};
@@ -49,10 +64,10 @@ pub enum FeedKind {
 }
 
 impl FeedKind {
-    pub fn content_type(self) -> &'static str {
+    pub const fn content_type(self) -> &'static str {
         match self {
-            FeedKind::Navigation => NAVIGATION_TYPE,
-            FeedKind::Acquisition => ACQUISITION_TYPE,
+            Self::Navigation => NAVIGATION_TYPE,
+            Self::Acquisition => ACQUISITION_TYPE,
         }
     }
 }
@@ -123,7 +138,7 @@ impl FeedBuilder {
             .write_event(Event::End(BytesEnd::new("author")))
             .expect("write author close");
 
-        let mut this = FeedBuilder {
+        let mut this = Self {
             writer,
             base_url: base_url.clone(),
             kind,
@@ -138,10 +153,9 @@ impl FeedBuilder {
     /// Absolute URL for a path relative to `base_url`. Falls back to the raw
     /// input if the join fails (should never happen with well-formed paths).
     fn abs(&self, path: &str) -> String {
-        match self.base_url.join(path) {
-            Ok(u) => u.to_string(),
-            Err(_) => path.to_string(),
-        }
+        self.base_url
+            .join(path)
+            .map_or_else(|_| path.to_string(), |u| u.to_string())
     }
 
     fn write_link(&mut self, rel: &str, path: &str, mime: Option<&str>, title: Option<&str>) {
@@ -235,10 +249,10 @@ impl FeedBuilder {
                 .expect("author close");
         }
 
-        let identifier = match &entry.isbn {
-            Some(isbn) => format!("urn:isbn:{}", sanitise_xml_text(isbn)),
-            None => format!("urn:uuid:{}", entry.manifestation_id),
-        };
+        let identifier = entry.isbn.as_ref().map_or_else(
+            || format!("urn:uuid:{}", entry.manifestation_id),
+            |isbn| format!("urn:isbn:{}", sanitise_xml_text(isbn)),
+        );
         write_text_element(&mut self.writer, "dc:identifier", &identifier);
 
         if let Some(lang) = &entry.language {
@@ -306,7 +320,7 @@ impl FeedBuilder {
         self.write_link(REL_NEXT, href, Some(ACQUISITION_TYPE), None);
     }
 
-    /// `rel="search"` pointing at the OpenSearch descriptor.
+    /// `rel="search"` pointing at the `OpenSearch` descriptor.
     pub fn add_search_link(&mut self, opensearch_xml_href: &str) {
         self.write_link(
             REL_SEARCH,

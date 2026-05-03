@@ -173,9 +173,9 @@ mod tests {
         assert_eq!(response.status_code(), StatusCode::UNAUTHORIZED);
     }
 
-    /// X3: admin POST /trigger must reset enrichment_status / attempt_count
+    /// X3: admin POST /trigger must reset `enrichment_status` / `attempt_count`
     /// on a real manifestation row.  Pre-C2 this 404'd in production
-    /// because state.pool had no app.current_user_id session var.
+    /// because state.pool had no `app.current_user_id` session var.
     #[sqlx::test(migrations = "./migrations")]
     async fn trigger_admin_resets_enrichment_state(pool: sqlx::PgPool) {
         use axum::http::header::AUTHORIZATION;

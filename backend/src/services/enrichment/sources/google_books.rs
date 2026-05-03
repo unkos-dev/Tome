@@ -23,7 +23,13 @@ type Limiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 
 fn limiter() -> &'static Limiter {
     static L: OnceLock<Limiter> = OnceLock::new();
-    L.get_or_init(|| RateLimiter::direct(Quota::per_second(NonZeroU32::new(1).expect("1 > 0"))))
+    L.get_or_init(|| {
+        #[allow(
+            clippy::expect_used,
+            reason = "NonZeroU32::new(1) — the literal 1 is a compile-time constant that is always non-zero; this cannot fail"
+        )]
+        RateLimiter::direct(Quota::per_second(NonZeroU32::new(1).expect("1 > 0")))
+    })
 }
 
 pub struct GoogleBooks {
@@ -227,7 +233,7 @@ mod tests {
     use wiremock::matchers::{method, path, query_param_contains};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn ctx<'a>(http: &'a reqwest::Client) -> LookupCtx<'a> {
+    fn ctx(http: &reqwest::Client) -> LookupCtx<'_> {
         LookupCtx { http, cached: None }
     }
 

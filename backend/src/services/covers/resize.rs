@@ -14,10 +14,10 @@ pub enum CoverSize {
 }
 
 impl CoverSize {
-    pub fn long_edge(self) -> u32 {
+    pub const fn long_edge(self) -> u32 {
         match self {
-            CoverSize::Full => 1200,
-            CoverSize::Thumb => 300,
+            Self::Full => 1200,
+            Self::Thumb => 300,
         }
     }
 }

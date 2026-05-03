@@ -1,6 +1,6 @@
 //! CRUD helpers for `field_locks`.
 //!
-//! A lock pins a specific (manifestation, entity_type, field) so the policy
+//! A lock pins a specific (manifestation, `entity_type`, field) so the policy
 //! engine's `decide` silently discards incoming observations for it.
 //! The orchestrator pre-resolves locks before calling into `policy::decide`
 //! so the policy module stays pure.
@@ -18,10 +18,10 @@ pub enum EntityType {
 }
 
 impl EntityType {
-    pub fn as_str(self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
-            EntityType::Work => "work",
-            EntityType::Manifestation => "manifestation",
+            Self::Work => "work",
+            Self::Manifestation => "manifestation",
         }
     }
 }

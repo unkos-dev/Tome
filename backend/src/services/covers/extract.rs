@@ -31,13 +31,9 @@ pub fn extract_cover_bytes(epub_path: &Path) -> Result<(Vec<u8>, ImageFormat), C
     let opf = opf_data.ok_or(CoverError::NoCover)?;
 
     let href = cover_layer::find_cover_href(&opf).ok_or(CoverError::NoCover)?;
-    let opf_dir = opf
-        .opf_path
-        .rfind('/')
-        .map(|i| &opf.opf_path[..i])
-        .unwrap_or("");
+    let opf_dir = opf.opf_path.rfind('/').map_or("", |i| &opf.opf_path[..i]);
     let entry_path = if opf_dir.is_empty() {
-        href.clone()
+        href
     } else {
         format!("{opf_dir}/{href}")
     };

@@ -16,10 +16,10 @@
 //!
 //! Deviation from plan task 4: the plan's single `find_or_create(tx, meta, draft_ids)`
 //! signature cannot be implemented without breaking the FK cycle
-//! (manifestations.work_id → works.id, metadata_versions.manifestation_id →
-//! manifestations.id, draft_ids requires existing drafts). The split preserves
+//! (`manifestations.work_id` → works.id, `metadata_versions.manifestation_id` →
+//! manifestations.id, `draft_ids` requires existing drafts). The split preserves
 //! the plan's behaviour (matched paths leave pointers untouched; create paths
-//! wire all pointers from draft_ids).
+//! wire all pointers from `draft_ids`).
 
 use sqlx::PgConnection;
 #[cfg(test)]
@@ -95,7 +95,7 @@ pub async fn create_stub(conn: &mut PgConnection) -> Result<Uuid, sqlx::Error> {
 }
 
 /// Upgrade a stub work (from `create_stub`) to the real thing:
-/// set title/sort_title/description/language + canonical pointers,
+/// set `title/sort_title/description/language` + canonical pointers,
 /// create authors + `work_authors` rows with `source_version_id` wired.
 /// Also creates the series row if present.
 pub async fn upgrade_stub(
@@ -140,7 +140,7 @@ pub async fn upgrade_stub(
         .bind(work_id)
         .bind(author_id)
         .bind(&creator.role)
-        .bind(i as i32)
+        .bind(i32::try_from(i).unwrap_or(i32::MAX))
         .bind(creators_version_id)
         .execute(&mut *conn)
         .await?;
@@ -302,9 +302,9 @@ pub async fn rematch_on_isbn_change(
         .await?;
 
         if other_manifestations == 0 && manual_drafts == 0 {
-            let matched = matches[0];
+            let target_work_id = matches[0];
             sqlx::query("UPDATE manifestations SET work_id = $1 WHERE id = $2")
-                .bind(matched)
+                .bind(target_work_id)
                 .bind(manifestation_id)
                 .execute(&mut *conn)
                 .await?;
@@ -314,7 +314,7 @@ pub async fn rematch_on_isbn_change(
                 .await?;
             return Ok(RematchOutcome::AutoMerged {
                 from: current_work_id,
-                to: matched,
+                to: target_work_id,
             });
         }
     }
@@ -480,7 +480,7 @@ mod tests {
     // ── Task 34: rematch_on_isbn_change integration tests ─────────────────
 
     /// Helper: insert a blank work directly (bypassing `find_or_create` so
-    /// test titles don't collide via pg_trgm similarity).
+    /// test titles don't collide via `pg_trgm` similarity).
     async fn insert_work(pool: &PgPool, title: &str) -> Uuid {
         sqlx::query_scalar(
             "INSERT INTO works (title, sort_title) VALUES ($1, lower($1)) RETURNING id",
@@ -675,7 +675,7 @@ mod tests {
         assert_eq!(dup, Some(real_work_id));
     }
 
-    /// No other work has the ISBN → NoOp.
+    /// No other work has the ISBN → `NoOp`.
     #[sqlx::test(migrations = "./migrations")]
     async fn rematch_noop_when_isbn_unique(pool: PgPool) {
         let pool = ingestion_pool_for(&pool).await;

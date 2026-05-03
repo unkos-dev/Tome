@@ -11,8 +11,12 @@ use super::{EpubError, Issue, IssueKind};
 ///
 /// Writes to a temp file in the same directory, then `rename()`s over `path`
 /// atomically. If re-packaging fails, `path` is left untouched.
+#[allow(
+    clippy::too_many_lines,
+    reason = "repackage handles 4 distinct EPUB structural repair cases in one pass; splitting would require passing shared state between helpers and obscure the repair logic"
+)]
 pub fn repackage(path: &Path, issues: &[Issue], opf_path: Option<&str>) -> Result<(), EpubError> {
-    let dir = path.parent().unwrap_or(Path::new("."));
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
 
     let broken_refs: Vec<String> = issues
         .iter()
@@ -148,9 +152,8 @@ pub fn repackage(path: &Path, issues: &[Issue], opf_path: Option<&str>) -> Resul
 
 /// Rewrite OPF XML removing `<itemref>` elements whose `idref` is in `broken_refs`.
 fn rewrite_opf_remove_broken_spine(opf_bytes: &[u8], broken_refs: &[String]) -> Vec<u8> {
-    let xml = match std::str::from_utf8(opf_bytes) {
-        Ok(s) => s,
-        Err(_) => return opf_bytes.to_vec(),
+    let Ok(xml) = std::str::from_utf8(opf_bytes) else {
+        return opf_bytes.to_vec();
     };
     let mut reader = quick_xml::Reader::from_str(xml);
     reader.config_mut().trim_text(false);
@@ -169,42 +172,60 @@ fn rewrite_opf_remove_broken_spine(opf_bytes: &[u8], broken_refs: &[String]) -> 
                     .attributes()
                     .flatten()
                     .find(|a| a.key.as_ref() == b"idref")
-                    .and_then(|a| std::str::from_utf8(&a.value).ok().map(|s| s.to_string()));
+                    .and_then(|a| {
+                        std::str::from_utf8(&a.value)
+                            .ok()
+                            .map(std::string::ToString::to_string)
+                    });
                 if idref
                     .as_deref()
                     .is_some_and(|id| broken_refs.iter().any(|r| r == id))
                 {
                     continue;
                 }
-                let _ = output.write_event(quick_xml::events::Event::Empty(e.into_owned()));
+                // Writing to Vec<u8> is infallible; the Result is discarded intentionally.
+                if let Err(e) = output.write_event(quick_xml::events::Event::Empty(e.into_owned()))
+                {
+                    tracing::warn!(error = ?e, "opf rewrite: unexpected write error (infallible sink)");
+                }
             }
             Ok(quick_xml::events::Event::Start(e)) if e.name().as_ref() == b"itemref" => {
                 let idref = e
                     .attributes()
                     .flatten()
                     .find(|a| a.key.as_ref() == b"idref")
-                    .and_then(|a| std::str::from_utf8(&a.value).ok().map(|s| s.to_string()));
+                    .and_then(|a| {
+                        std::str::from_utf8(&a.value)
+                            .ok()
+                            .map(std::string::ToString::to_string)
+                    });
                 if skip_depth > 0
                     || idref
                         .as_deref()
                         .is_some_and(|id| broken_refs.iter().any(|r| r == id))
                 {
                     skip_depth += 1;
-                } else {
-                    let _ = output.write_event(quick_xml::events::Event::Start(e.into_owned()));
+                } else if let Err(e) =
+                    output.write_event(quick_xml::events::Event::Start(e.into_owned()))
+                {
+                    tracing::warn!(error = ?e, "opf rewrite: unexpected write error (infallible sink)");
                 }
             }
             Ok(quick_xml::events::Event::End(e)) if e.name().as_ref() == b"itemref" => {
                 if skip_depth > 0 {
                     skip_depth -= 1;
-                } else {
-                    let _ = output.write_event(quick_xml::events::Event::End(e.into_owned()));
+                } else if let Err(e) =
+                    output.write_event(quick_xml::events::Event::End(e.into_owned()))
+                {
+                    tracing::warn!(error = ?e, "opf rewrite: unexpected write error (infallible sink)");
                 }
             }
             Ok(quick_xml::events::Event::Eof) => break,
             Ok(e) => {
-                if skip_depth == 0 {
-                    let _ = output.write_event(e.into_owned());
+                if skip_depth == 0
+                    && let Err(e) = output.write_event(e.into_owned())
+                {
+                    tracing::warn!(error = ?e, "opf rewrite: unexpected write error (infallible sink)");
                 }
             }
             Err(_) => return opf_bytes.to_vec(),

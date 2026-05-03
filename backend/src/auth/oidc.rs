@@ -6,7 +6,7 @@ use openidconnect::{
 
 use crate::config::Config;
 
-/// CoreClient with redirect_uri set (required for auth URL generation).
+/// `CoreClient` with `redirect_uri` set (required for auth URL generation).
 pub type OidcClient = openidconnect::Client<
     openidconnect::EmptyAdditionalClaims,
     openidconnect::core::CoreAuthDisplay,
@@ -46,7 +46,7 @@ fn http_client() -> Result<openidconnect::reqwest::Client> {
         .context("failed to build OIDC HTTP client")
 }
 
-/// Discover the OIDC provider and create a client with redirect_uri set.
+/// Discover the OIDC provider and create a client with `redirect_uri` set.
 pub async fn init_oidc_client(config: &Config) -> Result<OidcClient> {
     let issuer =
         IssuerUrl::new(config.oidc_issuer_url.clone()).context("invalid OIDC_ISSUER_URL")?;

@@ -102,12 +102,14 @@ pub async fn preview(
             load_existing_pending_readonly(pool, manifestation_id, field).await?;
 
         for (source_id, sr, incoming) in rows {
-            let quorum = rows
-                .iter()
-                .filter(|(_, _, r)| r.value_hash == incoming.value_hash)
-                .count() as u32;
+            let quorum = u32::try_from(
+                rows.iter()
+                    .filter(|(_, _, r)| r.value_hash == incoming.value_hash)
+                    .count(),
+            )
+            .unwrap_or(u32::MAX);
             let mut pending_set: Vec<PolicyInputRow> = existing_pending.clone();
-            for (_, _, other) in rows.iter() {
+            for (_, _, other) in rows {
                 if other.value_hash != incoming.value_hash {
                     pending_set.push(other.clone());
                 }

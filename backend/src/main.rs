@@ -1,3 +1,12 @@
+#![cfg_attr(
+    test,
+    allow(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::print_stdout,
+        clippy::print_stderr,
+    )
+)]
 mod auth;
 mod config;
 mod db;
@@ -101,41 +110,63 @@ where
         .with_state(state)
 }
 
+#[allow(
+    clippy::option_if_let_else,
+    reason = "nested match is more readable than chained Result::map_or_else for two-level fallback"
+)]
+fn resolve_log_filter(configured_level: &str) -> (EnvFilter, Option<String>) {
+    match EnvFilter::try_from_default_env() {
+        Ok(f) => (f, None),
+        Err(_) => match configured_level.parse::<EnvFilter>() {
+            Ok(f) => (f, None),
+            Err(e) => (
+                EnvFilter::new("info"),
+                Some(format!("{configured_level:?}: {e}")),
+            ),
+        },
+    }
+}
+
 #[tokio::main]
-async fn main() {
-    let mut config = Config::from_env().expect("invalid configuration");
+async fn main() -> anyhow::Result<()> {
+    let mut config =
+        Config::from_env().map_err(|e| anyhow::anyhow!("invalid configuration: {e}"))?;
 
     // Finalise CSP headers once at startup. API CSP has no dynamic inputs
     // besides the optional report endpoint. HTML CSP consumes the script-src
     // hash list produced by `vite build`'s csp-hash plugin and read back from
-    // the committed sidecar. Panicking at startup beats silently dropping
+    // the committed sidecar. Failing at startup beats silently dropping
     // the security header on every response.
     let api_csp = security::csp::build_api_csp(config.security.csp_report_endpoint.as_ref());
-    config.security.csp_api_header = Some(
-        axum::http::HeaderValue::from_str(&api_csp).unwrap_or_else(|e| {
-            panic!("API CSP is not a valid HTTP header value ({e}): {api_csp:?}")
-        }),
-    );
+    config.security.csp_api_header =
+        Some(axum::http::HeaderValue::from_str(&api_csp).map_err(|e| {
+            anyhow::anyhow!("API CSP is not a valid HTTP header value ({e}): {api_csp:?}")
+        })?);
     if let Some(dist_path) = config.security.frontend_dist_path.clone() {
-        let validated = security::dist_validation::validate_frontend_dist(&dist_path)
-            .expect("frontend dist validation failed — rebuild frontend (vite build)");
+        let validated =
+            security::dist_validation::validate_frontend_dist(&dist_path).map_err(|e| {
+                anyhow::anyhow!(
+                    "frontend dist validation failed — rebuild frontend (vite build): {e}"
+                )
+            })?;
         let html_csp = security::csp::build_html_csp(
             &validated.script_src_hashes,
             config.security.csp_report_endpoint.as_ref(),
         );
-        config.security.csp_html_header = Some(
-            axum::http::HeaderValue::from_str(&html_csp).unwrap_or_else(|e| {
-                panic!("HTML CSP is not a valid HTTP header value ({e}): {html_csp:?}")
-            }),
-        );
+        config.security.csp_html_header =
+            Some(axum::http::HeaderValue::from_str(&html_csp).map_err(|e| {
+                anyhow::anyhow!("HTML CSP is not a valid HTTP header value ({e}): {html_csp:?}")
+            })?);
     }
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| config.log_level.parse().expect("invalid RUST_LOG value")),
-        )
-        .init();
+    let (log_filter, log_level_parse_err) = resolve_log_filter(&config.log_level);
+    tracing_subscriber::fmt().with_env_filter(log_filter).init();
+    if let Some(err) = log_level_parse_err {
+        tracing::warn!(
+            error = %err,
+            "REVERIE_LOG_LEVEL unparseable; falling back to info. Set RUST_LOG or fix REVERIE_LOG_LEVEL to silence."
+        );
+    }
 
     if config.operator_contact.is_none() {
         tracing::warn!(
@@ -146,15 +177,15 @@ async fn main() {
 
     let pool = db::init_pool(&config.database_url, config.db_max_connections)
         .await
-        .expect("failed to connect to database");
+        .map_err(|e| anyhow::anyhow!("failed to connect to database: {e}"))?;
 
     let oidc_client = auth::oidc::init_oidc_client(&config)
         .await
-        .expect("failed to initialize OIDC client");
+        .map_err(|e| anyhow::anyhow!("failed to initialize OIDC client: {e}"))?;
 
     let ingestion_pool = db::init_pool(&config.ingestion_database_url, config.db_max_connections)
         .await
-        .expect("failed to connect ingestion pool");
+        .map_err(|e| anyhow::anyhow!("failed to connect ingestion pool: {e}"))?;
 
     let auth_backend = AuthBackend { pool: pool.clone() };
     let state = AppState {
@@ -198,7 +229,7 @@ async fn main() {
     let writeback_config = config.clone();
     let writeback_pool = db::init_writeback_pool(&config.database_url, config.db_max_connections)
         .await
-        .expect("failed to build writeback pool");
+        .map_err(|e| anyhow::anyhow!("failed to build writeback pool: {e}"))?;
     tokio::spawn(async move {
         if let Err(e) =
             services::writeback::spawn_worker(writeback_pool, writeback_config, writeback_token)
@@ -211,18 +242,24 @@ async fn main() {
     let addr = format!("0.0.0.0:{}", config.port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
-        .expect("failed to bind");
+        .map_err(|e| anyhow::anyhow!("failed to bind to {addr}: {e}"))?;
 
-    tracing::info!("listening on {}", listener.local_addr().unwrap());
+    tracing::info!("listening on {}", listener.local_addr()?);
 
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal(cancel_token))
         .await
-        .expect("server error");
+        .map_err(|e| anyhow::anyhow!("server error: {e}"))?;
+
+    Ok(())
 }
 
 async fn shutdown_signal(cancel_token: tokio_util::sync::CancellationToken) {
     let ctrl_c = tokio::signal::ctrl_c();
+    #[allow(
+        clippy::expect_used,
+        reason = "Signal registration happens once at startup; failure means the OS cannot deliver SIGTERM to this process at all, which is an unrecoverable condition on a Unix host — panicking here is correct"
+    )]
     let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .expect("failed to register SIGTERM handler");
     tokio::select! {
@@ -235,6 +272,7 @@ async fn shutdown_signal(cancel_token: tokio_util::sync::CancellationToken) {
 
 #[cfg(test)]
 mod tests {
+    use super::resolve_log_filter;
     use crate::test_support;
 
     #[tokio::test]
@@ -243,5 +281,37 @@ mod tests {
         let response = server.get("/health").await;
         response.assert_status_ok();
         response.assert_text("ok");
+    }
+
+    // resolve_log_filter consults RUST_LOG via try_from_default_env first and
+    // only falls back to the configured_level argument when RUST_LOG is unset
+    // or unparseable. Setting RUST_LOG inside a test would leak across the
+    // process; instead the tests below assume RUST_LOG is unset in `cargo
+    // test`, which is the project default. If a future contributor adds
+    // RUST_LOG to the test runner env, these will start exercising the
+    // env-takes-precedence path instead and may need adjusting.
+
+    #[test]
+    fn resolve_log_filter_returns_no_error_for_valid_configured_level() {
+        let (_filter, err) = resolve_log_filter("debug");
+        assert!(
+            err.is_none(),
+            "valid configured level should not produce a parse error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn resolve_log_filter_surfaces_error_for_invalid_configured_level() {
+        // EnvFilter parsing rejects directives where the level segment after `=`
+        // is not one of trace/debug/info/warn/error/off (or a numeric verbosity).
+        // "info=bogus" is a level-name typo — exactly the operator-error class
+        // this test guards against.
+        let bad = "info=bogus";
+        let (_filter, err) = resolve_log_filter(bad);
+        let err = err.expect("invalid configured level should produce a parse error");
+        assert!(
+            err.contains(bad),
+            "error message should name the bad value, got: {err}"
+        );
     }
 }

@@ -44,6 +44,10 @@ pub struct SeriesRef<'a> {
 /// Apply `target` to the OPF bytes at `opf_bytes`, returning the rewritten
 /// UTF-8 XML.  Preserves all non-targeted elements, attributes, and
 /// whitespace.
+#[allow(
+    clippy::too_many_lines,
+    reason = "transform implements a two-pass XML rewrite over 11 metadata axes plus EPUB 2/3 version-specific formats; the passes share state that cannot be cleanly separated without significant architecture changes"
+)]
 pub fn transform(opf_bytes: &[u8], target: &Target<'_>) -> Result<Vec<u8>, WritebackError> {
     // Own every event up front so we can walk the stream twice — once to
     // detect EPUB version / presence of ISBN identifier / series markers,
@@ -413,15 +417,18 @@ fn is_isbn_identifier(start: &BytesStart<'_>) -> bool {
 }
 
 fn local_name(name: &[u8]) -> &[u8] {
-    match name.iter().position(|&b| b == b':') {
-        Some(pos) => &name[pos + 1..],
-        None => name,
-    }
+    name.iter()
+        .position(|&b| b == b':')
+        .map_or(name, |pos| &name[pos + 1..])
 }
 
 fn format_index(idx: f64) -> String {
     if idx.fract() == 0.0 {
-        format!("{}", idx as i64)
+        // idx.fract() == 0.0 guarantees the value is a whole number;
+        // series positions are always small integers well within i64 range.
+        #[allow(clippy::cast_possible_truncation)]
+        let whole: i64 = idx as i64;
+        format!("{whole}")
     } else {
         format!("{idx}")
     }
@@ -527,7 +534,7 @@ mod tests {
 
     #[test]
     fn transform_replaces_dc_description() {
-        let input = sample_epub3(r#"<dc:description>Old blurb</dc:description>"#);
+        let input = sample_epub3(r"<dc:description>Old blurb</dc:description>");
         let target = Target {
             description: Some("New blurb"),
             ..Default::default()
@@ -557,7 +564,7 @@ mod tests {
 
     #[test]
     fn transform_replaces_dc_publisher() {
-        let input = sample_epub3(r#"<dc:publisher>Old House</dc:publisher>"#);
+        let input = sample_epub3(r"<dc:publisher>Old House</dc:publisher>");
         let target = Target {
             publisher: Some("New House"),
             ..Default::default()
@@ -572,7 +579,7 @@ mod tests {
 
     #[test]
     fn transform_replaces_dc_date() {
-        let input = sample_epub3(r#"<dc:date>1990-01-01</dc:date>"#);
+        let input = sample_epub3(r"<dc:date>1990-01-01</dc:date>");
         let target = Target {
             pub_date: Some("2026-04-19"),
             ..Default::default()

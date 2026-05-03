@@ -40,35 +40,32 @@ pub async fn run_watcher(
 
     loop {
         tokio::select! {
-            _ = cancel.cancelled() => {
+            () = cancel.cancelled() => {
                 tracing::info!("orchestrator shutting down");
                 break;
             }
             batch = rx.recv() => {
-                match batch {
-                    Some(_paths) => {
-                        // Watcher detected files — do a full scan of the ingestion dir.
-                        // We scan rather than use the watcher's paths because walkdir
-                        // gives us the complete picture (handles late-arriving files).
-                        let result = scan_once(&config, &pool).await;
-                        match result {
-                            Ok(r) => {
-                                tracing::info!(
-                                    processed = r.processed,
-                                    failed = r.failed,
-                                    skipped = r.skipped,
-                                    "batch complete"
-                                );
-                            }
-                            Err(e) => {
-                                tracing::error!(error = %e, "batch processing failed");
-                            }
+                if let Some(_paths) = batch {
+                    // Watcher detected files — do a full scan of the ingestion dir.
+                    // We scan rather than use the watcher's paths because walkdir
+                    // gives us the complete picture (handles late-arriving files).
+                    let result = scan_once(&config, &pool).await;
+                    match result {
+                        Ok(r) => {
+                            tracing::info!(
+                                processed = r.processed,
+                                failed = r.failed,
+                                skipped = r.skipped,
+                                "batch complete"
+                            );
+                        }
+                        Err(e) => {
+                            tracing::error!(error = %e, "batch processing failed");
                         }
                     }
-                    None => {
-                        tracing::warn!("watcher channel closed, stopping orchestrator");
-                        break;
-                    }
+                } else {
+                    tracing::warn!("watcher channel closed, stopping orchestrator");
+                    break;
                 }
             }
         }
@@ -77,12 +74,12 @@ pub async fn run_watcher(
     Ok(())
 }
 
-/// Advisory lock ID for serializing ingestion scans. Prevents concurrent scan_once
+/// Advisory lock ID for serializing ingestion scans. Prevents concurrent `scan_once`
 /// calls (watcher + manual POST) from racing on duplicate checks and file copies.
-const SCAN_ADVISORY_LOCK_ID: i64 = 0x52657665_00000004; // "Reve" + step 4
+const SCAN_ADVISORY_LOCK_ID: i64 = 0x5265_7665_0000_0004; // "Reve" + step 4
 
 /// One-shot ingestion scan: walk the ingestion directory, filter by format priority,
-/// copy to library, and track via ingestion_jobs.
+/// copy to library, and track via `ingestion_jobs`.
 ///
 /// Acquires a database advisory lock to serialize concurrent scans. A second scan
 /// that arrives while one is in progress will block until the first completes.
@@ -98,15 +95,23 @@ pub async fn scan_once(config: &Config, pool: &PgPool) -> Result<ScanResult, any
 
     let result = scan_once_inner(config, pool).await;
 
-    // Release the advisory lock explicitly (also released on connection drop)
-    let _ = sqlx::query("SELECT pg_advisory_unlock($1)")
+    // Release the advisory lock explicitly (also released on connection drop).
+    // Log a warning if the unlock fails — the lock will still release on connection drop.
+    if let Err(e) = sqlx::query("SELECT pg_advisory_unlock($1)")
         .bind(SCAN_ADVISORY_LOCK_ID)
         .execute(&mut *lock_conn)
-        .await;
+        .await
+    {
+        tracing::warn!(error = %e, "failed to explicitly release advisory scan lock; will release on connection drop");
+    }
 
     result
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "scan_once_inner orchestrates the full ingestion pipeline: walk → dedup → copy → DB; the steps have data dependencies that make splitting into helpers awkward without additional Arc-sharing"
+)]
 async fn scan_once_inner(config: &Config, pool: &PgPool) -> Result<ScanResult, anyhow::Error> {
     let ingestion_path = PathBuf::from(&config.ingestion_path);
     let library_path = PathBuf::from(&config.library_path);
@@ -131,7 +136,7 @@ async fn scan_once_inner(config: &Config, pool: &PgPool) -> Result<ScanResult, a
                     }
                 })
                 .filter(|e| e.file_type().is_file())
-                .map(|e| e.into_path())
+                .map(walkdir::DirEntry::into_path)
                 .collect::<Vec<PathBuf>>()
         })
         .await?
@@ -230,6 +235,10 @@ enum ProcessResult {
     Failed(String),
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "process_file executes a sequential 8-step ingest pipeline (hash, dedup, copy, validate, rename, DB commit) where each step needs output from the previous; decomposing further requires passing a large context struct between helpers"
+)]
 async fn process_file(
     source: &Path,
     library_path: &Path,
@@ -329,18 +338,18 @@ async fn process_file(
     // ManifestationFormat — this is the safety net for any code path that
     // bypasses that filter.
     let ext = vars.get("ext").cloned().unwrap_or_default();
-    let format = match ext.parse::<ManifestationFormat>() {
-        Ok(fmt) => fmt,
-        Err(_) => {
-            let dest = dest_path_str.clone();
-            let _ = tokio::task::spawn_blocking(move || {
-                if let Err(e) = std::fs::remove_file(&dest) {
-                    tracing::warn!(path = %dest, error = %e, "failed to remove orphaned library file after format check");
-                }
-            })
-            .await;
-            return ProcessResult::Failed(format!("unsupported format: {ext}"));
+    let Ok(format) = ext.parse::<ManifestationFormat>() else {
+        let dest = dest_path_str.clone();
+        if let Err(e) = tokio::task::spawn_blocking(move || {
+            if let Err(e) = std::fs::remove_file(&dest) {
+                tracing::warn!(path = %dest, error = %e, "failed to remove orphaned library file after format check");
+            }
+        })
+        .await
+        {
+            tracing::warn!(error = %e, "cleanup spawn_blocking panicked after format check");
         }
+        return ProcessResult::Failed(format!("unsupported format: {ext}"));
     };
 
     // Step 4.5: EPUB structural validation and auto-repair.
@@ -370,7 +379,7 @@ async fn process_file(
                 match report.outcome {
                     ValidationOutcome::Quarantined => {
                         let lib_file_str = lib_file.display().to_string();
-                        let _ = tokio::task::spawn_blocking(move || {
+                        if let Err(e) = tokio::task::spawn_blocking(move || {
                             if let Err(e) = std::fs::remove_file(&lib_file_str) {
                                 tracing::warn!(
                                     path = %lib_file_str,
@@ -379,7 +388,10 @@ async fn process_file(
                                 );
                             }
                         })
-                        .await;
+                        .await
+                        {
+                            tracing::warn!(error = %e, "cleanup spawn_blocking panicked for quarantined EPUB removal");
+                        }
                         let reason = issues
                             .iter()
                             .map(|i| format!("{:?}", i.kind))
@@ -420,7 +432,9 @@ async fn process_file(
             let new_full = library_path.join(&new_relative);
 
             // Attempt rename if path changed
-            if new_full.display().to_string() != dest_path_str {
+            if new_full.display().to_string() == dest_path_str {
+                dest_path_str.clone()
+            } else {
                 let old_path = dest_path_str.clone();
                 let new_full_clone = new_full.clone();
                 let rename_result = tokio::task::spawn_blocking(move || {
@@ -432,7 +446,11 @@ async fn process_file(
                     std::fs::rename(&old_path, &resolved)?;
                     // Try to clean up empty parent dirs of old path
                     if let Some(old_parent) = Path::new(&old_path).parent() {
-                        let _ = std::fs::remove_dir(old_parent); // only removes if empty
+                        // Best-effort: only succeeds if the directory is empty.
+                        // Failure (non-empty dir, permissions) is expected and ignored.
+                        if let Err(e) = std::fs::remove_dir(old_parent) {
+                            tracing::debug!(path = %old_parent.display(), error = %e, "could not remove old parent dir (non-empty or permissions); expected");
+                        }
                     }
                     Ok::<String, std::io::Error>(resolved.display().to_string())
                 })
@@ -460,8 +478,6 @@ async fn process_file(
                         dest_path_str.clone()
                     }
                 }
-            } else {
-                dest_path_str.clone()
             }
         } else {
             dest_path_str.clone()
@@ -490,7 +506,7 @@ async fn process_file(
         Err(e) => {
             tracing::error!(error = %e, "ingest DB commit failed");
             let dest = final_path_str.clone();
-            let _ = tokio::task::spawn_blocking(move || {
+            if let Err(e) = tokio::task::spawn_blocking(move || {
                 if let Err(rm_err) = std::fs::remove_file(&dest) {
                     tracing::warn!(
                         path = %dest,
@@ -499,7 +515,10 @@ async fn process_file(
                     );
                 }
             })
-            .await;
+            .await
+            {
+                tracing::warn!(error = %e, "cleanup spawn_blocking panicked after DB error");
+            }
             return ProcessResult::Failed(format!("DB insert failed: {e}"));
         }
     };
@@ -535,6 +554,10 @@ async fn process_file(
 ///   5. upgrade stub work with pointers if newly created
 ///   6. UPDATE manifestation canonical values + pointer columns from draft IDs
 #[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::ref_option,
+    reason = "commit_ingest is called with &extracted and &accessibility_metadata from a site that holds owned Options; changing to Option<&T> would require .as_ref() at every call site with no readability benefit"
+)]
 async fn commit_ingest(
     pool: &PgPool,
     extracted: &Option<crate::services::metadata::extractor::ExtractedMetadata>,
@@ -573,7 +596,7 @@ async fn commit_ingest(
     .bind(format)
     .bind(final_path_str)
     .bind(&copy_result.sha256)
-    .bind(copy_result.file_size as i64)
+    .bind(copy_result.file_size.cast_signed())
     .bind(IngestionStatus::Complete)
     .bind(validation_status_str)
     .bind(accessibility_metadata)
@@ -583,9 +606,8 @@ async fn commit_ingest(
     // 3. Write drafts — OPF or heuristic-fallback (Step 7 task 5).
     //    The heuristic row gives the canonical title_version_id pointer even
     //    when no OPF metadata exists, preserving the ingest invariant.
-    let metadata_for_drafts: ExtractedMetadata = match extracted.as_ref() {
-        Some(meta) => meta.clone(),
-        None => {
+    let metadata_for_drafts: ExtractedMetadata = extracted.as_ref().map_or_else(
+        || {
             let title = vars
                 .get("Title")
                 .cloned()
@@ -604,8 +626,9 @@ async fn commit_ingest(
                 inversion: None,
                 confidence: 0.2,
             }
-        }
-    };
+        },
+        ExtractedMetadata::clone,
+    );
     let draft_ids = draft::write_drafts(&mut tx, manifestation_id, &metadata_for_drafts).await?;
 
     // 4. Upgrade stub work with real values + pointers (create path only).
@@ -619,8 +642,7 @@ async fn commit_ingest(
     let (isbn_10, isbn_13) = extracted
         .as_ref()
         .and_then(|m| m.isbn.as_ref())
-        .map(|i| (i.isbn_10.clone(), i.isbn_13.clone()))
-        .unwrap_or((None, None));
+        .map_or((None, None), |i| (i.isbn_10.clone(), i.isbn_13.clone()));
     let publisher = extracted.as_ref().and_then(|m| m.publisher.clone());
     let pub_date = extracted.as_ref().and_then(|m| m.pub_date);
 
@@ -651,15 +673,22 @@ async fn quarantine_async(source: &Path, quarantine_path: &Path, reason: &str) {
     let source = source.to_path_buf();
     let qpath = quarantine_path.to_path_buf();
     let reason = reason.to_string();
-    let _ = tokio::task::spawn_blocking(move || {
+    if let Err(e) = tokio::task::spawn_blocking(move || {
         if let Err(e) = quarantine::quarantine_file(&source, &qpath, &reason) {
             tracing::error!(error = %e, "quarantine failed");
         }
     })
-    .await;
+    .await
+    {
+        tracing::error!(error = %e, "quarantine spawn_blocking panicked");
+    }
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::items_after_statements,
+    reason = "test code: local struct definitions inside test functions are idiomatic for sqlx::FromRow test helpers"
+)]
 mod tests {
     use super::*;
     use crate::config::CleanupMode;
@@ -1032,7 +1061,7 @@ mod tests {
         // Quarantine directory must contain a sidecar file for the corrupt EPUB
         let quarantine_entries: Vec<_> = std::fs::read_dir(quarantine.path())
             .unwrap()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .collect();
         assert!(
             !quarantine_entries.is_empty(),
@@ -1089,7 +1118,7 @@ mod tests {
 
     /// Every non-NULL canonical field set by ingestion must have a matching
     /// `*_version_id` pointer referencing a real `metadata_versions` row with
-    /// `source='opf'`.  Without this invariant, metadata_versions is optional
+    /// `source='opf'`.  Without this invariant, `metadata_versions` is optional
     /// instead of authoritative.
     #[sqlx::test(migrations = "./migrations")]
     async fn ingest_sets_version_pointers_for_all_canonical_fields(pool: PgPool) {

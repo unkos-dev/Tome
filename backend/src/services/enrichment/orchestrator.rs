@@ -87,17 +87,17 @@ pub struct CanonicalState {
 
 impl CanonicalState {
     pub fn is_empty_for(&self, field: &str) -> bool {
-        fn blank(v: &Option<String>) -> bool {
-            v.as_deref().unwrap_or("").is_empty()
+        fn blank(v: Option<&str>) -> bool {
+            v.unwrap_or("").is_empty()
         }
         match field {
-            "title" => blank(&self.title),
-            "description" => blank(&self.description),
-            "language" => blank(&self.language),
-            "publisher" => blank(&self.publisher),
-            "pub_date" => blank(&self.pub_date),
-            "isbn_10" => blank(&self.isbn_10),
-            "isbn_13" => blank(&self.isbn_13),
+            "title" => blank(self.title.as_deref()),
+            "description" => blank(self.description.as_deref()),
+            "language" => blank(self.language.as_deref()),
+            "publisher" => blank(self.publisher.as_deref()),
+            "pub_date" => blank(self.pub_date.as_deref()),
+            "isbn_10" => blank(self.isbn_10.as_deref()),
+            "isbn_13" => blank(self.isbn_13.as_deref()),
             _ => true,
         }
     }
@@ -256,10 +256,12 @@ async fn apply_canonical_batch(
 
         // quorum counts distinct rows in *this* run with the same hash.
         for (source_id, incoming) in rows {
-            let quorum = rows
-                .iter()
-                .filter(|(_, r)| r.value_hash == incoming.value_hash)
-                .count() as u32;
+            let quorum = u32::try_from(
+                rows.iter()
+                    .filter(|(_, r)| r.value_hash == incoming.value_hash)
+                    .count(),
+            )
+            .unwrap_or(u32::MAX);
             // Pull the authoritative match_type back from the row we just
             // upserted — it may be 'isbn', 'title_author_fuzzy', or 'title'
             // depending on the source path.
@@ -281,7 +283,7 @@ async fn apply_canonical_batch(
 
             // Combine pending from this run with stored pending rows.
             let mut pending_set: Vec<PolicyInputRow> = existing_pending.clone();
-            for (_, other) in rows.iter() {
+            for (_, other) in rows {
                 if other.id != incoming.id {
                     pending_set.push(other.clone());
                 }
@@ -391,7 +393,12 @@ pub async fn load_snapshot(pool: &PgPool, manifestation_id: Uuid) -> anyhow::Res
         isbn_13: isbn_13.clone(),
     };
 
-    let lookup_key = derive_lookup_key(&isbn_13, &isbn_10, &title, &first_author);
+    let lookup_key = derive_lookup_key(
+        isbn_13.as_deref(),
+        isbn_10.as_deref(),
+        title.as_deref(),
+        first_author.as_deref(),
+    );
 
     Ok(Snapshot {
         manifestation_id,
@@ -402,22 +409,22 @@ pub async fn load_snapshot(pool: &PgPool, manifestation_id: Uuid) -> anyhow::Res
 }
 
 fn derive_lookup_key(
-    isbn_13: &Option<String>,
-    isbn_10: &Option<String>,
-    title: &Option<String>,
-    author: &Option<String>,
+    isbn_13: Option<&str>,
+    isbn_10: Option<&str>,
+    title: Option<&str>,
+    author: Option<&str>,
 ) -> Option<LookupKey> {
-    if let Some(v) = isbn_13.as_deref()
+    if let Some(v) = isbn_13
         && let Some(k) = lookup_key::isbn_key(v)
     {
         return Some(LookupKey::Isbn(k));
     }
-    if let Some(v) = isbn_10.as_deref()
+    if let Some(v) = isbn_10
         && let Some(k) = lookup_key::isbn_key(v)
     {
         return Some(LookupKey::Isbn(k));
     }
-    if let (Some(t), Some(a)) = (title.as_deref(), author.as_deref())
+    if let (Some(t), Some(a)) = (title, author)
         && !t.is_empty()
         && !a.is_empty()
     {
@@ -480,11 +487,11 @@ pub async fn fan_out(
                 Some(run) => done.push(run),
                 None => break,
             },
-            _ = &mut deadline => {
+            () = &mut deadline => {
                 // Budget expired: synthesise a Timeout outcome for every
                 // source that hasn't reported yet so the failure surfaces
                 // to `finish`.  In-flight futures are dropped (cancelled).
-                for id in enabled_ids.iter() {
+                for id in &enabled_ids {
                     if !done.iter().any(|r| &r.source_id == id) {
                         done.push(SourceRun {
                             source_id: id.clone(),
@@ -641,6 +648,10 @@ async fn enqueue_writeback(
 /// value is unusable (non-string JSON, malformed `pub_date`) so the caller
 /// can try the next source instead of inflating counters and enqueuing a
 /// writeback for a change that did not happen.
+#[allow(
+    clippy::too_many_lines,
+    reason = "apply_field dispatches over 11 canonical axes each needing a typed UPDATE; the per-axis cases are mechanical and extracting them further would obscure the field→column mapping"
+)]
 async fn apply_field(
     tx: &mut Transaction<'_, Postgres>,
     snapshot: &Snapshot,
@@ -908,7 +919,7 @@ mod tests {
             _ctx: &LookupCtx<'_>,
             _key: &LookupKey,
         ) -> Result<Vec<SourceResult>, SourceError> {
-            tokio::time::sleep(Duration::from_secs(60)).await;
+            tokio::time::sleep(Duration::from_mins(1)).await;
             Ok(Vec::new())
         }
     }
@@ -1016,13 +1027,13 @@ mod tests {
             googlebooks_base_url: gb_uri.into(),
             googlebooks_api_key: None,
             hardcover_base_url: hc_uri.into(),
-            hardcover_api_token: hc_token.map(|s| s.into()),
+            hardcover_api_token: hc_token.map(std::convert::Into::into),
             operator_contact: None,
         }
     }
 
     /// Insert (work + manifestation) with the given ISBN-13 and return both IDs.
-    /// Canonical fields start empty so AutoFill is exercised.
+    /// Canonical fields start empty so `AutoFill` is exercised.
     async fn insert_enrich_fixture(pool: &PgPool, isbn_13: &str, marker: &str) -> (Uuid, Uuid) {
         let work_id: Uuid = sqlx::query_scalar(
             "INSERT INTO works (title, sort_title) VALUES ('', '') RETURNING id",
@@ -1251,7 +1262,7 @@ mod tests {
         );
     }
 
-    /// One source returns `publisher` (AutoFill by default) on an empty
+    /// One source returns `publisher` (`AutoFill` by default) on an empty
     /// canonical → Apply fires and `publisher` is written to the
     /// manifestation.
     #[sqlx::test(migrations = "./migrations")]
@@ -1308,7 +1319,7 @@ mod tests {
 
     /// When the `title` field is locked, the journal row is still written
     /// (so admins can see what the source proposed) but canonical and
-    /// title_version_id are NOT updated.
+    /// `title_version_id` are NOT updated.
     #[sqlx::test(migrations = "./migrations")]
     async fn orchestrator_locked_field_writes_journal_but_not_canonical(pool: PgPool) {
         let app_pool = app_pool_for(&pool).await;
@@ -1461,7 +1472,7 @@ mod tests {
     // and a full `run_once` integration call.
 
     /// Every source returned an error → no journal rows, all failures
-    /// summarised with correct retry_after / terminal flags. The
+    /// summarised with correct `retry_after` / terminal flags. The
     /// `SourceError::Other` case also verifies that
     /// `summarise_failure`'s `{err:#}` formatting preserves the full
     /// anyhow `.chain()` of context.
@@ -1493,7 +1504,7 @@ mod tests {
             SourceRun {
                 source_id: "hardcover".into(),
                 outcome: Err(SourceError::RateLimited {
-                    retry_after: Some(Duration::from_secs(60)),
+                    retry_after: Some(Duration::from_mins(1)),
                 }),
             },
             SourceRun {
@@ -1532,7 +1543,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             hc.retry_after,
-            Some(Duration::from_secs(60)),
+            Some(Duration::from_mins(1)),
             "RateLimited retry_after must round-trip"
         );
         assert!(!hc.terminal, "RateLimited is not terminal");
@@ -1633,8 +1644,8 @@ mod tests {
         );
     }
 
-    /// A pending row from a prior run with a different value_hash must
-    /// downgrade AutoFill to Propose — even when canonical is empty and the
+    /// A pending row from a prior run with a different `value_hash` must
+    /// downgrade `AutoFill` to Propose — even when canonical is empty and the
     /// new run has only one row.
     #[sqlx::test(migrations = "./migrations")]
     async fn apply_canonical_batch_merges_prior_pending_into_decision(pool: PgPool) {

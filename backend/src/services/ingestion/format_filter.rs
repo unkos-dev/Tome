@@ -12,7 +12,7 @@ use crate::models::manifestation_format::ManifestationFormat;
 pub fn select_by_priority(files: &[PathBuf], priority: &[ManifestationFormat]) -> Vec<PathBuf> {
     let mut groups: HashMap<(PathBuf, String), Vec<&PathBuf>> = HashMap::new();
     for file in files {
-        let parent = file.parent().unwrap_or(Path::new("")).to_path_buf();
+        let parent = file.parent().unwrap_or_else(|| Path::new("")).to_path_buf();
         if let Some(stem) = file.file_stem().and_then(|s| s.to_str()) {
             groups
                 .entry((parent, stem.to_lowercase()))
@@ -28,7 +28,7 @@ pub fn select_by_priority(files: &[PathBuf], priority: &[ManifestationFormat]) -
             let Some(ext) = candidate
                 .extension()
                 .and_then(|e| e.to_str())
-                .map(|e| e.to_lowercase())
+                .map(str::to_lowercase)
             else {
                 continue;
             };
@@ -37,6 +37,10 @@ pub fn select_by_priority(files: &[PathBuf], priority: &[ManifestationFormat]) -
             let Ok(fmt) = ext.parse::<ManifestationFormat>() else {
                 continue;
             };
+            #[allow(
+                clippy::unwrap_used,
+                reason = "the `best.is_none()` short-circuit in `&&` guarantees best is Some before .unwrap() is reached"
+            )]
             if let Some(pos) = priority.iter().position(|p| *p == fmt)
                 && (best.is_none() || pos < best.unwrap().0)
             {

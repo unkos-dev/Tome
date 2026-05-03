@@ -181,9 +181,8 @@ mod tests {
         for i in 0..ar.len() {
             let f = ar.by_index(i).unwrap();
             let expected = match f.name() {
-                MIMETYPE_ENTRY => zip::CompressionMethod::Stored,
+                MIMETYPE_ENTRY | "images/cover.jpg" => zip::CompressionMethod::Stored,
                 "OEBPS/content.opf" => zip::CompressionMethod::Deflated,
-                "images/cover.jpg" => zip::CompressionMethod::Stored,
                 other => panic!("unexpected entry {other}"),
             };
             assert_eq!(
@@ -205,12 +204,12 @@ mod tests {
             ),
             (
                 "OEBPS/content.opf",
-                br#"<package><metadata><dc:title>Old</dc:title></metadata></package>"#,
+                br"<package><metadata><dc:title>Old</dc:title></metadata></package>",
                 zip::CompressionMethod::Deflated,
             ),
         ]);
         let (dir, path) = write_to_temp(&bytes);
-        let replacement = br#"<package><metadata><dc:title>New</dc:title></metadata></package>"#;
+        let replacement = br"<package><metadata><dc:title>New</dc:title></metadata></package>";
         let temp = with_modifications(
             &path,
             dir.path(),

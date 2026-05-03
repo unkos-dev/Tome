@@ -1,8 +1,8 @@
 //! `BasicOnly` extractor: rejects session cookies, requires
 //! `Authorization: Basic …`, emits an RFC 7617 challenge on failure.
 //!
-//! Used by the `/opds/*` routes so that OPDS reader apps (KOReader, Moon+,
-//! Librera, KyBook 3) receive a 401 with `WWW-Authenticate: Basic realm="…",
+//! Used by the `/opds/*` routes so that OPDS reader apps (`KOReader`, Moon+,
+//! Librera, `KyBook` 3) receive a 401 with `WWW-Authenticate: Basic realm="…",
 //! charset="UTF-8"` and prompt for credentials — the cookie-or-Basic
 //! [`CurrentUser`] extractor returns a JSON 401 without a challenge, which
 //! mobile clients silently treat as an error.
@@ -29,7 +29,7 @@ impl FromRequestParts<AppState> for BasicOnly {
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
         match verify_basic(state, parts).await {
-            Ok(Some(user)) => Ok(BasicOnly(user)),
+            Ok(Some(user)) => Ok(Self(user)),
             Ok(None) | Err(AppError::Unauthorized) => Err(AppError::BasicAuthRequired {
                 realm: state.config.opds.realm.clone(),
             }),

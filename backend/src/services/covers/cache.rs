@@ -14,7 +14,7 @@ pub struct CoverCache {
 }
 
 impl CoverCache {
-    pub fn new(root: PathBuf) -> Self {
+    pub const fn new(root: PathBuf) -> Self {
         Self { root }
     }
 

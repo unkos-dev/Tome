@@ -141,8 +141,9 @@ fn short_uuid(id: Uuid) -> String {
     id.simple().to_string().chars().take(8).collect()
 }
 
-/// Percent-encode per RFC 5987 §3.2.1 attr-char set. Everything outside
-/// `alpha / digit / "!#$&+-.^_\`|~"` is percent-encoded.
+/// Percent-encode per RFC 5987 §3.2.1 attr-char set. Everything outside the
+/// attr-char set (`ALPHA / DIGIT / "!" / "#" / "$" / "&" / "+" / "-" / "." /
+/// "^" / "_" / backtick / "|" / "~"`) is percent-encoded.
 const RFC5987_NON_ATTR_CHAR: &AsciiSet = &CONTROLS
     .add(b' ')
     .add(b'"')

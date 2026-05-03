@@ -8,7 +8,7 @@
 //! inline names (the older `/isbn/{isbn}.json` endpoint only returned
 //! `/authors/OL...` keys and required a second hop).
 //!
-//! Rate-limited to 3 requests per second — OpenLibrary's identified-request
+//! Rate-limited to 3 requests per second — `OpenLibrary`'s identified-request
 //! tier, unlocked by the `User-Agent` set in [`super::super::http::api_client`].
 
 use std::num::NonZeroU32;
@@ -28,7 +28,13 @@ type Limiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 
 fn limiter() -> &'static Limiter {
     static L: OnceLock<Limiter> = OnceLock::new();
-    L.get_or_init(|| RateLimiter::direct(Quota::per_second(NonZeroU32::new(3).expect("3 > 0"))))
+    L.get_or_init(|| {
+        #[allow(
+            clippy::expect_used,
+            reason = "NonZeroU32::new(3) — the literal 3 is a compile-time constant that is always non-zero; this cannot fail"
+        )]
+        RateLimiter::direct(Quota::per_second(NonZeroU32::new(3).expect("3 > 0")))
+    })
 }
 
 pub struct OpenLibrary {
@@ -123,7 +129,7 @@ fn to_source_error(e: reqwest::Error) -> SourceError {
 ///
 /// The response is a map keyed by bibkey (e.g. `"ISBN:9780441172719"`).  A
 /// missing key is treated as a clean miss (empty vec), matching
-/// OpenLibrary's behaviour for unknown ISBNs on this endpoint.
+/// `OpenLibrary`'s behaviour for unknown ISBNs on this endpoint.
 fn map_api_books_response(body: &Value, isbn_key: &str) -> Vec<SourceResult> {
     let mut out = Vec::new();
     let mt = "isbn";
@@ -309,7 +315,7 @@ mod tests {
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn ctx<'a>(http: &'a reqwest::Client) -> LookupCtx<'a> {
+    fn ctx(http: &reqwest::Client) -> LookupCtx<'_> {
         LookupCtx { http, cached: None }
     }
 
@@ -499,7 +505,7 @@ mod tests {
             .unwrap_err();
         match err {
             SourceError::RateLimited { retry_after } => {
-                assert_eq!(retry_after, Some(Duration::from_secs(60)));
+                assert_eq!(retry_after, Some(Duration::from_mins(1)));
             }
             other => panic!("expected RateLimited, got {other:?}"),
         }

@@ -17,7 +17,11 @@ pub fn validate(handle: &ZipHandle, issues: &mut Vec<Issue>) -> Option<String> {
         extract_opf_path(&bytes, issues)
     } else {
         // Attempt regeneration: scan for .opf file
-        let candidate = handle.entries.iter().find(|e| e.ends_with(".opf")).cloned();
+        let candidate = handle
+            .entries
+            .iter()
+            .find(|e| e.to_ascii_lowercase().ends_with(".opf"))
+            .cloned();
 
         issues.push(Issue {
             layer: Layer::Container,
@@ -30,15 +34,15 @@ pub fn validate(handle: &ZipHandle, issues: &mut Vec<Issue>) -> Option<String> {
         candidate.as_ref().and_then(|c| {
             // C4: validate path safety using the shared helper (covers percent-encoded
             // traversal and backslashes in addition to plain `..` and leading `/`).
-            if !super::is_safe_path(c) {
+            if super::is_safe_path(c) {
+                Some(c.clone())
+            } else {
                 issues.push(Issue {
                     layer: Layer::Container,
                     severity: Severity::Irrecoverable,
                     kind: IssueKind::UnsafeOpfPath { path: c.clone() },
                 });
                 None
-            } else {
-                Some(c.clone())
             }
         })
     }

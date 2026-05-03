@@ -16,7 +16,7 @@ pub fn base_source(source: &str) -> f32 {
         "openlibrary" => 0.80,
         "googlebooks" => 0.75,
         "opf" => 0.50,
-        "ai" => 0.30,
+        // "ai" and any unknown source both get the conservative 0.30 default.
         _ => 0.30,
     }
 }
@@ -29,7 +29,7 @@ pub fn match_modifier(match_type: &str) -> f32 {
         "isbn" => 1.00,
         "title_author_exact" => 0.90,
         "title_author_fuzzy" => 0.75,
-        "title" => 0.50,
+        // "title" and any unknown match type both get the conservative 0.50 default.
         _ => 0.50,
     }
 }
@@ -39,7 +39,7 @@ pub fn match_modifier(match_type: &str) -> f32 {
 /// * 0 or 1 source → 1.00 (no boost)
 /// * 2 sources      → 1.10
 /// * 3+ sources     → 1.20
-pub fn agreement_boost(quorum: u32) -> f32 {
+pub const fn agreement_boost(quorum: u32) -> f32 {
     match quorum {
         0 | 1 => 1.00,
         2 => 1.10,
@@ -62,6 +62,10 @@ pub fn score(source: &str, match_type: &str, quorum: u32) -> f32 {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "test assertions on f32 literals that are exactly representable in IEEE 754 (1.00, 0.99, 0.50, 1.10, 1.20 are all powers-of-two fractions or exact values)"
+)]
 mod tests {
     use super::*;
 

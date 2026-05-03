@@ -9,7 +9,7 @@
 //!
 //! Attribute parity: the frontend `writeThemeCookie`
 //! (`frontend/src/lib/theme/cookie.ts`) MUST produce matching attributes
-//! (Path=/, Max-Age=31536000, SameSite=Lax, Secure, no HttpOnly). Drift
+//! (Path=/, Max-Age=31536000, SameSite=Lax, Secure, no `HttpOnly`). Drift
 //! produces two cookies of the same name with divergent attributes in
 //! the browser jar.
 //!

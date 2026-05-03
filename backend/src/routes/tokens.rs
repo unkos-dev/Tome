@@ -99,6 +99,10 @@ async fn revoke_token(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::items_after_statements,
+    reason = "test code: `use base64ct::Encoding` placed inline where needed in test function body"
+)]
 mod tests {
     use axum::http::StatusCode;
 

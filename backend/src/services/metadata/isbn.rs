@@ -40,7 +40,7 @@ pub fn validate_isbn10(isbn: &str) -> bool {
         } else {
             return false;
         };
-        sum += val * (10 - i as u32);
+        sum += val * (10 - u32::try_from(i).unwrap_or(0));
     }
     sum.is_multiple_of(11)
 }
@@ -123,7 +123,7 @@ fn isbn13_to_isbn10(isbn13: &str) -> Option<String> {
     let mut sum: u32 = 0;
     for (i, c) in core.chars().enumerate() {
         let d = c.to_digit(10)?;
-        sum += d * (10 - i as u32);
+        sum += d * (10 - u32::try_from(i).unwrap_or(0));
     }
     let check = (11 - (sum % 11)) % 11;
     let check_char = if check == 10 {

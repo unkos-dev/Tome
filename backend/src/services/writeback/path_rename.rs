@@ -110,7 +110,7 @@ fn exdev_fallback(temp: NamedTempFile, dest: &Path) -> Result<(), WritebackError
 /// path-rename step after post-writeback validation passes.
 pub fn move_existing(src: &Path, dest: &Path) -> Result<(), WritebackError> {
     match std::fs::rename(src, dest) {
-        Ok(_) => {
+        Ok(()) => {
             fsync_parent_dir(dest);
             // When `src` and `dest` share a parent the two fsyncs collapse
             // to one (same inode); when they don't, flush `src`'s parent

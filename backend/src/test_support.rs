@@ -142,6 +142,7 @@ pub fn test_server() -> TestServer {
 /// the runtime roles (`reverie_app` / `reverie_ingestion`) build secondary
 /// pools against the same per-test DB via [`app_pool_for`] / [`ingestion_pool_for`].
 pub mod db {
+    use base64ct::Encoding as _;
     use sqlx::PgPool;
     use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
     use uuid::Uuid;
@@ -239,16 +240,16 @@ pub mod db {
         crate::models::device_token::create(app_pool, user.id, "admin-test", &hash)
             .await
             .expect("create token");
-        use base64ct::Encoding;
+
         let basic =
             base64ct::Base64::encode_string(format!("{}:{}", user.id, plaintext).as_bytes());
         (user.id, format!("Basic {basic}"))
     }
 
-    /// Build the full router with both pools wired through AppState.
-    /// AppState.pool comes from `app_pool` (reverie_app — for the route
-    /// handlers' acquire_with_rls); AppState.ingestion_pool comes from
-    /// `ingestion_pool` (reverie_ingestion — matches the queue + dry_run).
+    /// Build the full router with both pools wired through `AppState`.
+    /// AppState.pool comes from `app_pool` (`reverie_app` — for the route
+    /// handlers' `acquire_with_rls`); `AppState.ingestion_pool` comes from
+    /// `ingestion_pool` (`reverie_ingestion` — matches the queue + `dry_run`).
     pub fn server_with_real_pools(
         app_pool: &PgPool,
         ingestion_pool: &PgPool,
@@ -352,7 +353,7 @@ pub mod db {
         crate::models::device_token::create(app_pool, user.id, "child-test", &hash)
             .await
             .expect("create token");
-        use base64ct::Encoding;
+
         let basic =
             base64ct::Base64::encode_string(format!("{}:{}", user.id, plaintext).as_bytes());
         (user.id, format!("Basic {basic}"))
@@ -377,7 +378,7 @@ pub mod db {
         crate::models::device_token::create(app_pool, user.id, "adult-test", &hash)
             .await
             .expect("create token");
-        use base64ct::Encoding;
+
         let basic =
             base64ct::Base64::encode_string(format!("{}:{}", user.id, plaintext).as_bytes());
         (user.id, format!("Basic {basic}"))
@@ -482,7 +483,7 @@ pub mod db {
 /// configured to point at the mock. Lets tests drive the full callback
 /// flow (PKCE/CSRF/nonce validation → token exchange → ID token signature
 /// verification → user upsert → session login) without going through a
-/// real IdP.
+/// real `IdP`.
 pub mod oidc_mock {
     use openidconnect::core::{
         CoreClient, CoreIdToken, CoreIdTokenClaims, CoreJsonWebKey, CoreJsonWebKeySet,
@@ -519,7 +520,7 @@ pub mod oidc_mock {
     impl MockOidcProvider {
         /// Boot a `MockServer` and serve a freshly-generated JWKS at `/jwks`.
         /// `client_id` is the OIDC `aud` claim — must match `OIDC_CLIENT_ID`
-        /// in the AppState's config (`test_config()` uses an empty string;
+        /// in the `AppState`'s config (`test_config()` uses an empty string;
         /// pass `""` here to match).
         pub async fn start(client_id: &str) -> Self {
             // 2048-bit RSA — fast enough for a per-test keygen and matches

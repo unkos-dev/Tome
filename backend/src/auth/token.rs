@@ -1,16 +1,22 @@
+use std::fmt::Write as _;
+
 use base64ct::{Base64UrlUnpadded, Encoding};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 fn sha256_hex(input: &[u8]) -> String {
-    Sha256::digest(input)
+    let digest = Sha256::digest(input);
+    digest
         .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect()
+        .fold(String::with_capacity(digest.len() * 2), |mut s, b| {
+            // write! to String via fmt::Write is infallible; .ok() discards the unreachable Err.
+            write!(s, "{b:02x}").ok();
+            s
+        })
 }
 
 /// Generate a cryptographically random device token (32 bytes, base64url).
-/// Returns (plaintext_token, sha256_hex_hash).
+/// Returns (`plaintext_token`, `sha256_hex_hash`).
 pub fn generate_device_token() -> (String, String) {
     let mut bytes = [0u8; 32];
     rand::fill(&mut bytes);

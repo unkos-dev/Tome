@@ -24,8 +24,10 @@ pub async fn watch(
                         EventKind::Create(_) | EventKind::Modify(_) => {
                             let paths: Vec<PathBuf> =
                                 event.paths.into_iter().filter(|p| p.is_file()).collect();
-                            if !paths.is_empty() {
-                                let _ = notify_tx.blocking_send(paths);
+                            if !paths.is_empty()
+                                && let Err(e) = notify_tx.blocking_send(paths)
+                            {
+                                tracing::warn!(error = ?e, "watcher: notify channel closed; stopping event forwarding");
                             }
                         }
                         _ => {}
@@ -44,19 +46,32 @@ pub async fn watch(
 
     loop {
         // If we have pending paths, wait for more events or debounce timeout
-        if !pending.is_empty() {
+        if pending.is_empty() {
+            // No pending paths — wait for first event or cancellation
             tokio::select! {
-                _ = cancel.cancelled() => {
+                () = cancel.cancelled() => {
+                    tracing::info!("watcher cancelled (idle)");
+                    break;
+                }
+                Some(paths) = notify_rx.recv() => {
+                    pending.extend(paths);
+                }
+            }
+        } else {
+            tokio::select! {
+                () = cancel.cancelled() => {
                     tracing::info!("watcher cancelled, flushing pending batch");
-                    if !pending.is_empty() {
-                        let _ = tx.send(std::mem::take(&mut pending)).await;
+                    if !pending.is_empty()
+                        && let Err(e) = tx.send(std::mem::take(&mut pending)).await
+                    {
+                        tracing::warn!(error = ?e, "watcher: batch channel closed during cancellation flush");
                     }
                     break;
                 }
                 Some(paths) = notify_rx.recv() => {
                     pending.extend(paths);
                 }
-                _ = tokio::time::sleep(debounce) => {
+                () = tokio::time::sleep(debounce) => {
                     // Debounce complete — send batch
                     pending.sort();
                     pending.dedup();
@@ -68,17 +83,6 @@ pub async fn watch(
                     }
                 }
             }
-        } else {
-            // No pending paths — wait for first event or cancellation
-            tokio::select! {
-                _ = cancel.cancelled() => {
-                    tracing::info!("watcher cancelled (idle)");
-                    break;
-                }
-                Some(paths) = notify_rx.recv() => {
-                    pending.extend(paths);
-                }
-            }
         }
     }
 
@@ -88,6 +92,10 @@ pub async fn watch(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::let_underscore_must_use,
+    reason = "test code: discarding JoinHandle and Result in test harness scaffolding is intentional; the crate-root cfg_attr only covers unwrap_used/expect_used"
+)]
 mod tests {
     use super::*;
 

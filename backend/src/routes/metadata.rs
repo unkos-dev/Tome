@@ -367,8 +367,7 @@ async fn apply_version(
 ) -> Result<(), AppError> {
     let str_val = value
         .as_str()
-        .map(str::to_owned)
-        .unwrap_or_else(|| value.to_string());
+        .map_or_else(|| value.to_string(), str::to_owned);
     match field {
         "title" => {
             exec(
@@ -378,7 +377,7 @@ async fn apply_version(
                 version_id,
                 work_id,
             )
-            .await?
+            .await?;
         }
         "description" => {
             exec(
@@ -388,7 +387,7 @@ async fn apply_version(
                 version_id,
                 work_id,
             )
-            .await?
+            .await?;
         }
         "language" => {
             exec(
@@ -398,7 +397,7 @@ async fn apply_version(
                 version_id,
                 work_id,
             )
-            .await?
+            .await?;
         }
         "publisher" => {
             exec(
@@ -408,7 +407,7 @@ async fn apply_version(
                 version_id,
                 manifestation_id,
             )
-            .await?
+            .await?;
         }
         "isbn_10" => {
             exec(
@@ -418,7 +417,7 @@ async fn apply_version(
                 version_id,
                 manifestation_id,
             )
-            .await?
+            .await?;
         }
         "isbn_13" => {
             exec(
@@ -428,12 +427,11 @@ async fn apply_version(
                 version_id,
                 manifestation_id,
             )
-            .await?
+            .await?;
         }
         "pub_date" => {
-            let date = parse_iso_date(&str_val).map_err(|e| {
-                AppError::Validation(format!("invalid pub_date: {e}"))
-            })?;
+            let date = parse_iso_date(&str_val)
+                .map_err(|e| AppError::Validation(format!("invalid pub_date: {e}")))?;
             sqlx::query(
                 "UPDATE manifestations SET pub_date = $1, pub_date_version_id = $2 WHERE id = $3",
             )

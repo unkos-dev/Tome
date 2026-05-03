@@ -1,5 +1,17 @@
-//! OpenSearch descriptors. Separate endpoints per scope so a reader paired
+//! `OpenSearch` descriptors. Separate endpoints per scope so a reader paired
 //! at `/opds/shelves/{id}` gets a search URL scoped to that shelf.
+//!
+//! # Why `expect_used` is allowed here
+//!
+//! All `expect()` calls write to a `Writer<Cursor<Vec<u8>>>` or build a
+//! `Response` from static status/header values. `Cursor<Vec<u8>>` writes are
+//! infallible; `Response::builder()` with a valid `StatusCode` and a valid
+//! ASCII header value cannot fail. Making these return `Result` would cascade
+//! error-handling into every call site for error paths that cannot occur.
+#![allow(
+    clippy::expect_used,
+    reason = "all expects write to Cursor<Vec<u8>> (infallible) or build Response from static inputs (cannot fail)"
+)]
 
 use axum::Router;
 use axum::extract::{Path, State};
@@ -35,8 +47,10 @@ async fn library_opensearch(
     let base = base_url(&state)?.clone();
     let template = base
         .join("/opds/library/search?q={searchTerms}")
-        .map(|u| u.to_string())
-        .unwrap_or_else(|_| "/opds/library/search?q={searchTerms}".into());
+        .map_or_else(
+            |_| "/opds/library/search?q={searchTerms}".into(),
+            |u| u.to_string(),
+        );
     let body = build_opensearch_xml("Reverie", "Search Reverie library", &template);
     Ok(build_response(body))
 }
@@ -69,8 +83,10 @@ async fn shelf_opensearch(
         .join(&format!(
             "/opds/shelves/{shelf_id}/search?q={{searchTerms}}"
         ))
-        .map(|u| u.to_string())
-        .unwrap_or_else(|_| format!("/opds/shelves/{shelf_id}/search?q={{searchTerms}}"));
+        .map_or_else(
+            |_| format!("/opds/shelves/{shelf_id}/search?q={{searchTerms}}"),
+            |u| u.to_string(),
+        );
     let body = build_opensearch_xml("Reverie Shelf", "Search shelf contents", &template);
     Ok(build_response(body))
 }

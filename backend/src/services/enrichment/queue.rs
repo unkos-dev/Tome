@@ -51,7 +51,7 @@ pub async fn spawn_queue(
 
     loop {
         tokio::select! {
-            _ = cancel.cancelled() => {
+            () = cancel.cancelled() => {
                 info!("enrichment queue shutting down");
                 revert_in_progress(&pool).await?;
                 return Ok(());
@@ -59,9 +59,8 @@ pub async fn spawn_queue(
             _ = interval.tick() => {
                 // Drain as many pending rows as semaphore permits allow.
                 loop {
-                    let permit = match semaphore.clone().try_acquire_owned() {
-                        Ok(p) => p,
-                        Err(_) => break, // fully busy; next tick
+                    let Ok(permit) = semaphore.clone().try_acquire_owned() else {
+                        break; // fully busy; next tick
                     };
                     let claim = claim_next(&pool).await?;
                     let Some((id, attempt_count)) = claim else {
@@ -89,7 +88,7 @@ pub async fn spawn_queue(
 /// when the queue is empty (or every row is still in its backoff window).
 async fn claim_next(pool: &PgPool) -> sqlx::Result<Option<(Uuid, i32)>> {
     let row: Option<(Uuid, i32)> = sqlx::query_as(
-        r#"WITH eligible AS (
+        r"WITH eligible AS (
              SELECT id, enrichment_attempt_count
              FROM manifestations
              WHERE enrichment_status IN ('pending', 'failed')
@@ -117,7 +116,7 @@ async fn claim_next(pool: &PgPool) -> sqlx::Result<Option<(Uuid, i32)>> {
                   enrichment_attempt_count = m.enrichment_attempt_count + 1
              FROM eligible
             WHERE m.id = eligible.id
-           RETURNING m.id, m.enrichment_attempt_count"#,
+           RETURNING m.id, m.enrichment_attempt_count",
     )
     .fetch_optional(pool)
     .await?;
@@ -189,7 +188,7 @@ async fn mark_failed(
     retry_after: Option<Duration>,
     error: Option<&str>,
 ) -> sqlx::Result<()> {
-    let max = config.enrichment.max_attempts as i32;
+    let max = config.enrichment.max_attempts.cast_signed();
     let next_status = if attempt_count >= max {
         "skipped"
     } else {
@@ -253,6 +252,12 @@ async fn revert_in_progress(pool: &PgPool) -> sqlx::Result<()> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    reason = "test code: casts in tests for known-small literal constants are intentional and not worth wrapping in try_from/cast_signed"
+)]
 mod tests {
     use super::*;
     use crate::test_support::db::ingestion_pool_for;

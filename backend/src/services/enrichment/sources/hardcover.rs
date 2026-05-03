@@ -26,10 +26,16 @@ type Limiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 
 fn limiter() -> &'static Limiter {
     static L: OnceLock<Limiter> = OnceLock::new();
-    L.get_or_init(|| RateLimiter::direct(Quota::per_second(NonZeroU32::new(1).expect("1 > 0"))))
+    L.get_or_init(|| {
+        #[allow(
+            clippy::expect_used,
+            reason = "NonZeroU32::new(1) — the literal 1 is a compile-time constant that is always non-zero; this cannot fail"
+        )]
+        RateLimiter::direct(Quota::per_second(NonZeroU32::new(1).expect("1 > 0")))
+    })
 }
 
-const ISBN_QUERY: &str = r#"
+const ISBN_QUERY: &str = r"
 query BooksByIsbn($isbn: String!) {
   books(where: { isbns: { isbn: { _eq: $isbn } } }, limit: 1) {
     title
@@ -43,9 +49,9 @@ query BooksByIsbn($isbn: String!) {
     cached_tags
   }
 }
-"#;
+";
 
-const TITLE_AUTHOR_QUERY: &str = r#"
+const TITLE_AUTHOR_QUERY: &str = r"
 query SearchByTitleAuthor($title: String!, $author: String!) {
   books(where: { title: { _ilike: $title }, contributions: { author: { name: { _ilike: $author } } } }, limit: 1) {
     title
@@ -59,7 +65,7 @@ query SearchByTitleAuthor($title: String!, $author: String!) {
     cached_tags
   }
 }
-"#;
+";
 
 pub struct Hardcover {
     base_url: String,
@@ -161,10 +167,7 @@ impl MetadataSource for Hardcover {
             .and_then(|d| d.get("books"))
             .and_then(Value::as_array)
             .and_then(|xs| xs.first());
-        Ok(match book {
-            Some(b) => map_book(b, match_type),
-            None => Vec::new(),
-        })
+        Ok(book.map_or_else(Vec::new, |b| map_book(b, match_type)))
     }
 }
 
@@ -185,6 +188,10 @@ fn to_source_error(e: reqwest::Error) -> SourceError {
     }
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "map_book maps 10+ Hardcover API fields to SourceResults; the per-field cases are mechanical and extracting would obscure the API→model mapping"
+)]
 fn map_book(book: &Value, match_type: &str) -> Vec<SourceResult> {
     let mut out = Vec::new();
 
@@ -308,7 +315,7 @@ mod tests {
     use wiremock::matchers::{body_partial_json, method};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn ctx<'a>(http: &'a reqwest::Client) -> LookupCtx<'a> {
+    fn ctx(http: &reqwest::Client) -> LookupCtx<'_> {
         LookupCtx { http, cached: None }
     }
 

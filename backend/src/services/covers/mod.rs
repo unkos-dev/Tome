@@ -30,7 +30,7 @@ fn cache_root(state: &AppState) -> PathBuf {
         .join("cache")
 }
 
-fn ext_for_format(fmt: image::ImageFormat) -> &'static str {
+const fn ext_for_format(fmt: image::ImageFormat) -> &'static str {
     match fmt {
         image::ImageFormat::Jpeg => "jpg",
         image::ImageFormat::Png => "png",

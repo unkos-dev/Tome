@@ -34,18 +34,18 @@ impl LookupKey {
     /// Cache-key form used by [`super::cache`].
     pub fn cache_key(&self) -> String {
         match self {
-            LookupKey::Isbn(k) => k.clone(),
-            LookupKey::TitleAuthor { title, author } => {
+            Self::Isbn(k) => k.clone(),
+            Self::TitleAuthor { title, author } => {
                 format!("ta:{title}|{author}")
             }
         }
     }
 
     #[allow(dead_code)] // Kept alongside cache_key() as the public shape of LookupKey; used by adapter tests.
-    pub fn match_type_for(&self) -> &'static str {
+    pub const fn match_type_for(&self) -> &'static str {
         match self {
-            LookupKey::Isbn(_) => "isbn",
-            LookupKey::TitleAuthor { .. } => "title_author_fuzzy",
+            Self::Isbn(_) => "isbn",
+            Self::TitleAuthor { .. } => "title_author_fuzzy",
         }
     }
 }

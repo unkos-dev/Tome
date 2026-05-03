@@ -45,8 +45,8 @@ pub fn default_policy(field: &str) -> FieldPolicy {
     match field {
         "title" | "sort_title" | "language" | "isbn_10" | "isbn_13" | "publisher" | "pub_date"
         | "cover" => FieldPolicy::AutoFill,
-        "description" | "series" | "series_position" | "creators" | "subjects" | "genres"
-        | "tags" => FieldPolicy::Propose,
+        // All other known fields ("description", "series", etc.) and any unknown
+        // fields default to Propose — cautious until a human promotes.
         _ => FieldPolicy::Propose,
     }
 }
@@ -59,8 +59,8 @@ pub fn default_policy(field: &str) -> FieldPolicy {
 /// 3. If base is [`FieldPolicy::AutoFill`] and any row in `existing_pending`
 ///    disagrees (different `value_hash`) → downgrade to [`FieldPolicy::Propose`].
 /// 4. Dispatch:
-///    - AutoFill + `canonical_is_empty` → [`Decision::Apply`].
-///    - AutoFill + canonical already set → [`Decision::Stage`].
+///    - `AutoFill` + `canonical_is_empty` → [`Decision::Apply`].
+///    - `AutoFill` + canonical already set → [`Decision::Stage`].
 ///    - Propose → [`Decision::Stage`].
 ///    - Lock → [`Decision::NoOp`] (unreachable here, handled in step 1).
 pub fn decide(
@@ -88,8 +88,7 @@ pub fn decide(
 
     match policy {
         FieldPolicy::AutoFill if canonical_is_empty => Decision::Apply(incoming.id),
-        FieldPolicy::AutoFill => Decision::Stage,
-        FieldPolicy::Propose => Decision::Stage,
+        FieldPolicy::AutoFill | FieldPolicy::Propose => Decision::Stage,
         FieldPolicy::Lock => Decision::NoOp,
     }
 }

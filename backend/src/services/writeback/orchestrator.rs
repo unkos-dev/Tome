@@ -54,7 +54,7 @@ pub enum RunOutcome {
         skip_reason: String,
     },
     /// Writeback failed in a way that's potentially retryable (the
-    /// queue's `finish` decides whether attempt_count has reached
+    /// queue's `finish` decides whether `attempt_count` has reached
     /// `max_attempts` and escalates to `skipped`).
     Failed {
         manifestation_id: Uuid,
@@ -93,6 +93,10 @@ struct JobSnapshot {
     primary_author: Option<String>,
 }
 
+#[allow(
+    clippy::too_many_lines,
+    reason = "run_once implements the full writeback pipeline: snapshot load → transform → pack → rename → post-validation → DB update; each step is a data-dependency on the previous"
+)]
 pub async fn run_once(
     pool: &PgPool,
     config: &Config,
@@ -160,7 +164,7 @@ pub async fn run_once(
     // translate hrefs by joining with the OPF's parent directory
     // (e.g. `images/cover.png` → `OEBPS/images/cover.png`).  When the
     // OPF is at ZIP root (`content.opf`), the two coincide.
-    let opf_dir = opf_path.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+    let opf_dir = opf_path.rsplit_once('/').map_or("", |(d, _)| d);
     let empty_replacements: HashMap<String, Vec<u8>> = HashMap::new();
     let translated_replacements: HashMap<String, Vec<u8>> = match cover_plan.as_ref() {
         Some(p) => p
@@ -231,7 +235,7 @@ pub async fn run_once(
     let post_validation = epub::validate_and_repair(&src_path);
     match finalise_post_writeback(
         &pre_report.outcome,
-        post_validation,
+        &post_validation,
         &src_path,
         &original_bytes,
         dest_dir,
@@ -311,12 +315,12 @@ pub async fn run_once(
 /// divergence on its next sweep.
 fn finalise_post_writeback(
     pre_outcome: &ValidationOutcome,
-    post_result: Result<ValidationReport, crate::services::epub::EpubError>,
+    post_result: &Result<ValidationReport, crate::services::epub::EpubError>,
     src_path: &Path,
     original_bytes: &[u8],
     dest_dir: &Path,
 ) -> Result<FinaliseAction, WritebackError> {
-    let err_msg = match &post_result {
+    let err_msg = match post_result {
         Err(e) => format!("post_writeback_validation_errored: {e}"),
         Ok(report) if is_regression(pre_outcome, &report.outcome) => format!(
             "post_writeback_validation_regressed: pre={:?} post={:?}",
@@ -343,9 +347,8 @@ async fn path_rename_step(
     src_path: PathBuf,
     pool: &PgPool,
 ) -> Result<PathBuf, WritebackError> {
-    let candidate = match render_target_path(snap, &config.library_path, &src_path)? {
-        Some(p) => p,
-        None => return Ok(src_path),
+    let Some(candidate) = render_target_path(snap, &config.library_path, &src_path)? else {
+        return Ok(src_path);
     };
 
     if let Some(parent) = candidate.parent() {
@@ -394,7 +397,7 @@ async fn path_rename_step(
 
 /// Pure helper: compute the rendered target path from the snapshot +
 /// library root.  Returns `None` when path-rename should be skipped
-/// (empty library_path, or rendered path equals current `src_path`).
+/// (empty `library_path`, or rendered path equals current `src_path`).
 fn render_target_path(
     snap: &JobSnapshot,
     library_path: &str,
@@ -574,8 +577,8 @@ fn read_entry_bytes(epub_bytes: &[u8], entry: &str) -> Result<Vec<u8>, Writeback
 
 // ── Regression detection ──────────────────────────────────────────────────
 
-fn is_regression(pre: &ValidationOutcome, post: &ValidationOutcome) -> bool {
-    use ValidationOutcome::*;
+const fn is_regression(pre: &ValidationOutcome, post: &ValidationOutcome) -> bool {
+    use ValidationOutcome::{Clean, Degraded, Quarantined, Repaired};
     matches!((pre, post), (_, Quarantined) | (Clean | Repaired, Degraded))
 }
 
@@ -584,6 +587,10 @@ fn is_regression(pre: &ValidationOutcome, post: &ValidationOutcome) -> bool {
 fn compute_hex_sha256(path: &Path) -> Result<String, WritebackError> {
     let mut f = std::fs::File::open(path)?;
     let mut hasher = Sha256::new();
+    #[allow(
+        clippy::large_stack_arrays,
+        reason = "64 KiB I/O buffer; intentional for throughput"
+    )]
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = f.read(&mut buf)?;
@@ -596,7 +603,11 @@ fn compute_hex_sha256(path: &Path) -> Result<String, WritebackError> {
     let mut hex = String::with_capacity(digest.len() * 2);
     for b in digest {
         use std::fmt::Write;
-        let _ = write!(hex, "{b:02x}");
+        // fmt::Write on String is infallible — the only error path on the trait
+        // is for types backed by I/O, which String is not.
+        if let Err(e) = write!(hex, "{b:02x}") {
+            tracing::warn!(error = ?e, "unexpected error writing to String (infallible)");
+        }
     }
     Ok(hex)
 }
@@ -633,6 +644,10 @@ fn move_cover_sidecar(pending_path: &str) -> std::io::Result<()> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::let_underscore_must_use,
+    reason = "test code: discarding fmt::Write result on String in test helper is intentional; fmt::Write on String is infallible"
+)]
 mod tests {
     use super::*;
     use crate::config::{CleanupMode, CoverConfig, EnrichmentConfig, WritebackConfig};
@@ -799,7 +814,7 @@ mod tests {
         (work_id, m_id)
     }
 
-    /// Task 16 + Task 24: full run_once on a fixture EPUB whose OPF lives
+    /// Task 16 + Task 24: full `run_once` on a fixture EPUB whose OPF lives
     /// at `OEBPS/package.opf` (not the default `content.opf`).  Verifies:
     /// - the non-default OPF is discovered via `META-INF/container.xml`
     /// - the rewritten OPF carries the new title
@@ -841,8 +856,7 @@ mod tests {
         let outcome = run_once(&app_pool, &test_config(), job_id).await.unwrap();
         assert!(
             matches!(outcome, RunOutcome::Success { .. }),
-            "run_once should succeed: {:?}",
-            outcome
+            "run_once should succeed: {outcome:?}"
         );
 
         // OPF at OEBPS/package.opf should contain the new title.
@@ -943,7 +957,7 @@ mod tests {
     }
 
     /// Path-rename E2E (Step 8 acceptance criterion): when the rendered
-    /// path differs from the on-disk file, run_once must move the file
+    /// path differs from the on-disk file, `run_once` must move the file
     /// AND update `manifestations.file_path`.
     #[sqlx::test(migrations = "./migrations")]
     async fn run_once_renames_file_to_template_path(pool: PgPool) {
@@ -1010,8 +1024,7 @@ mod tests {
         let outcome = run_once(&app_pool, &cfg, job_id).await.unwrap();
         assert!(
             matches!(outcome, RunOutcome::Success { .. }),
-            "run_once should succeed: {:?}",
-            outcome
+            "run_once should succeed: {outcome:?}"
         );
 
         // The src_path should no longer exist; the new template path should.
@@ -1167,8 +1180,7 @@ mod tests {
         let outcome = run_once(&app_pool, &test_config(), job_id).await.unwrap();
         assert!(
             matches!(outcome, RunOutcome::Success { .. }),
-            "cover writeback should succeed: {:?}",
-            outcome
+            "cover writeback should succeed: {outcome:?}"
         );
 
         // The cover bytes inside the EPUB match the replacement, not
@@ -1286,8 +1298,7 @@ mod tests {
         let outcome = run_once(&app_pool, &cfg, job_id).await.unwrap();
         assert!(
             matches!(outcome, RunOutcome::Success { .. }),
-            "run_once should succeed: {:?}",
-            outcome
+            "run_once should succeed: {outcome:?}"
         );
 
         // Pre-existing file must be untouched.
@@ -1361,7 +1372,7 @@ mod tests {
 
         let remaining: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .map(|e| e.file_name().into_string().unwrap())
             .collect();
         assert_eq!(
@@ -1389,7 +1400,7 @@ mod tests {
 
         let action = finalise_post_writeback(
             &ValidationOutcome::Clean,
-            Ok(ok_report(ValidationOutcome::Clean)),
+            &Ok(ok_report(ValidationOutcome::Clean)),
             &path,
             &original,
             dir.path(),
@@ -1400,7 +1411,7 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), written, "file untouched");
     }
 
-    /// `Ok(Quarantined)` post-validation → RolledBack.  File restored.
+    /// `Ok(Quarantined)` post-validation → `RolledBack`.  File restored.
     #[test]
     fn finalise_post_writeback_rolls_back_on_regression() {
         let original = b"ORIG".to_vec();
@@ -1409,7 +1420,7 @@ mod tests {
 
         let action = finalise_post_writeback(
             &ValidationOutcome::Clean,
-            Ok(ok_report(ValidationOutcome::Quarantined)),
+            &Ok(ok_report(ValidationOutcome::Quarantined)),
             &path,
             &original,
             dir.path(),
@@ -1420,12 +1431,12 @@ mod tests {
             FinaliseAction::RolledBack(msg) => {
                 assert!(msg.contains("regressed"), "msg: {msg}");
             }
-            _ => panic!("expected RolledBack, got {:?}", action),
+            FinaliseAction::Commit => panic!("expected RolledBack, got Commit"),
         }
         assert_eq!(std::fs::read(&path).unwrap(), original, "rollback restored");
     }
 
-    /// `Err(EpubError)` post-validation → RolledBack.  This is the S2
+    /// `Err(EpubError)` post-validation → `RolledBack`.  This is the S2
     /// branch: a validator error must not leave a corrupted file on disk.
     #[test]
     fn finalise_post_writeback_rolls_back_on_validator_error() {
@@ -1438,16 +1449,21 @@ mod tests {
         let err: Result<ValidationReport, EpubError> =
             Err(EpubError::Io(std::io::Error::other("simulated")));
 
-        let action =
-            finalise_post_writeback(&ValidationOutcome::Clean, err, &path, &original, dir.path())
-                .unwrap();
+        let action = finalise_post_writeback(
+            &ValidationOutcome::Clean,
+            &err,
+            &path,
+            &original,
+            dir.path(),
+        )
+        .unwrap();
 
         match action {
             FinaliseAction::RolledBack(msg) => {
                 assert!(msg.contains("errored"), "msg: {msg}");
                 assert!(msg.contains("simulated"), "msg: {msg}");
             }
-            _ => panic!("expected RolledBack, got {:?}", action),
+            FinaliseAction::Commit => panic!("expected RolledBack, got Commit"),
         }
         assert_eq!(
             std::fs::read(&path).unwrap(),
@@ -1465,14 +1481,14 @@ mod tests {
             file_path: String::new(),
             format: ManifestationFormat::Epub,
             cover_path: None,
-            title: title.map(|s| s.to_string()),
+            title: title.map(std::string::ToString::to_string),
             description: None,
             language: None,
             publisher: None,
             pub_date: None,
             isbn_10: None,
             isbn_13: None,
-            primary_author: author.map(|s| s.to_string()),
+            primary_author: author.map(std::string::ToString::to_string),
         }
     }
 

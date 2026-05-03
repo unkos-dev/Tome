@@ -30,7 +30,7 @@ impl IngestionStatus {
     /// Wire string for any place that needs the canonical lowercase form.
     /// Matches the `#[serde(rename_all)]` and `#[sqlx(rename_all)]` mappings.
     #[allow(dead_code)] // No production consumer yet — anchors wire-format invariant for future read paths.
-    pub const fn as_str(&self) -> &'static str {
+    pub const fn as_str(self) -> &'static str {
         match self {
             Self::Pending => "pending",
             Self::Processing => "processing",

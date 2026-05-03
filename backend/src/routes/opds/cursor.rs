@@ -37,6 +37,10 @@ pub enum CursorError {
 
 impl Cursor {
     pub fn encode(&self) -> String {
+        #[allow(
+            clippy::expect_used,
+            reason = "OffsetDateTime values stored in the DB are always representable as Rfc3339; format() only fails for out-of-range years which cannot occur here"
+        )]
         let ts = self
             .created_at
             .format(&Rfc3339)
@@ -56,7 +60,7 @@ impl Cursor {
         let created_at =
             OffsetDateTime::parse(ts, &Rfc3339).map_err(|_| CursorError::InvalidTimestamp)?;
         let id = Uuid::parse_str(uuid).map_err(|_| CursorError::InvalidUuid)?;
-        Ok(Cursor { created_at, id })
+        Ok(Self { created_at, id })
     }
 }
 

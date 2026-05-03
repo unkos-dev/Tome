@@ -81,7 +81,7 @@ async fn serve_cover(
     };
 
     let content_type = match path.extension().and_then(|e| e.to_str()) {
-        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("jpg" | "jpeg") => "image/jpeg",
         Some("png") => "image/png",
         Some("webp") => "image/webp",
         _ => "application/octet-stream",

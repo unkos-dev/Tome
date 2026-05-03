@@ -67,13 +67,10 @@ pub fn resolve_collision(path: &Path) -> std::io::Result<PathBuf> {
 
     let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
     let ext = path.extension().and_then(|e| e.to_str());
-    let parent = path.parent().unwrap_or(Path::new("."));
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
 
     for i in 2..=999 {
-        let new_name = match ext {
-            Some(e) => format!("{stem} ({i}).{e}"),
-            None => format!("{stem} ({i})"),
-        };
+        let new_name = ext.map_or_else(|| format!("{stem} ({i})"), |e| format!("{stem} ({i}).{e}"));
         let candidate = parent.join(new_name);
         if !candidate.exists() {
             return Ok(candidate);
@@ -114,6 +111,10 @@ pub fn heuristic_vars_from_filename(filename: &str) -> HashMap<String, String> {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::case_sensitive_file_extension_comparisons,
+    reason = "test code: all test extensions are lowercase literals, case-insensitive comparison is unnecessary ceremony"
+)]
 mod tests {
     use super::*;
 

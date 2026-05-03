@@ -22,10 +22,7 @@ pub fn quarantine_file(
         let ts = now.unix_timestamp();
         let stem = dest.file_stem().and_then(|s| s.to_str()).unwrap_or("file");
         let ext = dest.extension().and_then(|e| e.to_str());
-        let new_name = match ext {
-            Some(e) => format!("{stem}_{ts}.{e}"),
-            None => format!("{stem}_{ts}"),
-        };
+        let new_name = ext.map_or_else(|| format!("{stem}_{ts}"), |e| format!("{stem}_{ts}.{e}"));
         dest = quarantine_dir.join(new_name);
     }
 
@@ -33,7 +30,9 @@ pub fn quarantine_file(
     if std::fs::rename(source, &dest).is_err() {
         std::fs::copy(source, &dest)?;
         // Best-effort delete of source — if it fails, the file is just in both places
-        let _ = std::fs::remove_file(source);
+        if let Err(e) = std::fs::remove_file(source) {
+            tracing::warn!(path = %source.display(), error = %e, "quarantine: could not remove source after copy; file exists in both locations");
+        }
     }
 
     // Write JSON sidecar
@@ -44,10 +43,9 @@ pub fn quarantine_file(
         "reason": reason,
         "quarantined_at": now.format(&time::format_description::well_known::Rfc3339).unwrap_or_default(),
     });
-    std::fs::write(
-        &sidecar_path,
-        serde_json::to_string_pretty(&sidecar).unwrap(),
-    )?;
+    let sidecar_bytes = serde_json::to_string_pretty(&sidecar)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(&sidecar_path, sidecar_bytes)?;
 
     Ok(dest)
 }

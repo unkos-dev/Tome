@@ -9,6 +9,7 @@
 
 use serde_json::Value;
 use sqlx::PgPool;
+use sqlx::Row;
 use time::OffsetDateTime;
 
 /// The kind of API response recorded in a cache row.
@@ -20,11 +21,11 @@ pub enum ApiCacheKind {
 }
 
 impl ApiCacheKind {
-    fn as_str(self) -> &'static str {
+    const fn as_str(self) -> &'static str {
         match self {
-            ApiCacheKind::Hit => "hit",
-            ApiCacheKind::Miss => "miss",
-            ApiCacheKind::Error => "error",
+            Self::Hit => "hit",
+            Self::Miss => "miss",
+            Self::Error => "error",
         }
     }
 }
@@ -81,7 +82,6 @@ pub async fn read(
         return Ok(None);
     };
 
-    use sqlx::Row;
     let response: Value = row.try_get("response")?;
     let kind_str: String = row.try_get("response_kind")?;
     let kind = kind_from_str(&kind_str)?;

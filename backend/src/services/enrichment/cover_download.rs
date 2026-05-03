@@ -38,7 +38,7 @@ pub enum CoverFormat {
 }
 
 impl CoverFormat {
-    fn extension(self) -> &'static str {
+    const fn extension(self) -> &'static str {
         match self {
             Self::Jpeg => "jpg",
             Self::Png => "png",
@@ -230,6 +230,10 @@ fn write_atomically(dir: &Path, filename: &str, data: &[u8]) -> Result<PathBuf, 
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
+#[allow(
+    clippy::cast_possible_truncation,
+    reason = "test code: x as u8 in image pixel generator; x is pixel position, wrapping is the intended behavior for test image generation"
+)]
 mod tests {
     use super::*;
     use std::io::Cursor;

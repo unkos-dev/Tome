@@ -41,38 +41,35 @@ pub fn plan_embed(opf_bytes: &[u8], new_cover_bytes: &[u8]) -> Result<CoverPlan,
         Vec::new();
     let mut opf_replacement: Option<Vec<u8>> = None;
 
-    match scan.cover_href.clone() {
-        Some(existing_href) => {
-            let same_media = scan
-                .cover_media_type
-                .as_deref()
-                .is_some_and(|m| m.eq_ignore_ascii_case(media_type));
-            if same_media {
-                binary_replacements.insert(existing_href, new_cover_bytes.to_vec());
-            } else {
-                // Format changed: add a new entry under a fresh name and
-                // rewrite the OPF manifest to reference it.
-                let new_href = format!("images/cover-image-writeback.{ext}");
-                additions.push((
-                    new_href.clone(),
-                    new_cover_bytes.to_vec(),
-                    FileOptions::default().compression_method(compression),
-                ));
-                opf_replacement = Some(rewrite_opf_cover_reference(
-                    opf_bytes, &scan, &new_href, media_type,
-                )?);
-            }
-        }
-        None => {
-            // No cover: insert a new manifest item + cover marker.
+    if let Some(existing_href) = scan.cover_href.clone() {
+        let same_media = scan
+            .cover_media_type
+            .as_deref()
+            .is_some_and(|m| m.eq_ignore_ascii_case(media_type));
+        if same_media {
+            binary_replacements.insert(existing_href, new_cover_bytes.to_vec());
+        } else {
+            // Format changed: add a new entry under a fresh name and
+            // rewrite the OPF manifest to reference it.
             let new_href = format!("images/cover-image-writeback.{ext}");
             additions.push((
                 new_href.clone(),
                 new_cover_bytes.to_vec(),
                 FileOptions::default().compression_method(compression),
             ));
-            opf_replacement = Some(insert_opf_cover(opf_bytes, &new_href, media_type, &scan)?);
+            opf_replacement = Some(rewrite_opf_cover_reference(
+                opf_bytes, &scan, &new_href, media_type,
+            )?);
         }
+    } else {
+        // No cover: insert a new manifest item + cover marker.
+        let new_href = format!("images/cover-image-writeback.{ext}");
+        additions.push((
+            new_href.clone(),
+            new_cover_bytes.to_vec(),
+            FileOptions::default().compression_method(compression),
+        ));
+        opf_replacement = Some(insert_opf_cover(opf_bytes, &new_href, media_type, &scan)?);
     }
 
     Ok(CoverPlan {
@@ -91,7 +88,7 @@ struct OpfScan {
     manifest: HashMap<String, (String, Option<String>)>,
     /// `<meta name="cover" content="X"/>` → X
     cover_meta_content: Option<String>,
-    /// resolved cover href (manifest lookup of cover_meta_content or properties=cover-image)
+    /// resolved cover href (manifest lookup of `cover_meta_content` or properties=cover-image)
     cover_href: Option<String>,
     cover_media_type: Option<String>,
     /// manifest item id of the cover (for OPF-rewriting)
@@ -121,7 +118,7 @@ fn scan_opf(opf_bytes: &[u8]) -> OpfScan {
                 break;
             }
             Ok(Event::Eof) => break,
-            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+            Ok(Event::Start(e) | Event::Empty(e)) => {
                 let local = local_name(e.name().as_ref()).to_vec();
                 if local == b"package"
                     && let Some(v) = attr_str(&e, b"version")
@@ -193,10 +190,9 @@ fn attr_str(start: &BytesStart<'_>, name: &[u8]) -> Option<String> {
 }
 
 fn local_name(name: &[u8]) -> &[u8] {
-    match name.iter().position(|&b| b == b':') {
-        Some(pos) => &name[pos + 1..],
-        None => name,
-    }
+    name.iter()
+        .position(|&b| b == b':')
+        .map_or(name, |pos| &name[pos + 1..])
 }
 
 // ── OPF rewriters ─────────────────────────────────────────────────────────
@@ -323,12 +319,13 @@ fn insert_opf_cover(
     Ok(writer.into_inner().into_inner())
 }
 
-fn media_for(fmt: image::ImageFormat) -> (&'static str, &'static str, zip::CompressionMethod) {
+const fn media_for(
+    fmt: image::ImageFormat,
+) -> (&'static str, &'static str, zip::CompressionMethod) {
     match fmt {
         image::ImageFormat::Jpeg => ("image/jpeg", "jpg", zip::CompressionMethod::Stored),
-        image::ImageFormat::Png => ("image/png", "png", zip::CompressionMethod::Deflated),
         image::ImageFormat::WebP => ("image/webp", "webp", zip::CompressionMethod::Stored),
-        // Default to png for anything else (image crate mostly returns above three).
+        // PNG and anything else the image crate produces both get PNG container.
         _ => ("image/png", "png", zip::CompressionMethod::Deflated),
     }
 }
