@@ -51,7 +51,7 @@ export function cspHashPlugin(): Plugin {
         const markerCount = (html.match(markerRegex) ?? []).length;
         if (markerCount !== 1) {
           throw new Error(
-            `reverie-csp-hash: expected exactly one '${MARKER}' in index.html, found ${markerCount}`,
+            `reverie-csp-hash: expected exactly one '${MARKER}' in index.html, found ${String(markerCount)}`,
           );
         }
 

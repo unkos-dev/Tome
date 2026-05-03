@@ -150,7 +150,7 @@ export function ThemeProvider({ children }: ThemeProviderProps): ReactElement {
     channelRef.current = channel;
     channel.addEventListener("message", (event) => {
       const msg = event.data as { preference?: unknown };
-      const candidate = msg?.preference;
+      const candidate = msg.preference;
       if (
         candidate !== "system" &&
         candidate !== "light" &&

@@ -22,13 +22,13 @@ export function Lockup({
   const containerStyle: CSSProperties = {
     display: "inline-flex",
     alignItems: "center",
-    gap: `${gap}px`,
+    gap: `${String(gap)}px`,
   };
 
   const wordStyle: CSSProperties = {
     fontFamily: '"Satoshi Variable", "Satoshi", system-ui, sans-serif',
     fontWeight: 700,
-    fontSize: `${size}px`,
+    fontSize: `${String(size)}px`,
     letterSpacing: "0.32em",
     textTransform: "uppercase",
     paddingLeft: "0.32em",

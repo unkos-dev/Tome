@@ -87,7 +87,7 @@ function mockMe(themePref: string, status = 200): void {
   fetchMock.mockResolvedValueOnce({
     ok: status >= 200 && status < 300,
     status,
-    json: async () => ({ theme_preference: themePref }),
+    json: () => Promise.resolve({ theme_preference: themePref }),
   } as Response);
 }
 
@@ -95,7 +95,7 @@ function mockMeUnauthenticated(): void {
   fetchMock.mockResolvedValueOnce({
     ok: false,
     status: 401,
-    json: async () => ({}),
+    json: () => Promise.resolve({}),
   } as Response);
 }
 
@@ -201,7 +201,7 @@ describe("ThemeProvider setPreference", () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
-      json: async () => ({ theme_preference: "dark" }),
+      json: () => Promise.resolve({ theme_preference: "dark" }),
     } as Response);
 
     render(
@@ -210,7 +210,7 @@ describe("ThemeProvider setPreference", () => {
       </ThemeProvider>,
     );
 
-    await act(async () => {
+    act(() => {
       screen.getByText("set-dark").click();
     });
 
@@ -229,7 +229,7 @@ describe("ThemeProvider setPreference", () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,
       status: 422,
-      json: async () => ({ error: "invalid theme_preference" }),
+      json: () => Promise.resolve({ error: "invalid theme_preference" }),
     } as Response);
 
     render(
@@ -238,7 +238,7 @@ describe("ThemeProvider setPreference", () => {
       </ThemeProvider>,
     );
 
-    await act(async () => {
+    act(() => {
       screen.getByText("set-dark").click();
     });
 
@@ -265,7 +265,7 @@ describe("ThemeProvider system-preference reactivity", () => {
 
     expect(screen.getByTestId("effective").textContent).toBe("light");
 
-    await act(async () => {
+    act(() => {
       mql.set(true);
       mql.trigger();
     });

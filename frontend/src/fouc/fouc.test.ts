@@ -17,7 +17,7 @@ function runFouc(): void {
   // `new Function` is identical to how the browser would run it inline,
   // and it can read/write `document` and `window` from this scope.
   // eslint-disable-next-line @typescript-eslint/no-implied-eval
-  new Function(FOUC_BODY)();
+  (new Function(FOUC_BODY) as () => void)();
 }
 
 beforeEach(() => {
@@ -110,7 +110,8 @@ describe("fouc.js", () => {
 
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(warn).toHaveBeenCalled();
-    const [msg] = warn.mock.calls[0] ?? [];
+    const firstCall: unknown[] = warn.mock.calls[0] as unknown[] | undefined ?? [];
+    const msg = firstCall[0];
     expect(typeof msg).toBe("string");
     expect(msg).toMatch(/FOUC/);
   });
