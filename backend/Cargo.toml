@@ -18,7 +18,7 @@ futures = "0.3"
 governor = "0.10"
 hickory-resolver = "0.26"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
-notify = "8"
+notify = "8.2.0"
 openidconnect = { version = "4", features = ["reqwest"] }
 quick-xml = "0.39"
 rand = "0.10"
