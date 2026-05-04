@@ -596,6 +596,12 @@ pub mod oidc_mock {
             name: Option<&str>,
             nonce: &str,
         ) {
+            // chrono is required by openidconnect v4's public API:
+            // CoreIdTokenClaims::new takes chrono::DateTime<Utc> for the
+            // expiration and issued_at parameters. Project policy is `time`
+            // over chrono (see backend/CLAUDE.md) — this transitive use is
+            // the documented exception. Do not "migrate" to time here; it
+            // would require forking openidconnect.
             use chrono::{Duration, Utc};
             let issuer_url = IssuerUrl::new(self.issuer.clone()).expect("valid issuer url");
             let access_token = AccessToken::new("test-access-token".to_string());
