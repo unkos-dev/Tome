@@ -88,7 +88,7 @@ function mockMe(themePref: string, status = 200): void {
     ok: status >= 200 && status < 300,
     status,
     json: () => Promise.resolve({ theme_preference: themePref }),
-  } as Response);
+  });
 }
 
 function mockMeUnauthenticated(): void {
@@ -96,7 +96,7 @@ function mockMeUnauthenticated(): void {
     ok: false,
     status: 401,
     json: () => Promise.resolve({}),
-  } as Response);
+  });
 }
 
 describe("ThemeProvider initial-state derivation", () => {
@@ -202,7 +202,7 @@ describe("ThemeProvider setPreference", () => {
       ok: true,
       status: 200,
       json: () => Promise.resolve({ theme_preference: "dark" }),
-    } as Response);
+    });
 
     render(
       <ThemeProvider>
@@ -230,7 +230,7 @@ describe("ThemeProvider setPreference", () => {
       ok: false,
       status: 422,
       json: () => Promise.resolve({ error: "invalid theme_preference" }),
-    } as Response);
+    });
 
     render(
       <ThemeProvider>
