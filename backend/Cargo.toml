@@ -33,7 +33,7 @@ tempfile = "3.27.0"
 thiserror = "2.0.18"
 time = { version = "0.3", features = ["serde"] }
 tokio = { version = "1.52.1", features = ["full"] }
-tokio-util = "0.7"
+tokio-util = "0.7.18"
 tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
 tower-sessions = "0.14"
 tracing = "0.1"
