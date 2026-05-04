@@ -53,7 +53,7 @@ axum-test = "20"
 # scaffolding under `#[cfg(test)]` and dev-deps; production code path
 # in `src/auth/oidc.rs` uses no chrono.
 chrono = "0.4"
-rand_core_06 = { package = "rand_core", version = "0.6", features = ["std", "getrandom"] }
+rand_core_06 = { package = "rand_core", version = "0.10.1", features = ["std", "getrandom"] }
 rsa = { version = "0.9", features = ["pem"] }
 wiremock = "0.6"
 
