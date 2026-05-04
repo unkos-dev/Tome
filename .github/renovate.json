@@ -4,7 +4,6 @@
     "config:recommended",
     ":dependencyDashboard",
     ":semanticCommits",
-    ":automergeDigest",
     ":prHourlyLimitNone"
   ],
   "timezone": "Australia/Perth",
