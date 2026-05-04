@@ -55,7 +55,7 @@ axum-test = "20"
 chrono = "0.4.44"
 rand_core_06 = { package = "rand_core", version = "0.6", features = ["std", "getrandom"] }
 rsa = { version = "0.9", features = ["pem"] }
-wiremock = "0.6"
+wiremock = "0.6.5"
 
 [lints.rust]
 unsafe_code = "deny"
