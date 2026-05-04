@@ -186,8 +186,10 @@ Single PR scope. All work in `frontend/`:
 3. **Migrate any `eslint-disable` comments referencing the old
    rule names** (`react/jsx-key`, `react/no-array-index-key`,
    anything else in the `react/*` namespace). Grep with
-   `rg "react/" frontend/src` — likely zero matches given the
-   strict-lint policy
+   `rg "react/" frontend/` (scope covers `frontend/src/**` AND
+   `frontend/eslint.config.js` itself — the config file is the most
+   likely place stale rule names hide after Step 2's swap). Likely
+   zero matches outside the config given the strict-lint policy
 
 4. **Run `npm run lint` and triage the wave of new findings.** The
    `recommended-typescript` preset is stricter than
