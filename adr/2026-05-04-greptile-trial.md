@@ -36,13 +36,18 @@ Run a 4-week trial of Greptile on `unkos-dev/reverie`.
 
 ### Trial configuration
 
-Maximally verbose for trial calibration. Better to start with full
-visibility into what Greptile catches and tighten later than to
-start tight and miss patterns.
+Broad category coverage, high-confidence flagging only — surface
+the full range of comment types Greptile produces while filtering
+out low-confidence noise that would dominate the actionable-rate
+metric.
 
 `greptile.json` at repo root:
 
-- `strictness: 3` — most aggressive flagging
+- `strictness: 1` — least aggressive. Greptile only surfaces
+  high-confidence findings. Low-confidence flags are the typical
+  noise driver in AI reviewers; filtering them at strictness:1
+  gives the trial verdict honest data on the floor case ("does
+  even the highest-signal subset clear the 30% bar?")
 - `commentTypes: ["logic", "syntax", "style", "info"]` — every
   category enabled. Style overlap with the lint policy is expected
   signal data: any style nit Greptile raises that lint already
@@ -107,9 +112,11 @@ Decision recorded as a follow-up ADR (`accepted` / `superseded`).
 * Good — pinned `customContext.files` align Greptile with project
   conventions from day one. Reduces the cold-start noise common in
   AI reviewers that don't read the codebase's documented rules
-* Good — `strictness: 3` + all `commentTypes` produces maximum
-  signal data for the trial verdict. Easier to dial down than dial
-  up
+* Good — `strictness: 1` + all `commentTypes` measures the
+  high-confidence floor case. If the actionable-rate metric clears
+  30% even at the strictest signal filter, raising strictness at
+  the gate is justified; if it doesn't, the trial fails cleanly
+  without low-confidence noise muddying the data
 * Bad — auto-review on every PR means review noise during the
   trial. Maintainer must triage every comment, even false
   positives, to populate the actionable-rate metric
@@ -143,10 +150,13 @@ Decision recorded as a follow-up ADR (`accepted` / `superseded`).
   this repo at all" over "which implementation is best." A
   managed service with one config file is the lowest-effort
   hypothesis test
-* **`strictness: 2` (balanced) for trial.** Rejected — picks the
-  middle without data. `strictness: 3` exposes the upper bound of
-  Greptile's signal-to-noise; can dial down at the gate with
-  evidence
+* **`strictness: 2` (balanced) or `strictness: 3` (most aggressive)
+  for trial.** Rejected — picks a middle or upper noise level
+  without data. Starting at `strictness: 1` measures the
+  high-confidence floor first; if the floor clears the 30% gate,
+  raising strictness with evidence is the natural next step.
+  Starting high and dialling down on noise feedback risks
+  conflating low-confidence findings with the trial verdict
 * **`commentTypes: ["logic"]` only.** Rejected — pre-filters out
   the data needed to evaluate Greptile's full output. Trial first,
   filter later

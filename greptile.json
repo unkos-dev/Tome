@@ -1,5 +1,5 @@
 {
-  "strictness": 3,
+  "strictness": 1,
   "commentTypes": ["logic", "syntax", "style", "info"],
   "triggerOnUpdates": true,
   "customContext": {
