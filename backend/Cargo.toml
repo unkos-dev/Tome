@@ -11,7 +11,7 @@ async-trait = "0.1"
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }
 axum-login = "0.18"
-base64ct = { version = "1", features = ["std"] }
+base64ct = { version = "1.8.3", features = ["std"] }
 dotenvy = "0.15"
 encoding_rs = "0.8"
 futures = "0.3"
