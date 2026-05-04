@@ -14,7 +14,7 @@ axum-login = "0.18"
 base64ct = { version = "1.8.3", features = ["std"] }
 dotenvy = "0.15"
 encoding_rs = "0.8"
-futures = "0.3"
+futures = "0.3.32"
 governor = "0.10"
 hickory-resolver = "0.26"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
