@@ -48,7 +48,11 @@ Run migrations as the schema owner:
 - **Linting:** `cargo clippy -- -D warnings` is enforced by CI. Fix warnings, don't
   suppress them with `#[allow(...)]` unless there's a documented reason.
 - **Time:** use the `time` crate, not `chrono`. The blueprint mentions chrono
-  but the scaffold predates that decision — don't reintroduce chrono.
+  but the scaffold predates that decision — don't reintroduce chrono in
+  first-party code. The single documented exception is
+  `test_support.rs::oidc_mock`, where `openidconnect` v4's public API
+  (`CoreIdTokenClaims::new`) forces chrono types on the call site. That
+  use is contained to the OIDC mock and must not spread elsewhere.
 
 ## Rust Code Rules
 
