@@ -41,7 +41,7 @@ export function writeThemeCookie(value: ThemePreference): void {
   document.cookie =
     `${THEME_COOKIE_NAME}=${value}; ` +
     `Path=/; ` +
-    `Max-Age=${ONE_YEAR_SECONDS}; ` +
+    `Max-Age=${String(ONE_YEAR_SECONDS)}; ` +
     `SameSite=Lax; ` +
     `Secure`;
 }

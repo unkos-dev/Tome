@@ -38,7 +38,7 @@ describe("shadcn primitives must not use brand bg-accent for hover/focus", () =>
       /data-open:text-accent-foreground(?![\w-])/,
     ];
     for (const pat of forbidden) {
-      expect(src, `${file} matched ${pat} — rewrite to bg-hover/text-fg per UNK-114 issue 4`).not.toMatch(pat);
+      expect(src, `${file} matched ${String(pat)} — rewrite to bg-hover/text-fg per UNK-114 issue 4`).not.toMatch(pat);
     }
   });
 

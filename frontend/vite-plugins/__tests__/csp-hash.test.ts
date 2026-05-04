@@ -59,7 +59,7 @@ describe("cspHashPlugin", () => {
       // Vite's typedef marks `configResolved` as async-capable; for our
       // synchronous assignment it's safe to invoke directly.
       // @ts-expect-error — the cb type admits Promise<void>; we don't await.
-      configResolved(fakeResolvedConfig(root, "serve"));
+      void configResolved(fakeResolvedConfig(root, "serve"));
     }
 
     const html = getHandler(plugin)(VALID_HTML);
@@ -80,12 +80,12 @@ describe("cspHashPlugin", () => {
     const configResolved = plugin.configResolved;
     if (typeof configResolved === "function") {
       // @ts-expect-error — see note above.
-      configResolved(fakeResolvedConfig(root, "build"));
+      void configResolved(fakeResolvedConfig(root, "build"));
     }
 
     getHandler(plugin)(VALID_HTML);
     const sidecarPath = join(root, "dist", "csp-hashes.json");
-    const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8"));
+    const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8")) as unknown as Record<string, string[]>;
     expect(sidecar).toEqual({ "script-src-hashes": [expected] });
   });
 
@@ -95,7 +95,7 @@ describe("cspHashPlugin", () => {
     const configResolved = plugin.configResolved;
     if (typeof configResolved === "function") {
       // @ts-expect-error — see note above.
-      configResolved(fakeResolvedConfig(root, "serve"));
+      void configResolved(fakeResolvedConfig(root, "serve"));
     }
     expect(() => getHandler(plugin)("<!doctype html><head></head>")).toThrow(
       /found 0/,
@@ -108,7 +108,7 @@ describe("cspHashPlugin", () => {
     const configResolved = plugin.configResolved;
     if (typeof configResolved === "function") {
       // @ts-expect-error — see note above.
-      configResolved(fakeResolvedConfig(root, "serve"));
+      void configResolved(fakeResolvedConfig(root, "serve"));
     }
     const doubled =
       `<!doctype html><head><!-- reverie:fouc-hash --><!-- reverie:fouc-hash --></head>`;
@@ -123,7 +123,7 @@ describe("cspHashPlugin", () => {
     const configResolved = plugin.configResolved;
     if (typeof configResolved === "function") {
       // @ts-expect-error — see note above.
-      configResolved(fakeResolvedConfig(root, "serve"));
+      void configResolved(fakeResolvedConfig(root, "serve"));
     }
     expect(() => getHandler(plugin)(VALID_HTML)).toThrow(/closing-script-tag literal/i);
   });
@@ -142,7 +142,7 @@ describe("cspHashPlugin", () => {
     const configResolved = plugin.configResolved;
     if (typeof configResolved === "function") {
       // @ts-expect-error — see note above.
-      configResolved(fakeResolvedConfig(root, "serve"));
+      void configResolved(fakeResolvedConfig(root, "serve"));
     }
     expect(() => getHandler(plugin)(VALID_HTML)).toThrow(/closing-script-tag literal/i);
   });
@@ -156,7 +156,7 @@ describe("cspHashPlugin", () => {
     const configResolved = plugin.configResolved;
     if (typeof configResolved === "function") {
       // @ts-expect-error — see note above.
-      configResolved(fakeResolvedConfig(root, "serve"));
+      void configResolved(fakeResolvedConfig(root, "serve"));
     }
     expect(() => getHandler(plugin)(VALID_HTML)).not.toThrow();
   });
@@ -193,8 +193,8 @@ export default defineConfig({ plugins: [cspHashPlugin()], build: { minify: false
 
     const sidecar = JSON.parse(
       readFileSync(join(root, "dist", "csp-hashes.json"), "utf8"),
-    );
-    const hashes = sidecar["script-src-hashes"] as string[];
+    ) as unknown as Record<string, string[]>;
+    const hashes = sidecar["script-src-hashes"];
     expect(hashes).toHaveLength(1);
 
     const builtHtml = readFileSync(join(root, "dist", "index.html"), "utf8");
@@ -202,7 +202,8 @@ export default defineConfig({ plugins: [cspHashPlugin()], build: { minify: false
     // case-sensitive <script> extraction as a bad HTML filter.
     const match = builtHtml.match(/<script>([\s\S]*?)<\/script>/i);
     expect(match).not.toBeNull();
-    const inlineBody = match![1];
+    if (!match) throw new Error("regex match was null after expect");
+    const inlineBody = match[1];
     const expected = `sha256-${createHash("sha256").update(inlineBody).digest("base64")}`;
 
     expect(hashes[0]).toBe(expected);

@@ -87,7 +87,7 @@ function mockMe(themePref: string, status = 200): void {
   fetchMock.mockResolvedValueOnce({
     ok: status >= 200 && status < 300,
     status,
-    json: async () => ({ theme_preference: themePref }),
+    json: () => Promise.resolve({ theme_preference: themePref }),
   } as Response);
 }
 
@@ -95,7 +95,7 @@ function mockMeUnauthenticated(): void {
   fetchMock.mockResolvedValueOnce({
     ok: false,
     status: 401,
-    json: async () => ({}),
+    json: () => Promise.resolve({}),
   } as Response);
 }
 
@@ -160,10 +160,10 @@ describe("ThemeProvider initial-state derivation", () => {
     );
 
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith(
+      { expect(fetchMock).toHaveBeenCalledWith(
         "/auth/me",
         expect.any(Object),
-      ),
+      ); },
     );
     expect(screen.getByTestId("preference").textContent).toBe("light");
     expect(fetchMock).toHaveBeenCalledTimes(1); // /auth/me only, no PATCH
@@ -184,7 +184,7 @@ describe("ThemeProvider reconciliation", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByTestId("preference").textContent).toBe("dark"),
+      { expect(screen.getByTestId("preference").textContent).toBe("dark"); },
     );
     expect(screen.getByTestId("effective").textContent).toBe("dark");
     expect(document.documentElement.dataset.theme).toBe("dark");
@@ -201,7 +201,7 @@ describe("ThemeProvider setPreference", () => {
     fetchMock.mockResolvedValueOnce({
       ok: true,
       status: 200,
-      json: async () => ({ theme_preference: "dark" }),
+      json: () => Promise.resolve({ theme_preference: "dark" }),
     } as Response);
 
     render(
@@ -210,12 +210,12 @@ describe("ThemeProvider setPreference", () => {
       </ThemeProvider>,
     );
 
-    await act(async () => {
+    act(() => {
       screen.getByText("set-dark").click();
     });
 
     await waitFor(() =>
-      expect(screen.getByTestId("preference").textContent).toBe("dark"),
+      { expect(screen.getByTestId("preference").textContent).toBe("dark"); },
     );
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
@@ -229,7 +229,7 @@ describe("ThemeProvider setPreference", () => {
     fetchMock.mockResolvedValueOnce({
       ok: false,
       status: 422,
-      json: async () => ({ error: "invalid theme_preference" }),
+      json: () => Promise.resolve({ error: "invalid theme_preference" }),
     } as Response);
 
     render(
@@ -238,12 +238,12 @@ describe("ThemeProvider setPreference", () => {
       </ThemeProvider>,
     );
 
-    await act(async () => {
+    act(() => {
       screen.getByText("set-dark").click();
     });
 
     await waitFor(() =>
-      expect(screen.getByTestId("preference").textContent).toBe("light"),
+      { expect(screen.getByTestId("preference").textContent).toBe("light"); },
     );
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(document.cookie).toContain(`${THEME_COOKIE_NAME}=light`);
@@ -265,13 +265,13 @@ describe("ThemeProvider system-preference reactivity", () => {
 
     expect(screen.getByTestId("effective").textContent).toBe("light");
 
-    await act(async () => {
+    act(() => {
       mql.set(true);
       mql.trigger();
     });
 
     await waitFor(() =>
-      expect(screen.getByTestId("effective").textContent).toBe("dark"),
+      { expect(screen.getByTestId("effective").textContent).toBe("dark"); },
     );
     expect(document.documentElement.dataset.theme).toBe("dark");
   });

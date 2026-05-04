@@ -103,7 +103,7 @@ export function ThemeProvider({ children }: ThemeProviderProps): ReactElement {
       });
     };
     mql.addEventListener("change", onChange);
-    return () => mql.removeEventListener("change", onChange);
+    return () => { mql.removeEventListener("change", onChange); };
   }, []);
 
   // Reconcile with the server on mount. Logged-out visitors (401) stay on
@@ -141,7 +141,7 @@ export function ThemeProvider({ children }: ThemeProviderProps): ReactElement {
       }
     };
     void reconcile();
-    return () => controller.abort();
+    return () => { controller.abort(); };
   }, []);
 
   // Cross-tab sync: receive remote changes without re-PATCHing.
@@ -150,7 +150,7 @@ export function ThemeProvider({ children }: ThemeProviderProps): ReactElement {
     channelRef.current = channel;
     channel.addEventListener("message", (event) => {
       const msg = event.data as { preference?: unknown };
-      const candidate = msg?.preference;
+      const candidate = msg.preference;
       if (
         candidate !== "system" &&
         candidate !== "light" &&
