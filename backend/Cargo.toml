@@ -23,7 +23,7 @@ openidconnect = { version = "4.0.1", features = ["reqwest"] }
 quick-xml = "0.39"
 rand = "0.10"
 regex = "1.12.3"
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "stream"] }
+reqwest = { version = "0.13.3", default-features = false, features = ["rustls-tls", "json", "stream"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"
 sha2 = "0.11"
