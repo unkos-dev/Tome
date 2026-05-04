@@ -44,6 +44,12 @@
       "automerge": true,
       "automergeType": "pr",
       "platformAutomerge": true
+    },
+    {
+      "description": "Pin rand_core_06 cargo alias at v0.6 — the alias name explicitly documents the deliberate version pin (v0.6 API is required by a transitive crypto consumer). Any bump silently breaks the pin intent and gets closed manually (see PR #122). Revisit if the alias is removed from Cargo.toml",
+      "matchManagers": ["cargo"],
+      "matchDepNames": ["rand_core_06"],
+      "enabled": false
     }
   ]
 }
