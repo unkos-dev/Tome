@@ -2,6 +2,10 @@
   "strictness": 1,
   "commentTypes": ["logic", "syntax", "style", "info"],
   "triggerOnUpdates": true,
+  "ignorePatterns": [
+    "**/package-lock.json",
+    "**/Cargo.lock"
+  ],
   "customContext": {
     "files": [
       {
