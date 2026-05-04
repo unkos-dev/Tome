@@ -35,7 +35,7 @@ time = { version = "0.3", features = ["serde"] }
 tokio = { version = "1.52.1", features = ["full"] }
 tokio-util = "0.7"
 tower-http = { version = "0.6", features = ["cors", "fs", "trace"] }
-tower-sessions = "0.14"
+tower-sessions = "0.15.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2.5.8"
