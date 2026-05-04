@@ -9,7 +9,7 @@ description = "Reverie ebook library manager — API server"
 anyhow = "1.0.102"
 async-trait = "0.1"
 axum = "0.8.9"
-axum-extra = { version = "0.10", features = ["cookie"] }
+axum-extra = { version = "0.12.6", features = ["cookie"] }
 axum-login = "0.18"
 base64ct = { version = "1.8.3", features = ["std"] }
 dotenvy = "0.15.7"
