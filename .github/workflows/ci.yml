@@ -3,6 +3,7 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  merge_group:
 
 permissions:
   contents: read
@@ -27,6 +28,13 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          # On merge_group events, paths-filter's default base (HEAD~1)
+          # only sees the topmost commit in the synthetic merge ref —
+          # it would miss the diff for any PR sharing the queue. Pin
+          # explicitly to merge_group.base_sha so downstream skip
+          # decisions match the actual PR-against-main diff.
+          base: ${{ github.event.merge_group.base_sha || github.base_ref }}
+          ref: ${{ github.event.merge_group.head_sha || github.ref }}
           filters: |
             backend:
               - 'backend/**'
