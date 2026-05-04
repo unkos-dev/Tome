@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-05-04
 decision-makers: john
 ---
