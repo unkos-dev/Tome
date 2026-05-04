@@ -43,11 +43,11 @@ export default defineConfig([
 ])
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+You can also install [@eslint-react/eslint-plugin](https://eslint-react.xyz) and [eslint-plugin-react-dom](https://eslint-react.xyz) for React-specific lint rules:
 
 ```js
 // eslint.config.js
-import reactX from 'eslint-plugin-react-x'
+import reactX from '@eslint-react/eslint-plugin'
 import reactDom from 'eslint-plugin-react-dom'
 
 export default defineConfig([

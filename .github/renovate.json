@@ -50,12 +50,6 @@
       "matchManagers": ["cargo"],
       "matchDepNames": ["rand_core_06"],
       "enabled": false
-    },
-    {
-      "description": "Hold eslint and @eslint/js at v9 until eslint-plugin-react ships v10-compatible release. eslint-plugin-react@7.37.5 (13+ months old, jsx-eslint/eslint-plugin-react#3977 stale) declares peer eslint@\"^3 || ^4 || ^5 || ^6 || ^7 || ^8 || ^9.7\" — npm install errors with ERESOLVE on any v10 bump. PRs #135 and #136 closed for this reason. Migration off eslint-plugin-react to @eslint-react/eslint-plugin tracked in a follow-up ADR; remove this rule once that ADR is implemented",
-      "matchManagers": ["npm"],
-      "matchPackageNames": ["eslint", "@eslint/js"],
-      "allowedVersions": "<10"
     }
   ]
 }

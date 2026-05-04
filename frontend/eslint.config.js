@@ -2,7 +2,7 @@ import js from '@eslint/js'
 import globals from 'globals'                                                                                                                                                       
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'                                                                                                                              
-import react from 'eslint-plugin-react'                                                                                     
+import reactX from '@eslint-react/eslint-plugin'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
 
@@ -55,8 +55,7 @@ export default defineConfig([
       tseslint.configs.strictTypeChecked,
       reactHooks.configs.flat.recommended,
       reactRefresh.configs.vite,
-      react.configs.flat.recommended,
-      react.configs.flat['jsx-runtime'],
+      reactX.configs['recommended-typescript'],
     ],
     languageOptions: {
       ecmaVersion: 2020,
@@ -65,9 +64,6 @@ export default defineConfig([
         projectService: true,
         tsconfigRootDir: import.meta.dirname,
       },
-    },
-    settings: {
-      react: { version: 'detect' },
     },
     rules: {
       ...restrictedSyntaxRule,
@@ -85,11 +81,11 @@ export default defineConfig([
       // tsc fails the build for missed type-only imports while ESLint
       // stays silent. Auto-fixable.
       '@typescript-eslint/consistent-type-imports': 'error',
-      // Stable `key` prop required (frontend/CLAUDE.md). `react/jsx-key`
-      // is already on via react/recommended; restate explicitly so the
-      // intent is visible at the config level.
-      'react/jsx-key': 'error',
-      'react/no-array-index-key': 'error',
+      // Stable `key` prop required (frontend/CLAUDE.md). The
+      // `recommended-typescript` preset enables this; restate
+      // explicitly so the intent is visible at the config level.
+      '@eslint-react/no-missing-key': 'error',
+      '@eslint-react/no-array-index-key': 'error',
     },
   },
   // Lockup is the canonical brand-identifier component and intentionally
