@@ -64,7 +64,8 @@ start tight and miss patterns.
   `enum` (frontend), no inline JSX style (frontend), shadcn/ui
   carve-out, secret-handling stance, TDD requirement, Conventional
   Commits requirement
-- No `ignorePatterns` — see Alternatives below
+- No `ignorePatterns` initially — see Alternatives. Amended
+  2026-05-04 to exclude lockfiles only; see Amendments below
 
 ### App install
 
@@ -164,7 +165,11 @@ Decision recorded as a follow-up ADR (`accepted` / `superseded`).
   `dist/`, `graphify-out/`, generated SQL.** Considered. Skipped
   in initial config because no per-PR cost data exists yet to
   justify the speedup. Add at the trial gate if review latency or
-  cost is the binding constraint
+  cost is the binding constraint. **Amended 2026-05-04**: the
+  lockfile subset (`package-lock.json`, `Cargo.lock`) was added
+  early in response to a different binding constraint than the one
+  this bullet anticipated — see Amendments below. The remaining
+  patterns (`dist/`, `graphify-out/`, generated SQL) stay deferred
 * **Branch filter to skip `release-please--*` and `dependabot/*`.**
   Rejected for the trial — silence on these branches is itself
   useful signal. If Greptile adds noise on dependency bumps, that's
@@ -178,6 +183,45 @@ Decision recorded as a follow-up ADR (`accepted` / `superseded`).
   the only repo in scope. Per-repo install matches the trial
   scope; org-wide install pre-commits to other repos before the
   verdict is in
+
+## Amendments
+
+### 2026-05-04 — `ignorePatterns` added for lockfiles (PR #148)
+
+The initial config in this ADR deferred `ignorePatterns` to the
+trial gate, with the explicit trigger: *"Add at the trial gate if
+review latency or cost is the binding constraint."* That trigger
+described a future quantitative ceiling — too slow or too expensive
+once data accumulated.
+
+A different binding constraint emerged ~5 hours into the trial,
+not anticipated by the original ADR: a **confirmed hallucination
+pattern** specific to lockfiles. Two consecutive Renovate npm-bump
+PRs (#71 `@commitlint/config-conventional` and #74
+`markdownlint-cli2`) produced identical false-positive findings —
+Greptile narrated the existing `name: reverie-dev` string in
+`package-lock.json` context as a brand-new `tome-dev → reverie-dev`
+"silent rename" introduced by the PR. Verified against actual
+diffs: zero `name` field changes in either PR. The pattern is
+consistent (twice in two consecutive lockfile PRs), specific
+(lockfile only), and predictable (will repeat on every Renovate
+npm bump touching `package-lock.json` until mitigated).
+
+PR #148 adds `**/package-lock.json` and `**/Cargo.lock` to
+`ignorePatterns` to suppress this false-positive class. Lockfile
+changes are mechanical regenerations of dep trees plus integrity
+hashes; line-by-line review has zero security signal beyond what
+npm/cargo already verify cryptographically. The mitigation also
+saves Greptile review-credit budget on every Renovate PR (50/account
+trial cap, already partially burned by the eslint v10 retry storm
+documented separately in PR #147).
+
+The remaining deferred patterns (`dist/`, `graphify-out/`,
+generated SQL) stay deferred per the original ADR — they have not
+exhibited the false-positive class that justified the lockfile
+amendment.
+
+Trial tally tracking these findings: UNK-155 (rows #4 and #5).
 
 ## More Information
 
