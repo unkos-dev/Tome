@@ -1,0 +1,111 @@
+{
+  "strictness": 1,
+  "commentTypes": ["logic", "syntax", "style", "info"],
+  "triggerOnUpdates": true,
+  "customContext": {
+    "files": [
+      {
+        "path": "CLAUDE.md",
+        "description": "Project-wide conventions: GitHub Flow, Conventional Commits, SemVer, hard rules (TDD mandatory, security scrutiny, no merge without human approval)."
+      },
+      {
+        "path": "backend/CLAUDE.md",
+        "description": "Backend Rust conventions: error handling with thiserror, sqlx for queries, time crate (not chrono), explicit module boundaries, RLS-aware DB access."
+      },
+      {
+        "path": "frontend/CLAUDE.md",
+        "description": "Frontend React + TS conventions: functional components, ReactElement return type, no any/!/as-against-object-literals, AbortController in useEffect, Tailwind tokens (no raw hex, no inline JSX style), Zod at boundaries, shadcn via CLI only."
+      },
+      {
+        "path": "adr/2026-05-03-strict-lint-policy.md",
+        "description": "Strict lint policy ratified for both stacks. Backend: clippy::pedantic + nursery + cargo-deny. Frontend: tseslint strictTypeChecked + eslint-plugin-react. Style nits should already be machine-caught — flag what slipped past."
+      },
+      {
+        "path": ".claude/security/codeguard-0-authentication-mfa.md",
+        "description": "Auth/MFA security checklist."
+      },
+      {
+        "path": ".claude/security/codeguard-0-authorization-access-control.md",
+        "description": "Authorization and access control security checklist."
+      },
+      {
+        "path": ".claude/security/codeguard-0-input-validation-injection.md",
+        "description": "Input validation and injection prevention security checklist."
+      },
+      {
+        "path": ".claude/security/codeguard-0-session-management-and-cookies.md",
+        "description": "Session and cookie security checklist."
+      },
+      {
+        "path": ".claude/security/codeguard-0-content-security-policy.md",
+        "description": "CSP and inline-script-hash policy."
+      },
+      {
+        "path": ".claude/security/codeguard-0-xml-and-serialization.md",
+        "description": "XML and serialization (XXE, deserialization) security checklist."
+      },
+      {
+        "path": ".claude/security/codeguard-0-file-handling-and-uploads.md",
+        "description": "File handling and upload security checklist."
+      },
+      {
+        "path": ".claude/security/codeguard-0-supply-chain-security.md",
+        "description": "Supply chain security checklist."
+      },
+      {
+        "path": ".claude/security/codeguard-0-http-headers.md",
+        "description": "HTTP security header policy."
+      },
+      {
+        "path": ".claude/security/codeguard-0-clickjacking-defense.md",
+        "description": "Clickjacking defense checklist."
+      },
+      {
+        "path": ".claude/security/codeguard-0-client-side-web-security.md",
+        "description": "Client-side web security checklist."
+      },
+      {
+        "path": ".claude/security/codeguard-0-http-strict-transport-security.md",
+        "description": "HSTS policy."
+      },
+      {
+        "path": ".claude/security/codeguard-0-logging.md",
+        "description": "Logging policy: never log secrets or PII."
+      }
+    ],
+    "rules": [
+      {
+        "rule": "Never surface decrypted secret values. When discussing secrets (env vars, API keys, session cookies, DB passwords, OIDC client secrets), describe presence and shape only (source, length, format) — never the value itself."
+      },
+      {
+        "rule": "Reverie is open-source and self-hosted. Threat model is a multi-user exposed instance, not a private homelab. Treat security findings on user input, auth, sessions, secrets, file I/O, XML parsing, outbound HTTP, and response headers as load-bearing — not nice-to-have."
+      },
+      {
+        "rule": "Backend uses the `time` crate, not `chrono`. Flag any new `chrono` import.",
+        "scope": ["backend/**/*.rs"]
+      },
+      {
+        "rule": "TDD is mandatory. A code change without a corresponding test (happy path, negative, edge case where non-obvious) should be flagged as incomplete."
+      },
+      {
+        "rule": "No raw hex colour literals in .ts/.tsx. Every brand colour comes from the canonical token system (--color-canvas, --color-fg, --color-accent, etc.). Lockup.tsx is the documented exemption.",
+        "scope": ["frontend/src/**/*.{ts,tsx}"]
+      },
+      {
+        "rule": "No TypeScript `enum`. Use `as const` objects + union types instead.",
+        "scope": ["frontend/src/**/*.{ts,tsx}"]
+      },
+      {
+        "rule": "No inline JSX `style={{...}}` object literals. Use Tailwind classes or design tokens. Lockup.tsx and src/components/ui/** (shadcn-generated) are the documented exemptions.",
+        "scope": ["frontend/src/**/*.tsx"]
+      },
+      {
+        "rule": "shadcn/ui primitives in src/components/ui/** are CLI-generated (`npx shadcn@latest add`). Do not flag style or convention divergences in this directory unless they affect runtime correctness.",
+        "scope": ["frontend/src/components/ui/**"]
+      },
+      {
+        "rule": "Conventional Commits are mandatory. Branch names follow GitHub Flow with prefixes feat/, fix/, refactor/, docs/, chore/, test/."
+      }
+    ]
+  }
+}
