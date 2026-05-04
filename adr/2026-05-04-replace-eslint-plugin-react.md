@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-05-04
 decision-makers: john
 ---
@@ -233,23 +233,28 @@ Single PR scope. All work in `frontend/`:
 
 Walk through these after the migration PR lands:
 
-* [ ] `npm run lint` exits 0 against the migrated config
-* [ ] CI Frontend job passes end-to-end (lint, test, stylelint,
+* [x] `npm run lint` exits 0 against the migrated config
+* [x] CI Frontend job passes end-to-end (lint, test, stylelint,
       font integrity, build)
 * [ ] Renovate raises eslint v10 + @eslint/js v10 PRs on next
-      poll (proves the pin removal is honoured by Renovate)
-* [ ] Manual sanity test: introduce a deliberate `<ul>{items.map(i =>
+      poll (proves the pin removal is honoured by Renovate) —
+      pending next Renovate poll cycle post-merge
+* [x] Manual sanity test: introduce a deliberate `<ul>{items.map(i =>
       <li>{i}</li>)}</ul>` (no `key`), confirm
       `@eslint-react/no-missing-key` flags it, revert
-* [ ] Manual sanity test: introduce
+* [x] Manual sanity test: introduce
       `items.map((i, idx) => <li key={idx}>{i}</li>)`, confirm
       `@eslint-react/no-array-index-key` flags it, revert
-* [ ] `Lockup.tsx` and `Lockup.test.tsx` still lint-clean (carve-out
+* [x] `Lockup.tsx` and `Lockup.test.tsx` still lint-clean (carve-out
       block still works)
-* [ ] `src/components/ui/**` files still lint-clean (shadcn carve-out
+* [x] `src/components/ui/**` files still lint-clean (shadcn carve-out
       still works)
-* [ ] `rg "react/jsx-key|react/no-array-index-key|eslint-plugin-react"
-      frontend/` returns zero matches outside this ADR
+* [x] `rg "react/jsx-key|react/no-array-index-key|eslint-plugin-react"
+      frontend/` returns zero matches outside this ADR (verified with
+      word-boundary regex `rg -P "(?<!-)react/(jsx-key|no-array-index-key)|eslint-plugin-react(?!-)"`
+      to exclude substring false positives from the new
+      `@eslint-react/...` rule names and the unrelated
+      `eslint-plugin-react-{hooks,refresh,dom}` packages)
 
 ## Revisit Conditions
 
