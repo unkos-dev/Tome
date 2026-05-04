@@ -6,7 +6,7 @@ license = "AGPL-3.0-or-later"
 description = "Reverie ebook library manager — API server"
 
 [dependencies]
-anyhow = "1"
+anyhow = "1.0.102"
 async-trait = "0.1"
 axum = "0.8"
 axum-extra = { version = "0.10", features = ["cookie"] }
