@@ -54,7 +54,7 @@ axum-test = "20"
 # in `src/auth/oidc.rs` uses no chrono.
 chrono = "0.4.44"
 rand_core_06 = { package = "rand_core", version = "0.6", features = ["std", "getrandom"] }
-rsa = { version = "0.9", features = ["pem"] }
+rsa = { version = "0.9.10", features = ["pem"] }
 wiremock = "0.6.5"
 
 [lints.rust]
