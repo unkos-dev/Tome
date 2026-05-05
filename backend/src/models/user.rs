@@ -7,11 +7,6 @@ use uuid::Uuid;
 use crate::models::role::Role;
 use crate::models::theme_preference::ThemePreference;
 
-// Both `role` and `theme_preference` are decoded directly via sqlx::Type
-// (Postgres ENUM types `user_role` and `theme_preference` respectively).
-const USER_COLUMNS: &str = "id, oidc_subject, display_name, email, role, is_child, \
-                            created_at, updated_at, session_version, theme_preference";
-
 /// Raw row from the database. Use `User::from` to get the public type.
 #[derive(Debug, Clone, sqlx::FromRow)]
 struct UserRow {
@@ -79,11 +74,17 @@ impl AuthUser for User {
 }
 
 pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<User>, sqlx::Error> {
-    sqlx::query_as::<_, UserRow>(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = $1"))
-        .bind(id)
-        .fetch_optional(pool)
-        .await
-        .map(|opt| opt.map(User::from))
+    sqlx::query_as!(
+        UserRow,
+        "SELECT id, oidc_subject, display_name, email, \
+                role AS \"role: Role\", is_child, created_at, updated_at, \
+                session_version, theme_preference AS \"theme_preference: ThemePreference\" \
+         FROM users WHERE id = $1",
+        id,
+    )
+    .fetch_optional(pool)
+    .await
+    .map(|opt| opt.map(User::from))
 }
 
 #[allow(dead_code)] // Used by admin user management in future steps
@@ -91,10 +92,14 @@ pub async fn find_by_oidc_subject(
     pool: &PgPool,
     subject: &str,
 ) -> Result<Option<User>, sqlx::Error> {
-    sqlx::query_as::<_, UserRow>(&format!(
-        "SELECT {USER_COLUMNS} FROM users WHERE oidc_subject = $1"
-    ))
-    .bind(subject)
+    sqlx::query_as!(
+        UserRow,
+        "SELECT id, oidc_subject, display_name, email, \
+                role AS \"role: Role\", is_child, created_at, updated_at, \
+                session_version, theme_preference AS \"theme_preference: ThemePreference\" \
+         FROM users WHERE oidc_subject = $1",
+        subject,
+    )
     .fetch_optional(pool)
     .await
     .map(|opt| opt.map(User::from))
@@ -114,40 +119,48 @@ pub async fn upsert_from_oidc_and_maybe_promote(
     // Serialize concurrent first-user promotion attempts. Without this lock,
     // two concurrent transactions under READ COMMITTED could both see count=1
     // (their own uncommitted insert) and both promote to admin.
-    sqlx::query("SELECT pg_advisory_xact_lock(42)")
+    sqlx::query!("SELECT pg_advisory_xact_lock(42)")
         .execute(&mut *tx)
         .await?;
 
-    let row = sqlx::query_as::<_, UserRow>(&format!(
+    let row = sqlx::query_as!(
+        UserRow,
         "INSERT INTO users (oidc_subject, display_name, email) \
          VALUES ($1, $2, $3) \
          ON CONFLICT (oidc_subject) DO UPDATE \
            SET display_name = EXCLUDED.display_name, \
                email = EXCLUDED.email, \
                updated_at = now() \
-         RETURNING {USER_COLUMNS}"
-    ))
-    .bind(subject)
-    .bind(display_name)
-    .bind(email)
+         RETURNING id, oidc_subject, display_name, email, \
+                   role AS \"role: Role\", is_child, created_at, updated_at, \
+                   session_version, theme_preference AS \"theme_preference: ThemePreference\"",
+        subject,
+        display_name,
+        email,
+    )
     .fetch_one(&mut *tx)
     .await?;
 
     // Promote to admin if this is the only user in the table.
-    sqlx::query(
+    sqlx::query!(
         "UPDATE users SET role = 'admin'::user_role, updated_at = now() \
          WHERE id = $1 AND (SELECT count(*) FROM users) = 1",
+        row.id,
     )
-    .bind(row.id)
     .execute(&mut *tx)
     .await?;
 
     // Re-fetch to get potentially updated role
-    let row =
-        sqlx::query_as::<_, UserRow>(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = $1"))
-            .bind(row.id)
-            .fetch_one(&mut *tx)
-            .await?;
+    let row = sqlx::query_as!(
+        UserRow,
+        "SELECT id, oidc_subject, display_name, email, \
+                role AS \"role: Role\", is_child, created_at, updated_at, \
+                session_version, theme_preference AS \"theme_preference: ThemePreference\" \
+         FROM users WHERE id = $1",
+        row.id,
+    )
+    .fetch_one(&mut *tx)
+    .await?;
 
     tx.commit().await?;
     Ok(User::from(row))
@@ -201,6 +214,13 @@ mod tests {
     /// boundary rather than a polite suggestion.
     #[sqlx::test(migrations = "./migrations")]
     async fn role_decode_fails_for_unknown_db_variant(pool: PgPool) {
+        // CARVE-OUT (UNK-167): runtime sqlx::query is intentional. The two
+        // runtime calls in this test (the ALTER TYPE below and the subsequent
+        // UPDATE referencing the new 'superadmin' variant) cannot be expressed
+        // as compile-time macros: ALTER TYPE is DDL, and the UPDATE references
+        // a variant deliberately not in the prepare-time schema. The whole
+        // point of the test is to inject an unknown variant and assert the
+        // decode path rejects it.
         sqlx::query("ALTER TYPE user_role ADD VALUE 'superadmin'")
             .execute(&pool)
             .await

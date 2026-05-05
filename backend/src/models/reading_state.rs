@@ -28,25 +28,27 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn both_null_is_valid_sentinel(pool: PgPool) {
         let (m_id, user_id) = fixture(&pool, "sentinel").await;
-        sqlx::query("INSERT INTO reading_state (user_id, manifestation_id) VALUES ($1, $2)")
-            .bind(user_id)
-            .bind(m_id)
-            .execute(&pool)
-            .await
-            .expect("both-null sentinel insert");
+        sqlx::query!(
+            "INSERT INTO reading_state (user_id, manifestation_id) VALUES ($1, $2)",
+            user_id,
+            m_id,
+        )
+        .execute(&pool)
+        .await
+        .expect("both-null sentinel insert");
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn both_set_is_valid(pool: PgPool) {
         let (m_id, user_id) = fixture(&pool, "both-set").await;
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO reading_state (user_id, manifestation_id, progress_pct, last_read_at) \
              VALUES ($1, $2, $3, $4)",
+            user_id,
+            m_id,
+            50.0_f32,
+            OffsetDateTime::now_utc(),
         )
-        .bind(user_id)
-        .bind(m_id)
-        .bind(50.0_f32)
-        .bind(OffsetDateTime::now_utc())
         .execute(&pool)
         .await
         .expect("both-set insert");
@@ -55,13 +57,13 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn progress_with_null_timestamp_rejected(pool: PgPool) {
         let (m_id, user_id) = fixture(&pool, "pct-null-ts").await;
-        let result = sqlx::query(
+        let result = sqlx::query!(
             "INSERT INTO reading_state (user_id, manifestation_id, progress_pct, last_read_at) \
              VALUES ($1, $2, $3, NULL)",
+            user_id,
+            m_id,
+            50.0_f32,
         )
-        .bind(user_id)
-        .bind(m_id)
-        .bind(50.0_f32)
         .execute(&pool)
         .await;
         assert!(
@@ -73,13 +75,13 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn null_progress_with_timestamp_rejected(pool: PgPool) {
         let (m_id, user_id) = fixture(&pool, "null-pct-ts").await;
-        let result = sqlx::query(
+        let result = sqlx::query!(
             "INSERT INTO reading_state (user_id, manifestation_id, progress_pct, last_read_at) \
              VALUES ($1, $2, NULL, $3)",
+            user_id,
+            m_id,
+            OffsetDateTime::now_utc(),
         )
-        .bind(user_id)
-        .bind(m_id)
-        .bind(OffsetDateTime::now_utc())
         .execute(&pool)
         .await;
         assert!(
@@ -91,14 +93,14 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn progress_below_zero_rejected(pool: PgPool) {
         let (m_id, user_id) = fixture(&pool, "below-zero").await;
-        let result = sqlx::query(
+        let result = sqlx::query!(
             "INSERT INTO reading_state (user_id, manifestation_id, progress_pct, last_read_at) \
              VALUES ($1, $2, $3, $4)",
+            user_id,
+            m_id,
+            -1.0_f32,
+            OffsetDateTime::now_utc(),
         )
-        .bind(user_id)
-        .bind(m_id)
-        .bind(-1.0_f32)
-        .bind(OffsetDateTime::now_utc())
         .execute(&pool)
         .await;
         assert!(
@@ -110,14 +112,14 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn progress_above_hundred_rejected(pool: PgPool) {
         let (m_id, user_id) = fixture(&pool, "above-hundred").await;
-        let result = sqlx::query(
+        let result = sqlx::query!(
             "INSERT INTO reading_state (user_id, manifestation_id, progress_pct, last_read_at) \
              VALUES ($1, $2, $3, $4)",
+            user_id,
+            m_id,
+            101.0_f32,
+            OffsetDateTime::now_utc(),
         )
-        .bind(user_id)
-        .bind(m_id)
-        .bind(101.0_f32)
-        .bind(OffsetDateTime::now_utc())
         .execute(&pool)
         .await;
         assert!(
@@ -135,14 +137,14 @@ mod tests {
         let (user_id, _) = create_adult_and_basic_auth(&app, "boundaries").await;
         let now = OffsetDateTime::now_utc();
 
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO reading_state (user_id, manifestation_id, progress_pct, last_read_at) \
              VALUES ($1, $2, 0.0, $3), ($1, $4, 100.0, $3)",
+            user_id,
+            m1,
+            now,
+            m2,
         )
-        .bind(user_id)
-        .bind(m1)
-        .bind(now)
-        .bind(m2)
         .execute(&pool)
         .await
         .expect("boundary values 0 and 100 should be accepted");
@@ -151,18 +153,21 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn duplicate_user_manifestation_rejected(pool: PgPool) {
         let (m_id, user_id) = fixture(&pool, "dup").await;
-        sqlx::query("INSERT INTO reading_state (user_id, manifestation_id) VALUES ($1, $2)")
-            .bind(user_id)
-            .bind(m_id)
-            .execute(&pool)
-            .await
-            .unwrap();
-        let result =
-            sqlx::query("INSERT INTO reading_state (user_id, manifestation_id) VALUES ($1, $2)")
-                .bind(user_id)
-                .bind(m_id)
-                .execute(&pool)
-                .await;
+        sqlx::query!(
+            "INSERT INTO reading_state (user_id, manifestation_id) VALUES ($1, $2)",
+            user_id,
+            m_id,
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        let result = sqlx::query!(
+            "INSERT INTO reading_state (user_id, manifestation_id) VALUES ($1, $2)",
+            user_id,
+            m_id,
+        )
+        .execute(&pool)
+        .await;
         assert!(
             result.is_err(),
             "duplicate (user, manifestation) should violate PK"
@@ -179,14 +184,14 @@ mod tests {
 
         // Alice writes her own row.
         let mut tx = acquire_with_rls(&app, alice).await.unwrap();
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO reading_state (user_id, manifestation_id, progress_pct, last_read_at) \
              VALUES ($1, $2, $3, $4)",
+            alice,
+            m_id,
+            42.0_f32,
+            OffsetDateTime::now_utc(),
         )
-        .bind(alice)
-        .bind(m_id)
-        .bind(42.0_f32)
-        .bind(OffsetDateTime::now_utc())
         .execute(&mut *tx)
         .await
         .unwrap();
@@ -194,7 +199,7 @@ mod tests {
 
         // Alice sees one row.
         let mut tx = acquire_with_rls(&app, alice).await.unwrap();
-        let alice_count: i64 = sqlx::query_scalar("SELECT count(*) FROM reading_state")
+        let alice_count = sqlx::query_scalar!("SELECT count(*) AS \"count!\" FROM reading_state")
             .fetch_one(&mut *tx)
             .await
             .unwrap();
@@ -203,7 +208,7 @@ mod tests {
 
         // Bob sees zero rows.
         let mut tx = acquire_with_rls(&app, bob).await.unwrap();
-        let bob_count: i64 = sqlx::query_scalar("SELECT count(*) FROM reading_state")
+        let bob_count = sqlx::query_scalar!("SELECT count(*) AS \"count!\" FROM reading_state")
             .fetch_one(&mut *tx)
             .await
             .unwrap();
@@ -212,14 +217,14 @@ mod tests {
 
         // Bob writing under alice's user_id is blocked by WITH CHECK.
         let mut tx = acquire_with_rls(&app, bob).await.unwrap();
-        let result = sqlx::query(
+        let result = sqlx::query!(
             "INSERT INTO reading_state (user_id, manifestation_id, progress_pct, last_read_at) \
              VALUES ($1, $2, $3, $4)",
+            alice,
+            m_id,
+            99.0_f32,
+            OffsetDateTime::now_utc(),
         )
-        .bind(alice)
-        .bind(m_id)
-        .bind(99.0_f32)
-        .bind(OffsetDateTime::now_utc())
         .execute(&mut *tx)
         .await;
         assert!(
@@ -232,78 +237,81 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn user_delete_cascades(pool: PgPool) {
         let (m_id, user_id) = fixture(&pool, "user-cascade").await;
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO reading_state (user_id, manifestation_id, progress_pct, last_read_at) \
              VALUES ($1, $2, $3, $4)",
+            user_id,
+            m_id,
+            75.0_f32,
+            OffsetDateTime::now_utc(),
         )
-        .bind(user_id)
-        .bind(m_id)
-        .bind(75.0_f32)
-        .bind(OffsetDateTime::now_utc())
         .execute(&pool)
         .await
         .unwrap();
 
-        sqlx::query("DELETE FROM users WHERE id = $1")
-            .bind(user_id)
+        sqlx::query!("DELETE FROM users WHERE id = $1", user_id)
             .execute(&pool)
             .await
             .unwrap();
 
-        let count: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM reading_state WHERE user_id = $1")
-                .bind(user_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let count = sqlx::query_scalar!(
+            "SELECT count(*) AS \"count!\" FROM reading_state WHERE user_id = $1",
+            user_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(count, 0, "user delete cascades into reading_state");
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn manifestation_delete_cascades(pool: PgPool) {
         let (m_id, user_id) = fixture(&pool, "m-cascade").await;
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO reading_state (user_id, manifestation_id, progress_pct, last_read_at) \
              VALUES ($1, $2, $3, $4)",
+            user_id,
+            m_id,
+            75.0_f32,
+            OffsetDateTime::now_utc(),
         )
-        .bind(user_id)
-        .bind(m_id)
-        .bind(75.0_f32)
-        .bind(OffsetDateTime::now_utc())
         .execute(&pool)
         .await
         .unwrap();
 
-        sqlx::query("DELETE FROM manifestations WHERE id = $1")
-            .bind(m_id)
+        sqlx::query!("DELETE FROM manifestations WHERE id = $1", m_id)
             .execute(&pool)
             .await
             .unwrap();
 
-        let count: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM reading_state WHERE manifestation_id = $1")
-                .bind(m_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let count = sqlx::query_scalar!(
+            "SELECT count(*) AS \"count!\" FROM reading_state WHERE manifestation_id = $1",
+            m_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(count, 0, "manifestation delete cascades into reading_state");
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn updated_at_trigger_advances_on_update(pool: PgPool) {
         let (m_id, user_id) = fixture(&pool, "updated-at").await;
-        sqlx::query("INSERT INTO reading_state (user_id, manifestation_id) VALUES ($1, $2)")
-            .bind(user_id)
-            .bind(m_id)
-            .execute(&pool)
-            .await
-            .unwrap();
-
-        let initial: OffsetDateTime = sqlx::query_scalar(
-            "SELECT updated_at FROM reading_state WHERE user_id = $1 AND manifestation_id = $2",
+        sqlx::query!(
+            "INSERT INTO reading_state (user_id, manifestation_id) VALUES ($1, $2)",
+            user_id,
+            m_id,
         )
-        .bind(user_id)
-        .bind(m_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let initial = sqlx::query_scalar!(
+            "SELECT updated_at AS \"updated_at!\" FROM reading_state \
+             WHERE user_id = $1 AND manifestation_id = $2",
+            user_id,
+            m_id,
+        )
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -313,23 +321,24 @@ mod tests {
         // observable on fast hardware.
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
 
-        sqlx::query(
+        sqlx::query!(
             "UPDATE reading_state SET progress_pct = $1, last_read_at = $2 \
              WHERE user_id = $3 AND manifestation_id = $4",
+            33.0_f32,
+            OffsetDateTime::now_utc(),
+            user_id,
+            m_id,
         )
-        .bind(33.0_f32)
-        .bind(OffsetDateTime::now_utc())
-        .bind(user_id)
-        .bind(m_id)
         .execute(&pool)
         .await
         .unwrap();
 
-        let updated: OffsetDateTime = sqlx::query_scalar(
-            "SELECT updated_at FROM reading_state WHERE user_id = $1 AND manifestation_id = $2",
+        let updated = sqlx::query_scalar!(
+            "SELECT updated_at AS \"updated_at!\" FROM reading_state \
+             WHERE user_id = $1 AND manifestation_id = $2",
+            user_id,
+            m_id,
         )
-        .bind(user_id)
-        .bind(m_id)
         .fetch_one(&pool)
         .await
         .unwrap();

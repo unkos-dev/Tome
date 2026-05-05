@@ -40,6 +40,24 @@ Run migrations as the schema owner:
     seam the `manifestations_*_system` policies match against). Not
     data access; macros cannot validate GUC mutation against schema at
     prepare time.
+
+  Established type-binding tactics for the ongoing migration (see
+  `backend/src/models/work.rs` and `backend/src/models/user.rs`):
+
+  - Custom Postgres ENUMs from string params: bind as text, cast in
+    SQL — `($N::text)::enum_type`. Avoids needing a Rust→PG-enum
+    mapping for `&str`.
+  - NUMERIC columns from `f64` / `Option<f64>`: bind as `float8` and
+    let Postgres implicitly cast — `$N::float8`. Avoids requiring
+    sqlx's `bigdecimal` feature.
+  - `query_as!` struct fields with custom enum types: use the
+    column-type override syntax — `column AS "name: Type"`. Forces
+    the macro to validate the column's PG OID against the Rust type's
+    `sqlx::Type` impl at prepare time.
+  - `format!()`-injected column lists are dynamic SQL and incompatible
+    with macros. Inline columns at each call site; macro validation
+    catches column drift independently per site.
+
   Cache regeneration: `DATABASE_URL=postgres://reverie:reverie@localhost:5433/reverie_dev cargo sqlx prepare -- --tests`
   from `backend/`. CI guards against stale cache via
   `cargo sqlx prepare --check -- --tests`. Migrations in

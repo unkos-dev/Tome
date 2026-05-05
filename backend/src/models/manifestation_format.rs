@@ -127,6 +127,11 @@ mod tests {
     /// must surface this as a decode error, not silently coerce.
     #[sqlx::test(migrations = "./migrations")]
     async fn decode_fails_for_unknown_db_variant(pool: sqlx::PgPool) {
+        // CARVE-OUT (UNK-167): runtime sqlx::query is intentional. The ALTER
+        // TYPE is DDL (macros can't validate it), and the SELECT references a
+        // variant ('djvu') deliberately not in the prepare-time schema — the
+        // entire point of the test is to exercise the unknown-variant decode
+        // path. Compile-time macros would refuse to validate.
         sqlx::query("ALTER TYPE manifestation_format ADD VALUE 'djvu'")
             .execute(&pool)
             .await

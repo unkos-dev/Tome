@@ -48,13 +48,13 @@ pub async fn match_existing(
     if let Some(isbn) = &metadata.isbn
         && let Some(isbn_13) = &isbn.isbn_13
     {
-        let hit: Option<Uuid> = sqlx::query_scalar(
+        let hit = sqlx::query_scalar!(
             "SELECT w.id FROM works w \
              JOIN manifestations m ON m.work_id = w.id \
              WHERE m.isbn_13 = $1 \
              LIMIT 1",
+            isbn_13,
         )
-        .bind(isbn_13)
         .fetch_optional(&mut *conn)
         .await?;
         if hit.is_some() {
@@ -65,7 +65,7 @@ pub async fn match_existing(
     if let Some(title) = &metadata.title
         && let Some(first_author) = metadata.creators.first()
     {
-        let hit: Option<Uuid> = sqlx::query_scalar(
+        let hit = sqlx::query_scalar!(
             "SELECT w.id FROM works w \
              JOIN work_authors wa ON wa.work_id = w.id \
              JOIN authors a ON a.id = wa.author_id \
@@ -73,9 +73,9 @@ pub async fn match_existing(
                AND similarity(a.name, $2) > 0.6 \
              ORDER BY similarity(w.title, $1) DESC \
              LIMIT 1",
+            title,
+            &first_author.name,
         )
-        .bind(title)
-        .bind(&first_author.name)
         .fetch_optional(&mut *conn)
         .await?;
         if hit.is_some() {
@@ -89,7 +89,7 @@ pub async fn match_existing(
 /// Insert an empty-placeholder work used to satisfy the manifestation FK
 /// before drafts are written. Upgrade via `upgrade_stub` after drafts exist.
 pub async fn create_stub(conn: &mut PgConnection) -> Result<Uuid, sqlx::Error> {
-    sqlx::query_scalar("INSERT INTO works (title, sort_title) VALUES ('', '') RETURNING id")
+    sqlx::query_scalar!("INSERT INTO works (title, sort_title) VALUES ('', '') RETURNING id")
         .fetch_one(&mut *conn)
         .await
 }
@@ -107,7 +107,7 @@ pub async fn upgrade_stub(
     let work_title = metadata.title.as_deref().unwrap_or("Unknown");
     let work_sort_title = metadata.sort_title.as_deref().unwrap_or(work_title);
 
-    sqlx::query(
+    sqlx::query!(
         "UPDATE works SET \
             title = $1, \
             sort_title = $2, \
@@ -117,31 +117,34 @@ pub async fn upgrade_stub(
             description_version_id = $6, \
             language_version_id = $7 \
          WHERE id = $8",
+        work_title,
+        work_sort_title,
+        metadata.description.as_deref(),
+        metadata.language.as_deref(),
+        draft_ids.get("title").copied(),
+        draft_ids.get("description").copied(),
+        draft_ids.get("language").copied(),
+        work_id,
     )
-    .bind(work_title)
-    .bind(work_sort_title)
-    .bind(metadata.description.as_deref())
-    .bind(metadata.language.as_deref())
-    .bind(draft_ids.get("title").copied())
-    .bind(draft_ids.get("description").copied())
-    .bind(draft_ids.get("language").copied())
-    .bind(work_id)
     .execute(&mut *conn)
     .await?;
 
     let creators_version_id = draft_ids.get("creators").copied();
     for (i, creator) in metadata.creators.iter().enumerate() {
         let author_id = find_or_create_author(conn, &creator.name, &creator.sort_name).await?;
-        sqlx::query(
+        let position = i32::try_from(i).unwrap_or(i32::MAX);
+        sqlx::query!(
+            // sqlx macros have no built-in &str→enum mapping for `author_role`,
+            // so $3 binds as text and the cast to the DB enum happens in SQL.
             "INSERT INTO work_authors (work_id, author_id, role, position, source_version_id) \
-             VALUES ($1, $2, $3::author_role, $4, $5) \
+             VALUES ($1, $2, ($3::text)::author_role, $4, $5) \
              ON CONFLICT (work_id, author_id, role) DO NOTHING",
+            work_id,
+            author_id,
+            &creator.role,
+            position,
+            creators_version_id,
         )
-        .bind(work_id)
-        .bind(author_id)
-        .bind(&creator.role)
-        .bind(i32::try_from(i).unwrap_or(i32::MAX))
-        .bind(creators_version_id)
         .execute(&mut *conn)
         .await?;
     }
@@ -149,13 +152,16 @@ pub async fn upgrade_stub(
     if let Some(series) = &metadata.series {
         let series_id =
             find_or_create_series(conn, &series.name, &series.name.to_lowercase()).await?;
-        sqlx::query(
+        sqlx::query!(
+            // $3 bound as float8; postgres implicitly casts to NUMERIC for
+            // the column. Avoids requiring sqlx's `bigdecimal` feature for
+            // an Option<f64> source value.
             "INSERT INTO series_works (series_id, work_id, position) \
-             VALUES ($1, $2, $3)",
+             VALUES ($1, $2, $3::float8)",
+            series_id,
+            work_id,
+            series.position,
         )
-        .bind(series_id)
-        .bind(work_id)
-        .bind(series.position)
         .execute(&mut *conn)
         .await?;
     }
@@ -193,13 +199,13 @@ async fn find_or_create_author(
 ) -> Result<Uuid, sqlx::Error> {
     // DO UPDATE SET name = EXCLUDED.name is a no-op trick to make RETURNING work
     // on the conflict path (DO NOTHING doesn't return the existing row).
-    sqlx::query_scalar(
+    sqlx::query_scalar!(
         "INSERT INTO authors (name, sort_name) VALUES ($1, $2) \
          ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name \
          RETURNING id",
+        name,
+        sort_name,
     )
-    .bind(name)
-    .bind(sort_name)
     .fetch_one(&mut *conn)
     .await
 }
@@ -209,13 +215,13 @@ async fn find_or_create_series(
     name: &str,
     sort_name: &str,
 ) -> Result<Uuid, sqlx::Error> {
-    sqlx::query_scalar(
+    sqlx::query_scalar!(
         "INSERT INTO series (name, sort_name) VALUES ($1, $2) \
          ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name \
          RETURNING id",
+        name,
+        sort_name,
     )
-    .bind(name)
-    .bind(sort_name)
     .fetch_one(&mut *conn)
     .await
 }
@@ -237,16 +243,19 @@ pub async fn rematch_on_isbn_change(
     conn: &mut PgConnection,
     manifestation_id: Uuid,
 ) -> Result<RematchOutcome, sqlx::Error> {
-    let row: Option<(Uuid, Option<String>, Option<String>)> = sqlx::query_as(
+    let row = sqlx::query!(
         "SELECT work_id, isbn_10, isbn_13 FROM manifestations WHERE id = $1 FOR UPDATE",
+        manifestation_id,
     )
-    .bind(manifestation_id)
     .fetch_optional(&mut *conn)
     .await?;
 
-    let Some((current_work_id, isbn_10, isbn_13)) = row else {
+    let Some(row) = row else {
         return Ok(RematchOutcome::NoOp);
     };
+    let current_work_id = row.work_id;
+    let isbn_10 = row.isbn_10;
+    let isbn_13 = row.isbn_13;
 
     if isbn_10.is_none() && isbn_13.is_none() {
         return Ok(RematchOutcome::NoOp);
@@ -256,7 +265,7 @@ pub async fn rematch_on_isbn_change(
     // rows (not-distinct) and dedupe their work_ids in Rust. The FOR UPDATE
     // still guarantees no concurrent rematch can mutate the same matched
     // manifestation mid-flight.
-    let raw_matches: Vec<Uuid> = sqlx::query_scalar(
+    let raw_matches = sqlx::query_scalar!(
         "SELECT m.work_id FROM manifestations m \
          WHERE m.work_id != $3 \
            AND ( \
@@ -264,10 +273,10 @@ pub async fn rematch_on_isbn_change(
                (m.isbn_10 = $2 AND $2 IS NOT NULL) \
            ) \
          FOR UPDATE",
+        isbn_13,
+        isbn_10,
+        current_work_id,
     )
-    .bind(&isbn_13)
-    .bind(&isbn_10)
-    .bind(current_work_id)
     .fetch_all(&mut *conn)
     .await?;
 
@@ -284,32 +293,34 @@ pub async fn rematch_on_isbn_change(
     }
 
     if matches.len() == 1 {
-        let other_manifestations: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM manifestations WHERE work_id = $1 AND id != $2",
+        let other_manifestations = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM manifestations \
+             WHERE work_id = $1 AND id != $2",
+            current_work_id,
+            manifestation_id,
         )
-        .bind(current_work_id)
-        .bind(manifestation_id)
         .fetch_one(&mut *conn)
         .await?;
 
-        let manual_drafts: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM metadata_versions mv \
+        let manual_drafts = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM metadata_versions mv \
              JOIN manifestations m ON m.id = mv.manifestation_id \
              WHERE m.work_id = $1 AND mv.source = 'manual'",
+            current_work_id,
         )
-        .bind(current_work_id)
         .fetch_one(&mut *conn)
         .await?;
 
         if other_manifestations == 0 && manual_drafts == 0 {
             let target_work_id = matches[0];
-            sqlx::query("UPDATE manifestations SET work_id = $1 WHERE id = $2")
-                .bind(target_work_id)
-                .bind(manifestation_id)
-                .execute(&mut *conn)
-                .await?;
-            sqlx::query("DELETE FROM works WHERE id = $1")
-                .bind(current_work_id)
+            sqlx::query!(
+                "UPDATE manifestations SET work_id = $1 WHERE id = $2",
+                target_work_id,
+                manifestation_id,
+            )
+            .execute(&mut *conn)
+            .await?;
+            sqlx::query!("DELETE FROM works WHERE id = $1", current_work_id)
                 .execute(&mut *conn)
                 .await?;
             return Ok(RematchOutcome::AutoMerged {
@@ -320,11 +331,13 @@ pub async fn rematch_on_isbn_change(
     }
 
     let pick = matches[0];
-    sqlx::query("UPDATE manifestations SET suspected_duplicate_work_id = $1 WHERE id = $2")
-        .bind(pick)
-        .bind(manifestation_id)
-        .execute(&mut *conn)
-        .await?;
+    sqlx::query!(
+        "UPDATE manifestations SET suspected_duplicate_work_id = $1 WHERE id = $2",
+        pick,
+        manifestation_id,
+    )
+    .execute(&mut *conn)
+    .await?;
 
     Ok(RematchOutcome::Suspected { matched_work: pick })
 }
@@ -363,19 +376,18 @@ mod tests {
         let meta = test_metadata("Test Book Alpha", "Test Author Alpha");
         let work_id = find_or_create(&pool, &meta).await.unwrap();
 
-        let title: String = sqlx::query_scalar("SELECT title FROM works WHERE id = $1")
-            .bind(work_id)
+        let title = sqlx::query_scalar!("SELECT title FROM works WHERE id = $1", work_id)
             .fetch_one(&pool)
             .await
             .unwrap();
         assert_eq!(title, "Test Book Alpha");
 
-        let author_name: String = sqlx::query_scalar(
+        let author_name = sqlx::query_scalar!(
             "SELECT a.name FROM authors a \
              JOIN work_authors wa ON wa.author_id = a.id \
              WHERE wa.work_id = $1",
+            work_id,
         )
-        .bind(work_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -393,25 +405,28 @@ mod tests {
         let work_id2 = find_or_create(&pool, &meta2).await.unwrap();
         assert_ne!(work_id1, work_id2);
 
-        let author_id1: Uuid =
-            sqlx::query_scalar("SELECT author_id FROM work_authors WHERE work_id = $1 LIMIT 1")
-                .bind(work_id1)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
-        let author_id2: Uuid =
-            sqlx::query_scalar("SELECT author_id FROM work_authors WHERE work_id = $1 LIMIT 1")
-                .bind(work_id2)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let author_id1 = sqlx::query_scalar!(
+            "SELECT author_id FROM work_authors WHERE work_id = $1 LIMIT 1",
+            work_id1,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let author_id2 = sqlx::query_scalar!(
+            "SELECT author_id FROM work_authors WHERE work_id = $1 LIMIT 1",
+            work_id2,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(author_id1, author_id2, "same author should be reused");
 
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM authors WHERE name = 'Shared Author Name'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let count = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM authors WHERE name = 'Shared Author Name'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(count, 1);
     }
 
@@ -433,11 +448,12 @@ mod tests {
         let _work_id1 = find_or_create(&pool, &meta1).await.unwrap();
         let _work_id2 = find_or_create(&pool, &meta2).await.unwrap();
 
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM series WHERE name = 'Test Series Dedup'")
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let count = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM series WHERE name = 'Test Series Dedup'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(count, 1);
     }
 
@@ -453,16 +469,18 @@ mod tests {
         });
         let work_id1 = find_or_create(&pool, &meta1).await.unwrap();
 
-        let _ = sqlx::query(
+        let isbn = "9780306406157";
+        let path = format!("/tmp/test-isbn-{work_id1}.epub");
+        sqlx::query!(
             "INSERT INTO manifestations \
              (work_id, isbn_13, format, file_path, ingestion_file_hash, current_file_hash, \
               file_size_bytes, ingestion_status, validation_status) \
              VALUES ($1, $2, 'epub'::manifestation_format, $3, 'testhash', 'testhash', 1000, \
                      'complete'::ingestion_status, 'valid'::validation_status)",
+            work_id1,
+            isbn,
+            path,
         )
-        .bind(work_id1)
-        .bind("9780306406157")
-        .bind(format!("/tmp/test-isbn-{work_id1}.epub"))
         .execute(&pool)
         .await
         .unwrap();
@@ -482,10 +500,10 @@ mod tests {
     /// Helper: insert a blank work directly (bypassing `find_or_create` so
     /// test titles don't collide via `pg_trgm` similarity).
     async fn insert_work(pool: &PgPool, title: &str) -> Uuid {
-        sqlx::query_scalar(
+        sqlx::query_scalar!(
             "INSERT INTO works (title, sort_title) VALUES ($1, lower($1)) RETURNING id",
+            title,
         )
-        .bind(title)
         .fetch_one(pool)
         .await
         .unwrap()
@@ -500,18 +518,19 @@ mod tests {
         file_marker: &str,
     ) -> Uuid {
         let path = format!("/tmp/rematch-{file_marker}.epub");
-        sqlx::query_scalar(
+        let hash = format!("hash-{file_marker}");
+        sqlx::query_scalar!(
             "INSERT INTO manifestations \
                (work_id, isbn_13, format, file_path, ingestion_file_hash, current_file_hash, \
                 file_size_bytes, ingestion_status, validation_status) \
              VALUES ($1, $2, 'epub'::manifestation_format, $3, $4, $4, 1000, \
                      'complete'::ingestion_status, 'valid'::validation_status) \
              RETURNING id",
+            work_id,
+            isbn_13,
+            path,
+            hash,
         )
-        .bind(work_id)
-        .bind(isbn_13)
-        .bind(&path)
-        .bind(format!("hash-{file_marker}"))
         .fetch_one(pool)
         .await
         .unwrap()
@@ -553,20 +572,23 @@ mod tests {
         );
 
         // Stub work must be deleted.
-        let stub_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM works WHERE id = $1")
-            .bind(stub_work_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let stub_exists = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM works WHERE id = $1",
+            stub_work_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(stub_exists, 0, "stub work should be deleted");
 
         // Manifestation should now point at the real work.
-        let new_work_id: Uuid =
-            sqlx::query_scalar("SELECT work_id FROM manifestations WHERE id = $1")
-                .bind(stub_manifestation_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let new_work_id = sqlx::query_scalar!(
+            "SELECT work_id FROM manifestations WHERE id = $1",
+            stub_manifestation_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(new_work_id, real_work_id);
     }
 
@@ -602,18 +624,20 @@ mod tests {
         );
 
         // Stub work must still exist.
-        let stub_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM works WHERE id = $1")
-            .bind(stub_work_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let stub_exists = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM works WHERE id = $1",
+            stub_work_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(stub_exists, 1, "stub work should NOT be deleted");
 
         // suspected_duplicate_work_id should be set.
-        let dup: Option<Uuid> = sqlx::query_scalar(
+        let dup = sqlx::query_scalar!(
             "SELECT suspected_duplicate_work_id FROM manifestations WHERE id = $1",
+            target_m,
         )
-        .bind(target_m)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -635,13 +659,13 @@ mod tests {
             insert_manifestation(&pool, stub_work_id, Some(isbn), &format!("{marker}-b")).await;
 
         // Add a manual-source draft on the stub.
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO metadata_versions \
                (manifestation_id, source, field_name, new_value, value_hash, match_type, confidence_score) \
              VALUES ($1, 'manual', 'title', '\"User Override\"'::jsonb, \
                      digest('user-override', 'sha256'), 'isbn', 1.0)",
+            stub_m,
         )
-        .bind(stub_m)
         .execute(&pool)
         .await
         .unwrap();
@@ -658,17 +682,19 @@ mod tests {
             "expected Suspected because of manual draft"
         );
 
-        let stub_exists: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM works WHERE id = $1")
-            .bind(stub_work_id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
+        let stub_exists = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM works WHERE id = $1",
+            stub_work_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(stub_exists, 1, "stub work should NOT be deleted");
 
-        let dup: Option<Uuid> = sqlx::query_scalar(
+        let dup = sqlx::query_scalar!(
             "SELECT suspected_duplicate_work_id FROM manifestations WHERE id = $1",
+            stub_m,
         )
-        .bind(stub_m)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -691,10 +717,10 @@ mod tests {
 
         assert_eq!(outcome, RematchOutcome::NoOp);
 
-        let dup: Option<Uuid> = sqlx::query_scalar(
+        let dup = sqlx::query_scalar!(
             "SELECT suspected_duplicate_work_id FROM manifestations WHERE id = $1",
+            m,
         )
-        .bind(m)
         .fetch_one(&pool)
         .await
         .unwrap();
