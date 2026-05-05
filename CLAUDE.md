@@ -169,6 +169,31 @@ Socratic capture → draft → checklist review.
   layer, auth model), or making a non-obvious choice between real alternatives.
   If you would write a long "why" code comment — that reasoning belongs in an ADR.
 
+## Tracked technical debt
+
+A workaround is a known-wrong-shape we accept temporarily because of a
+specific constraint. They live in `debt/`, not buried in code comments
+and not as Linear tickets alone.
+
+Hard rules:
+
+- **Every debt entry has a recorded lift condition.** If you can't
+  state a measurable lift condition, the shape is wrong — fix the
+  shape, don't accept the workaround.
+- **Debt gets reviewed at every release tag and at the start of
+  non-trivial planning work.** When a constraint lifts, the entry
+  is flipped to `status: lifted` (kept for audit), not grandfathered
+  into "this is how we do it".
+- **Workarounds adopted under temporary constraints (missing tooling,
+  unbuilt infra, blocked deps) are tech debt, not idiomatic
+  patterns.** Trace each candidate workaround to its justification
+  before defending it; if the justification has lifted, it's debt.
+
+Format and lifecycle: `debt/README.md`. Entries are intentionally
+machine-extractable; post-v0.2 a public dev roadmap will consume
+active entries as a "Known limitations and accepted technical debt"
+section.
+
 ## graphify
 
 This project has a graphify knowledge graph at graphify-out/.
