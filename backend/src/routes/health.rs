@@ -17,7 +17,7 @@ async fn health() -> &'static str {
 }
 
 async fn ready(State(state): State<AppState>) -> Result<impl IntoResponse, StatusCode> {
-    sqlx::query!("SELECT 1 AS one")
+    sqlx::query_scalar!("SELECT 1 AS \"one!: i32\"")
         .fetch_one(&state.pool)
         .await
         .map_err(|e| {
