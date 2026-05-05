@@ -214,12 +214,13 @@ mod tests {
     /// boundary rather than a polite suggestion.
     #[sqlx::test(migrations = "./migrations")]
     async fn role_decode_fails_for_unknown_db_variant(pool: PgPool) {
-        // CARVE-OUT (UNK-167): runtime sqlx::query is intentional. ALTER
-        // TYPE is DDL (macros can't validate it), and the subsequent UPDATE
-        // references a variant ('superadmin') deliberately not in the
-        // prepare-time schema — the entire point of the test is to inject
-        // an unknown variant and assert the decode path rejects it. Compile-
-        // time macros would refuse to validate either statement.
+        // CARVE-OUT (UNK-167): runtime sqlx::query is intentional. The two
+        // runtime calls in this test (the ALTER TYPE below and the subsequent
+        // UPDATE referencing the new 'superadmin' variant) cannot be expressed
+        // as compile-time macros: ALTER TYPE is DDL, and the UPDATE references
+        // a variant deliberately not in the prepare-time schema. The whole
+        // point of the test is to inject an unknown variant and assert the
+        // decode path rejects it.
         sqlx::query("ALTER TYPE user_role ADD VALUE 'superadmin'")
             .execute(&pool)
             .await

@@ -134,9 +134,8 @@ pub async fn upgrade_stub(
         let author_id = find_or_create_author(conn, &creator.name, &creator.sort_name).await?;
         let position = i32::try_from(i).unwrap_or(i32::MAX);
         sqlx::query!(
-            // $3 is bound as text; ::author_role cast happens DB-side.
-            // sqlx macros have no built-in mapping from Rust strings to the
-            // `author_role` ENUM, so the text→enum cast lives in SQL.
+            // sqlx macros have no built-in &str→enum mapping for `author_role`,
+            // so $3 binds as text and the cast to the DB enum happens in SQL.
             "INSERT INTO work_authors (work_id, author_id, role, position, source_version_id) \
              VALUES ($1, $2, ($3::text)::author_role, $4, $5) \
              ON CONFLICT (work_id, author_id, role) DO NOTHING",

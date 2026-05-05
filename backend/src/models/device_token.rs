@@ -80,21 +80,31 @@ pub async fn create_with_limit(
 ) -> Result<DeviceToken, CreateError> {
     let mut tx = pool.begin().await.map_err(CreateError::Db)?;
 
-    // Lock the user's active token rows to serialize concurrent creates,
-    // then count them in Rust. Postgres rejects `count(*) ... FOR UPDATE`
-    // (aggregate + row lock) as a single statement, so we acquire the
-    // locks and count the returned rows.
-    let locked = sqlx::query!(
-        "SELECT 1 AS dummy FROM device_tokens \
-         WHERE user_id = $1 AND revoked_at IS NULL \
-         FOR UPDATE",
-        user_id,
+    // Serialize concurrent create_with_limit calls for this user. The earlier
+    // shape (`SELECT ... FOR UPDATE` on the active-tokens result) only locks
+    // existing rows; if the user has zero active tokens, the empty result set
+    // means N concurrent first-token creates can all pass the count guard
+    // and all insert. Per-user advisory lock closes the gap regardless of how
+    // many rows already exist.
+    let lock_key = user_id.to_string();
+    sqlx::query!(
+        "SELECT pg_advisory_xact_lock(hashtext($1)::bigint)",
+        lock_key,
     )
-    .fetch_all(&mut *tx)
+    .execute(&mut *tx)
     .await
     .map_err(CreateError::Db)?;
 
-    if i64::try_from(locked.len()).unwrap_or(i64::MAX) >= MAX_TOKENS_PER_USER {
+    let count = sqlx::query_scalar!(
+        "SELECT count(*) AS \"count!\" FROM device_tokens \
+         WHERE user_id = $1 AND revoked_at IS NULL",
+        user_id,
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(CreateError::Db)?;
+
+    if count >= MAX_TOKENS_PER_USER {
         return Err(CreateError::LimitExceeded);
     }
 
@@ -187,6 +197,58 @@ mod tests {
         let listed = list_for_user(&pool, user_id).await.expect("list");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].id, active.id);
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn create_with_limit_returns_limit_exceeded_at_cap(pool: PgPool) {
+        let oidc_subject = format!("limit-cap-{}", Uuid::new_v4());
+        let user_id = sqlx::query_scalar!(
+            "INSERT INTO users (oidc_subject, display_name) VALUES ($1, 'Limit Cap') RETURNING id",
+            oidc_subject,
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("create user");
+
+        let cap = usize::try_from(MAX_TOKENS_PER_USER).expect("MAX_TOKENS_PER_USER fits usize");
+        for i in 0..cap {
+            create_with_limit(&pool, user_id, &format!("t-{i}"), &format!("h-{i}"))
+                .await
+                .expect("create within limit");
+        }
+
+        let result = create_with_limit(&pool, user_id, "overflow", "h-overflow").await;
+        assert!(
+            matches!(result, Err(CreateError::LimitExceeded)),
+            "expected LimitExceeded at cap, got {result:?}"
+        );
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn create_with_limit_excludes_revoked_from_count(pool: PgPool) {
+        let oidc_subject = format!("limit-revoked-{}", Uuid::new_v4());
+        let user_id = sqlx::query_scalar!(
+            "INSERT INTO users (oidc_subject, display_name) VALUES ($1, 'Limit Revoked') RETURNING id",
+            oidc_subject,
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("create user");
+
+        // Saturate then revoke them all — revoked tokens must not block creation.
+        let cap = usize::try_from(MAX_TOKENS_PER_USER).expect("MAX_TOKENS_PER_USER fits usize");
+        for i in 0..cap {
+            let t = create_with_limit(&pool, user_id, &format!("r-{i}"), &format!("rh-{i}"))
+                .await
+                .expect("create within limit");
+            assert!(revoke(&pool, t.id, user_id).await.expect("revoke"));
+        }
+
+        let result = create_with_limit(&pool, user_id, "active", "h-active").await;
+        assert!(
+            result.is_ok(),
+            "revoked tokens must not block creation: {result:?}"
+        );
     }
 
     #[sqlx::test(migrations = "./migrations")]
