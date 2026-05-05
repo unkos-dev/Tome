@@ -61,9 +61,10 @@ Concretely:
   binary into `/usr/local/bin`
 * **Runtime**: the backend reads `REVERIE_FRONTEND_DIST_PATH` at
   startup, validates the directory and the `csp-hashes.json` sidecar
-  (panics if either is missing), and mounts the SPA-fallback router.
-  All HTTP traffic (API + frontend) terminates at the same Axum
-  listener on `:3000`
+  (returns `Err` from `main` and exits with a non-zero status if
+  either is missing or malformed), and mounts the SPA-fallback
+  router. All HTTP traffic (API + frontend) terminates at the same
+  Axum listener on `:3000`
 * **Security headers**: the CSP HTML header is emitted by
   `backend/src/security/headers.rs` using the hashes loaded from the
   sidecar. There is one CSP enforcement point in the entire stack
