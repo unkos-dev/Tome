@@ -17,8 +17,8 @@ async fn health() -> &'static str {
 }
 
 async fn ready(State(state): State<AppState>) -> Result<impl IntoResponse, StatusCode> {
-    sqlx::query("SELECT 1")
-        .execute(&state.pool)
+    sqlx::query!("SELECT 1 AS one")
+        .fetch_one(&state.pool)
         .await
         .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
     Ok("ok")
