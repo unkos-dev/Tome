@@ -26,19 +26,23 @@ landed `#[sqlx::test]` providing per-test isolated databases.
 
 ## Workaround
 
-All sqlx usage in `backend/src/` uses the runtime function form
-(`sqlx::query(...)`, `sqlx::query_as(...)`, `sqlx::query_scalar(...)`)
-instead of the macro form. The runtime functions do not validate
-against a live DB at compile time. Type binding is done by-hand at the
-call site.
+All sqlx usage in `backend/src/` except `routes/health.rs`
+(bootstrap-migrated 2026-05-05 in PR #157) uses the runtime function
+form (`sqlx::query(...)`, `sqlx::query_as(...)`,
+`sqlx::query_scalar(...)`) instead of the macro form. The runtime
+functions do not validate against a live DB at compile time. Type
+binding is done by-hand at the call site.
 
-Example sites: `backend/src/db.rs:28`, `backend/src/db.rs:49`,
-`backend/src/db.rs:65`, `backend/src/test_support.rs:208,234,315`,
-plus more in `routes/` / `services/` / `models/` (full count to be
-inventoried during the lift work).
+Initial inventory: 28 files, ~294 invocations (heaviest hitters:
+`services/enrichment/orchestrator.rs` 41, `services/writeback/queue.rs`
+37, `models/work.rs` 32, `services/writeback/orchestrator.rs` 28).
+The remaining migration is grouped by module boundary as a PR series
+following the bootstrap.
 
-`backend/CLAUDE.md:25` claims "sqlx with compile-time checked queries"
-— stale doc claim; this entry surfaces the mismatch.
+Until 2026-05-05, `backend/CLAUDE.md` described only the aspirational
+posture ("sqlx with compile-time checked queries"); the wording was
+corrected in the UNK-167 bootstrap PR to reflect the actual mid-
+migration state with carve-outs documented.
 
 ## Why this isn't the right shape
 
@@ -68,15 +72,18 @@ direct evidence the pattern catches real bugs.
 queries. Carve-outs documented for legitimate runtime use (DDL,
 dynamic SQL, `set_config(...)` config calls).
 
-When that PR (or PR series) merges:
+When the full PR series merges:
 
 1. Flip this entry to `status: lifted`, set `lifted: <date>`, set
-   `superseded-by: <PR url>`.
-2. Update `backend/CLAUDE.md` to reflect actual state with carve-outs
-   documented.
-3. [UNK-161](https://linear.app/unkos/issue/UNK-161) (operational
-   follow-up: commit `.sqlx/` cache + `SQLX_OFFLINE=true` in builds +
-   CI drift guard) becomes unblocked.
+   `superseded-by: <final PR url>`.
+2. Update `backend/CLAUDE.md` to drop the "migration in flight"
+   language and the carve-outs pointer to this entry.
+
+[UNK-161](https://linear.app/unkos/issue/UNK-161) (operational
+follow-up: commit `.sqlx/` cache + `SQLX_OFFLINE=true` in builds + CI
+drift guard) ships in the bootstrap PR (#157) — its scope lands
+ahead of the full lift, so the remaining UNK-167 work is purely the
+per-site macro migration.
 
 ## Related
 

@@ -22,7 +22,27 @@ Run migrations as the schema owner:
 - **Error handling:** Use `thiserror` for library errors, `anyhow` for application
   errors. Axum handlers return `Result<impl IntoResponse, AppError>` where `AppError`
   implements `IntoResponse`.
-- **Database:** `sqlx` with compile-time checked queries. Migrations in
+- **Database:** `sqlx` with compile-time checked queries — `query!`,
+  `query_as!`, `query_scalar!` macros validate SQL and types against the
+  live dev DB at compile time, then check against the committed
+  `backend/.sqlx/` cache for offline builds (CI, Docker). Migration to
+  macros is in flight under [UNK-167](https://linear.app/unkos/issue/UNK-167);
+  pre-existing runtime `sqlx::query(...)` sites are tracked in
+  `debt/2026-05-05-runtime-sqlx-queries.md`. Documented carve-outs that
+  stay runtime forever:
+  - **DDL** (`CREATE`, `DROP`, `ALTER TYPE`) — macros can't validate
+    against schema that doesn't exist yet at prepare time.
+  - **Dynamic SQL** built from runtime input (rare; flag in review).
+  - **`SELECT set_config(...)`** in `db.rs` — Postgres GUC calls for
+    RLS context injection (`app.current_user_id`, transaction-local —
+    the RLS enforcement seam consumed by every user-facing query) and
+    writeback pool identity (`app.system_context`, session-scoped — the
+    seam the `manifestations_*_system` policies match against). Not
+    data access; macros cannot validate GUC mutation against schema at
+    prepare time.
+  Cache regeneration: `DATABASE_URL=postgres://reverie:reverie@localhost:5433/reverie_dev cargo sqlx prepare -- --tests`
+  from `backend/`. CI guards against stale cache via
+  `cargo sqlx prepare --check -- --tests`. Migrations in
   `backend/migrations/`.
 - **Testing:** Use `axum-test` for integration tests. Unit tests live alongside the
   code in `#[cfg(test)]` modules.

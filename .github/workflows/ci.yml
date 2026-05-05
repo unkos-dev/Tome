@@ -93,11 +93,24 @@ jobs:
         with:
           workspaces: backend
 
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: sqlx-cli@0.8.6
+
+      - name: Apply migrations
+        run: sqlx migrate run
+
       - name: Check formatting
         run: cargo fmt --check
 
       - name: Lint
         run: cargo clippy -- -D warnings
+
+      # UNK-167: drift guard on the committed .sqlx/ query cache. Every
+      # `cargo sqlx prepare` regeneration must be checked in; CI fails if
+      # cache is stale relative to query macros + live schema.
+      - name: Check sqlx query cache freshness
+        run: cargo sqlx prepare --check -- --tests
 
       - name: Test
         run: cargo test
