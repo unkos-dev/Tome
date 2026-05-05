@@ -20,58 +20,59 @@ pub async fn create(
     batch_id: Uuid,
     source_path: &str,
 ) -> Result<IngestionJob, sqlx::Error> {
-    sqlx::query_as::<_, IngestionJob>(
+    sqlx::query_as!(
+        IngestionJob,
         "INSERT INTO ingestion_jobs (batch_id, source_path) \
          VALUES ($1, $2) \
-         RETURNING id, batch_id, source_path, status::text, error_message, \
+         RETURNING id, batch_id, source_path, status::text AS \"status!\", error_message, \
                    started_at, completed_at, created_at",
+        batch_id,
+        source_path,
     )
-    .bind(batch_id)
-    .bind(source_path)
     .fetch_one(pool)
     .await
 }
 
 pub async fn mark_running(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    sqlx::query!(
         "UPDATE ingestion_jobs SET status = 'running', started_at = now() \
          WHERE id = $1",
+        id,
     )
-    .bind(id)
     .execute(pool)
     .await?;
     Ok(())
 }
 
 pub async fn mark_complete(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    sqlx::query!(
         "UPDATE ingestion_jobs SET status = 'complete', completed_at = now() \
          WHERE id = $1",
+        id,
     )
-    .bind(id)
     .execute(pool)
     .await?;
     Ok(())
 }
 
 pub async fn mark_skipped(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    sqlx::query!(
         "UPDATE ingestion_jobs SET status = 'skipped', completed_at = now() \
          WHERE id = $1",
+        id,
     )
-    .bind(id)
     .execute(pool)
     .await?;
     Ok(())
 }
 
 pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    sqlx::query!(
         "UPDATE ingestion_jobs SET status = 'failed', error_message = $2, \
          completed_at = now() WHERE id = $1",
+        id,
+        error_message,
     )
-    .bind(id)
-    .bind(error_message)
     .execute(pool)
     .await?;
     Ok(())
@@ -82,13 +83,14 @@ pub async fn find_by_batch(
     pool: &PgPool,
     batch_id: Uuid,
 ) -> Result<Vec<IngestionJob>, sqlx::Error> {
-    sqlx::query_as::<_, IngestionJob>(
-        "SELECT id, batch_id, source_path, status::text, error_message, \
+    sqlx::query_as!(
+        IngestionJob,
+        "SELECT id, batch_id, source_path, status::text AS \"status!\", error_message, \
                 started_at, completed_at, created_at \
          FROM ingestion_jobs WHERE batch_id = $1 \
          ORDER BY created_at",
+        batch_id,
     )
-    .bind(batch_id)
     .fetch_all(pool)
     .await
 }
