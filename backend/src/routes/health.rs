@@ -20,6 +20,9 @@ async fn ready(State(state): State<AppState>) -> Result<impl IntoResponse, Statu
     sqlx::query!("SELECT 1 AS one")
         .fetch_one(&state.pool)
         .await
-        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+        .map_err(|e| {
+            tracing::warn!(error = ?e, "readiness probe DB check failed");
+            StatusCode::SERVICE_UNAVAILABLE
+        })?;
     Ok("ok")
 }

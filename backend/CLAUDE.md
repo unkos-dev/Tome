@@ -33,11 +33,17 @@ Run migrations as the schema owner:
   - **DDL** (`CREATE`, `DROP`, `ALTER TYPE`) — macros can't validate
     against schema that doesn't exist yet at prepare time.
   - **Dynamic SQL** built from runtime input (rare; flag in review).
-  - **`SELECT set_config(...)`** in `db.rs` — Postgres GUC mutation, not
-    data access.
+  - **`SELECT set_config(...)`** in `db.rs` — Postgres GUC calls for
+    RLS context injection (`app.current_user_id`, transaction-local —
+    the RLS enforcement seam consumed by every user-facing query) and
+    writeback pool identity (`app.system_context`, session-scoped — the
+    seam the `manifestations_*_system` policies match against). Not
+    data access; macros cannot validate GUC mutation against schema at
+    prepare time.
   Cache regeneration: `DATABASE_URL=postgres://reverie:reverie@localhost:5433/reverie_dev cargo sqlx prepare -- --tests`
   from `backend/`. CI guards against stale cache via
-  `cargo sqlx prepare --check`. Migrations in `backend/migrations/`.
+  `cargo sqlx prepare --check -- --tests`. Migrations in
+  `backend/migrations/`.
 - **Testing:** Use `axum-test` for integration tests. Unit tests live alongside the
   code in `#[cfg(test)]` modules.
 - **DB-backed tests use `#[sqlx::test(migrations = "./migrations")]`.** The macro

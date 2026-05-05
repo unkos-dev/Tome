@@ -4,7 +4,7 @@ WORKDIR /build
 COPY backend/ .
 # SQLX_OFFLINE forces sqlx::query! macros to validate against the committed
 # .sqlx/ cache instead of opening a database connection at compile time.
-# Cache regeneration: `cargo sqlx prepare` against a populated dev DB.
+# Cache regeneration: `cargo sqlx prepare -- --tests` against a populated dev DB.
 ENV SQLX_OFFLINE=true
 RUN cargo build --release
 
