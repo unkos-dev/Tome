@@ -62,7 +62,18 @@
       {
         "ordinal": 9,
         "name": "theme_preference: ThemePreference",
-        "type_info": "Text"
+        "type_info": {
+          "Custom": {
+            "name": "theme_preference",
+            "kind": {
+              "Enum": [
+                "system",
+                "light",
+                "dark"
+              ]
+            }
+          }
+        }
       }
     ],
     "parameters": {
