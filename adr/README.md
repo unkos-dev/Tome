@@ -23,3 +23,4 @@ An Architecture Decision Record (ADR) captures an important architecture decisio
 - [Strict lint policy: clippy pedantic + ESLint strict-tier](2026-05-03-strict-lint-policy.md) (proposed, 2026-05-03)
 - [Greptile AI code review: 4-week trial](2026-05-04-greptile-trial.md) (proposed, 2026-05-04)
 - [Replace eslint-plugin-react with @eslint-react/eslint-plugin](2026-05-04-replace-eslint-plugin-react.md) (accepted, 2026-05-04)
+- [Single-image distribution with backend-served frontend and central CSP enforcement](2026-05-05-single-image-distribution-central-csp.md) (proposed, 2026-05-05)

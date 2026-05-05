@@ -2,9 +2,10 @@
 //! `csp-hashes.json` sidecar produced by the Vite `reverie-csp-hash` plugin.
 //!
 //! Called from `main()` when `config.security.frontend_dist_path` is `Some`.
-//! Any failure panics the process before `tracing_subscriber` binds the
-//! subscriber (existing main.rs `.expect()` pattern) — an operator who points
-//! the backend at a missing or malformed dist must see the failure in stderr.
+//! Any failure is propagated as an `anyhow::Error` from `main`, which exits
+//! with a non-zero status before `tracing_subscriber` binds the subscriber —
+//! an operator who points the backend at a missing or malformed dist must
+//! see the failure in stderr.
 
 use std::fs;
 use std::path::Path;
