@@ -1,13 +1,13 @@
 ---
-status: active
+status: lifted
 severity: medium
 surfaces: [developer, security, ci]
 adopted: 2026-05-05
 adopted-because: pre-UNK-70 (sqlx-cli could not reach workspace shared-postgres) and pre-UNK-97 (no per-test DB pattern); both Done; recognised as debt 2026-05-05
 lift-when-class: internal-refactor
 lift-when: UNK-167 (sqlx query!/query_as! macros migration) merged to main
-lifted: ~
-superseded-by: ~
+lifted: 2026-05-06
+superseded-by: https://github.com/unkos-dev/reverie/pull/157, https://github.com/unkos-dev/reverie/pull/158, https://github.com/unkos-dev/reverie/pull/159, https://github.com/unkos-dev/reverie/pull/160, https://github.com/unkos-dev/reverie/pull/161, https://github.com/unkos-dev/reverie/pull/162, https://github.com/unkos-dev/reverie/pull/163
 ---
 
 # Runtime sqlx queries instead of compile-time macros
@@ -71,20 +71,20 @@ direct evidence the pattern catches real bugs.
 [UNK-167](https://linear.app/unkos/issue/UNK-167) — adopt
 `query!` / `query_as!` / `query_scalar!` macros across data-path
 queries. Carve-outs documented for legitimate runtime use (DDL,
-dynamic SQL, `set_config(...)` config calls).
+dynamic SQL, `set_config(...)` config calls, enum-drift test probes).
 
-When the full PR series merges:
+## Lifted 2026-05-06
 
-1. Flip this entry to `status: lifted`, set `lifted: <date>`, set
-   `superseded-by: <final PR url>`.
-2. Update `backend/CLAUDE.md` to drop the "migration in flight"
-   language and the carve-outs pointer to this entry.
+PR series #157–#162 migrated every data-path `sqlx::query(...)` to
+the macro form. The closer PR (this debt-flip + UNK-172 grep-guard)
+adds CI enforcement at `.github/sqlx-runtime-allowlist.txt`: new
+runtime invocations outside the documented carve-out registry fail
+CI. `backend/CLAUDE.md` now points at the allowlist as canonical
+carve-out registry instead of this debt entry.
 
 [UNK-161](https://linear.app/unkos/issue/UNK-161) (operational
 follow-up: commit `.sqlx/` cache + `SQLX_OFFLINE=true` in builds + CI
-drift guard) ships in the bootstrap PR (#157) — its scope lands
-ahead of the full lift, so the remaining UNK-167 work is purely the
-per-site macro migration.
+drift guard) shipped in the bootstrap PR (#157).
 
 ## Related
 

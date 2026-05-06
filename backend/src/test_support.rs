@@ -312,23 +312,25 @@ pub mod db {
         ingestion_pool: &PgPool,
         marker: &str,
     ) -> (Uuid, Uuid) {
-        let work_id: Uuid = sqlx::query_scalar(
+        let work_id: Uuid = sqlx::query_scalar!(
             "INSERT INTO works (title, sort_title) VALUES ('', '') RETURNING id",
         )
         .fetch_one(ingestion_pool)
         .await
         .expect("insert work");
-        let m_id: Uuid = sqlx::query_scalar(
+        let file_path = format!("/tmp/admin-test-{marker}.epub");
+        let file_hash = format!("admin-test-hash-{marker}");
+        let m_id: Uuid = sqlx::query_scalar!(
             "INSERT INTO manifestations \
                 (work_id, format, file_path, ingestion_file_hash, current_file_hash, \
                  file_size_bytes, ingestion_status, validation_status) \
              VALUES ($1, 'epub'::manifestation_format, $2, $3, $3, 1000, \
                      'complete'::ingestion_status, 'valid'::validation_status) \
              RETURNING id",
+            work_id,
+            file_path,
+            file_hash,
         )
-        .bind(work_id)
-        .bind(format!("/tmp/admin-test-{marker}.epub"))
-        .bind(format!("admin-test-hash-{marker}"))
         .fetch_one(ingestion_pool)
         .await
         .expect("insert manifestation");
@@ -385,21 +387,23 @@ pub mod db {
     }
 
     pub async fn create_shelf(app_pool: &PgPool, user_id: Uuid, name: &str) -> Uuid {
-        sqlx::query_scalar("INSERT INTO shelves (user_id, name) VALUES ($1, $2) RETURNING id")
-            .bind(user_id)
-            .bind(name)
-            .fetch_one(app_pool)
-            .await
-            .expect("create shelf")
+        sqlx::query_scalar!(
+            "INSERT INTO shelves (user_id, name) VALUES ($1, $2) RETURNING id",
+            user_id,
+            name,
+        )
+        .fetch_one(app_pool)
+        .await
+        .expect("create shelf")
     }
 
     pub async fn add_to_shelf(app_pool: &PgPool, shelf_id: Uuid, manifestation_id: Uuid) {
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO shelf_items (shelf_id, manifestation_id) \
              VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            shelf_id,
+            manifestation_id,
         )
-        .bind(shelf_id)
-        .bind(manifestation_id)
         .execute(app_pool)
         .await
         .expect("shelf_items insert");

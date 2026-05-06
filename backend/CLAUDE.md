@@ -25,23 +25,30 @@ Run migrations as the schema owner:
 - **Database:** `sqlx` with compile-time checked queries — `query!`,
   `query_as!`, `query_scalar!` macros validate SQL and types against the
   live dev DB at compile time, then check against the committed
-  `backend/.sqlx/` cache for offline builds (CI, Docker). Migration to
-  macros is in flight under [UNK-167](https://linear.app/unkos/issue/UNK-167);
-  pre-existing runtime `sqlx::query(...)` sites are tracked in
-  `debt/2026-05-05-runtime-sqlx-queries.md`. Documented carve-outs that
-  stay runtime forever:
+  `backend/.sqlx/` cache for offline builds (CI, Docker). Data-path
+  queries went all-macro under [UNK-167](https://linear.app/unkos/issue/UNK-167)
+  (PR series #157–#162, closer #163). Runtime
+  `sqlx::query(...)` is reserved for documented carve-outs only; CI
+  grep-guard (`.github/sqlx-runtime-allowlist.txt`) fails any new
+  invocation outside the registry. Carve-out classes:
   - **DDL** (`CREATE`, `DROP`, `ALTER TYPE`) — macros can't validate
     against schema that doesn't exist yet at prepare time.
   - **Dynamic SQL** built from runtime input (rare; flag in review).
-  - **`SELECT set_config(...)`** in `db.rs` — Postgres GUC calls for
-    RLS context injection (`app.current_user_id`, transaction-local —
-    the RLS enforcement seam consumed by every user-facing query) and
+  - **`SELECT set_config(...)`** — Postgres GUC calls for RLS context
+    injection (`app.current_user_id`, transaction-local — the RLS
+    enforcement seam consumed by every user-facing query) and
     writeback pool identity (`app.system_context`, session-scoped — the
     seam the `manifestations_*_system` policies match against). Not
     data access; macros cannot validate GUC mutation against schema at
     prepare time.
+  - **Enum-drift test probes** — `models/manifestation_format.rs` and
+    `models/user.rs` use `ALTER TYPE ... ADD VALUE` + cast to detect
+    code-vs-schema enum drift at test time; both require runtime SQL.
 
-  Established type-binding tactics for the ongoing migration (see
+  The canonical carve-out registry is `.github/sqlx-runtime-allowlist.txt`.
+  Adding a new entry requires reviewer justification in the PR adding it.
+
+  Established type-binding tactics (see
   `backend/src/models/work.rs` and `backend/src/models/user.rs`):
 
   - Custom Postgres ENUMs from string params: bind as text, cast in
