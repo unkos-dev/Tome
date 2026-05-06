@@ -17,6 +17,7 @@ use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::config::Config;
+use crate::models::enrichment_status::EnrichmentStatus;
 
 use super::orchestrator::{self, RunOutcome};
 
@@ -190,9 +191,9 @@ async fn mark_failed(
 ) -> sqlx::Result<()> {
     let max = config.enrichment.max_attempts.cast_signed();
     let next_status = if attempt_count >= max {
-        "skipped"
+        EnrichmentStatus::Skipped
     } else {
-        "failed"
+        EnrichmentStatus::Failed
     };
 
     // When rate-limited, bump `enrichment_attempted_at` forward so the
@@ -205,11 +206,11 @@ async fn mark_failed(
         let secs_str = secs.to_string();
         sqlx::query!(
             "UPDATE manifestations \
-             SET enrichment_status = ($1::text)::enrichment_status, \
+             SET enrichment_status = $1, \
                  enrichment_attempted_at = now() + ($2 || ' seconds')::interval, \
                  enrichment_error = $3 \
              WHERE id = $4",
-            next_status,
+            next_status as EnrichmentStatus,
             secs_str,
             error,
             id,
@@ -219,10 +220,10 @@ async fn mark_failed(
     } else {
         sqlx::query!(
             "UPDATE manifestations \
-             SET enrichment_status = ($1::text)::enrichment_status, \
+             SET enrichment_status = $1, \
                  enrichment_error = $2 \
              WHERE id = $3",
-            next_status,
+            next_status as EnrichmentStatus,
             error,
             id,
         )
@@ -344,7 +345,7 @@ mod tests {
     /// `cleanup_queue_fixture`.
     async fn insert_queue_fixture(
         pool: &PgPool,
-        status: &str,
+        status: EnrichmentStatus,
         attempt_count: i32,
         attempted_at_offset_secs: Option<i64>,
     ) -> (Uuid, Uuid, String) {
@@ -367,14 +368,14 @@ mod tests {
                 enrichment_status, enrichment_attempt_count, enrichment_attempted_at) \
              VALUES ($1, 'epub'::manifestation_format, $2, $3, $3, 1000, \
                      'complete'::ingestion_status, 'valid'::validation_status, \
-                     ($4::text)::enrichment_status, $5, \
+                     $4, $5, \
                      CASE WHEN $6::bigint IS NULL THEN NULL \
                           ELSE now() - ($6 || ' seconds')::interval END) \
              RETURNING id",
             work_id,
             path,
             hash,
-            status,
+            status as EnrichmentStatus,
             attempt_count,
             attempted_at_offset_secs,
         )
@@ -389,7 +390,8 @@ mod tests {
     #[sqlx::test(migrations = "./migrations")]
     async fn two_workers_race_exactly_one_claims(pool: PgPool) {
         let pool = ingestion_pool_for(&pool).await;
-        let (_work_id, m_id, _path) = insert_queue_fixture(&pool, "pending", 0, None).await;
+        let (_work_id, m_id, _path) =
+            insert_queue_fixture(&pool, EnrichmentStatus::Pending, 0, None).await;
 
         // Race two claims.  Each call acquires its own connection from the pool.
         let (a, b) = tokio::join!(claim_next(&pool), claim_next(&pool));
@@ -413,7 +415,8 @@ mod tests {
 
         // attempt_count=1 → 5-minute backoff.  Set attempted_at to 60 seconds
         // ago (still inside the window).
-        let (_work_id, m_id, _) = insert_queue_fixture(&pool, "failed", 1, Some(60)).await;
+        let (_work_id, m_id, _) =
+            insert_queue_fixture(&pool, EnrichmentStatus::Failed, 1, Some(60)).await;
         let claim_inside = claim_next(&pool).await.unwrap();
         assert!(
             claim_inside.is_none(),
@@ -446,8 +449,13 @@ mod tests {
         let config = test_config_with_max_attempts(max_attempts);
 
         // Row is `in_progress` at the Nth attempt (as if just claimed).
-        let (_work_id, m_id, _) =
-            insert_queue_fixture(&pool, "in_progress", max_attempts as i32, Some(10)).await;
+        let (_work_id, m_id, _) = insert_queue_fixture(
+            &pool,
+            EnrichmentStatus::InProgress,
+            max_attempts as i32,
+            Some(10),
+        )
+        .await;
 
         // Simulate a failed run — final attempt, no retry_after.
         mark_failed(
@@ -461,11 +469,12 @@ mod tests {
         .await
         .unwrap();
 
-        // `enrichment_status` is `enrichment_status NOT NULL`, but `::text`
-        // casts drop NOT NULL inference; `AS "enrichment_status!"` restores
-        // it so the scalar type stays `String` instead of `Option<String>`.
+        // `enrichment_status` is `enrichment_status NOT NULL`; the
+        // `AS "enrichment_status: _"` override decodes via the
+        // `EnrichmentStatus` `sqlx::Type` impl so an unknown PG variant
+        // would surface as a decode error rather than a silent miss.
         let status = sqlx::query_scalar!(
-            "SELECT enrichment_status::text AS \"enrichment_status!\" \
+            "SELECT enrichment_status AS \"enrichment_status!: EnrichmentStatus\" \
              FROM manifestations WHERE id = $1",
             m_id,
         )
@@ -473,7 +482,8 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            status, "skipped",
+            status,
+            EnrichmentStatus::Skipped,
             "row should be marked skipped at max_attempts"
         );
     }
@@ -484,16 +494,23 @@ mod tests {
     async fn shutdown_reverts_in_progress_to_pending(pool: PgPool) {
         let pool = ingestion_pool_for(&pool).await;
 
-        let (_work_id_a, m_a, _) = insert_queue_fixture(&pool, "in_progress", 1, Some(5)).await;
-        let (_work_id_b, m_b, _) = insert_queue_fixture(&pool, "in_progress", 2, Some(5)).await;
+        let (_work_id_a, m_a, _) =
+            insert_queue_fixture(&pool, EnrichmentStatus::InProgress, 1, Some(5)).await;
+        let (_work_id_b, m_b, _) =
+            insert_queue_fixture(&pool, EnrichmentStatus::InProgress, 2, Some(5)).await;
         // A `pending` row shouldn't be changed (already pending).
-        let (_work_id_c, m_c, _) = insert_queue_fixture(&pool, "pending", 0, None).await;
+        let (_work_id_c, m_c, _) =
+            insert_queue_fixture(&pool, EnrichmentStatus::Pending, 0, None).await;
 
         revert_in_progress(&pool).await.unwrap();
 
-        for (id, expected) in [(m_a, "pending"), (m_b, "pending"), (m_c, "pending")] {
+        for (id, expected) in [
+            (m_a, EnrichmentStatus::Pending),
+            (m_b, EnrichmentStatus::Pending),
+            (m_c, EnrichmentStatus::Pending),
+        ] {
             let s = sqlx::query_scalar!(
-                "SELECT enrichment_status::text AS \"enrichment_status!\" \
+                "SELECT enrichment_status AS \"enrichment_status!: EnrichmentStatus\" \
                  FROM manifestations WHERE id = $1",
                 id,
             )
@@ -502,7 +519,7 @@ mod tests {
             .unwrap();
             assert_eq!(
                 s, expected,
-                "manifestation {id} status mismatch (expected {expected}, got {s})"
+                "manifestation {id} status mismatch (expected {expected:?}, got {s:?})"
             );
         }
     }
