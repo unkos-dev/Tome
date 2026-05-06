@@ -119,10 +119,9 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: |
           set -euo pipefail
-          awk '!/^[[:space:]]*#/ && !/^[[:space:]]*$/' \
-              .github/sqlx-runtime-allowlist.txt > /tmp/sqlx-allowlist.txt
           violations=$(grep -rnE 'sqlx::query[a-z_]*\(' backend/src/ \
-              | grep -v -F -f /tmp/sqlx-allowlist.txt || true)
+              | grep -v -F -f <(grep -vE '^\s*(#|$)' .github/sqlx-runtime-allowlist.txt) \
+              || true)
           if [ -n "$violations" ]; then
               echo "Disallowed runtime sqlx::query invocations detected." >&2
               echo "Use compile-time macros (query!, query_as!, query_scalar!)" >&2

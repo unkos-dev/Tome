@@ -27,7 +27,7 @@ Run migrations as the schema owner:
   live dev DB at compile time, then check against the committed
   `backend/.sqlx/` cache for offline builds (CI, Docker). Data-path
   queries went all-macro under [UNK-167](https://linear.app/unkos/issue/UNK-167)
-  (PR series #157–#162; closer landed alongside this doc). Runtime
+  (PR series #157–#162, closer #163). Runtime
   `sqlx::query(...)` is reserved for documented carve-outs only; CI
   grep-guard (`.github/sqlx-runtime-allowlist.txt`) fails any new
   invocation outside the registry. Carve-out classes:

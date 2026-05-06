@@ -17,25 +17,29 @@
 #   4. Enum-drift test probes — `ALTER TYPE ... ADD VALUE` + cast performed
 #      at runtime in tests to detect code-vs-schema enum drift.
 #
-# Each non-comment line is a substring; if it appears in an `rg` output
-# line `path:line:content`, that runtime invocation is allowed.
+# Each non-comment line is a substring; if it appears in a `grep -rn`
+# output line `path:line:content`, that runtime invocation is allowed.
+#
+# Two pattern styles are mixed deliberately:
+#   - `path:` prefixes act as file-level blankets: every runtime sqlx
+#     invocation in that file is exempted. Use only when the entire
+#     file's runtime usage falls under one carve-out class. New runtime
+#     additions to such files pass the guard silently — review them
+#     manually against the documented carve-out classes.
+#   - `<SQL substring>` patterns scope the exemption to specific call
+#     shapes inside files that mix legitimate macros with carve-outs.
 
-# (3) db.rs — RLS context GUC plumbing (set_config + current_setting verification helper)
+# (3) db.rs file-blanket — RLS context GUC plumbing (set_config + current_setting verification helper)
 backend/src/db.rs:
 
-# (1, 4) models/manifestation_format.rs — enum-drift detection test (ALTER TYPE + ::manifestation_format probe)
+# (1, 4) models/manifestation_format.rs file-blanket — enum-drift detection test (ALTER TYPE + ::manifestation_format probe)
 backend/src/models/manifestation_format.rs:
 
-# (1, 4) models/user.rs — user_role enum-drift detection test + role-cast fixture
+# (1, 4) models/user.rs file-blanket — user_role enum-drift detection test (ALTER TYPE + ::user_role cast probe + role-cast fixture)
 backend/src/models/user.rs:
 
-# (3) test_support.rs after_connect callback — set_config('app.system_context', ...)
-SELECT set_config('app.system_context'
-
-# (4) test_support.rs role-cast drift fixtures (admin, child, adult); the
-# fixtures cast role text literals to ::user_role at runtime — same drift
-# probe class as models/user.rs.
-UPDATE users SET role =
+# (3, 4) test_support.rs file-blanket — set_config('app.system_context', ...) in after_connect callback (class 3) plus role-cast drift fixtures for admin/child/adult (class 4); test-only fixture module
+backend/src/test_support.rs:
 
 # (3) services/writeback/queue.rs RLS impostor test — set_config('app.current_user_id', ...)
 SELECT set_config('app.current_user_id'

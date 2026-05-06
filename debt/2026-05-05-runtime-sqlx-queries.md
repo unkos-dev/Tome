@@ -7,7 +7,7 @@ adopted-because: pre-UNK-70 (sqlx-cli could not reach workspace shared-postgres)
 lift-when-class: internal-refactor
 lift-when: UNK-167 (sqlx query!/query_as! macros migration) merged to main
 lifted: 2026-05-06
-superseded-by: https://github.com/unkos-dev/reverie/pull/157, https://github.com/unkos-dev/reverie/pull/158, https://github.com/unkos-dev/reverie/pull/159, https://github.com/unkos-dev/reverie/pull/160, https://github.com/unkos-dev/reverie/pull/161, https://github.com/unkos-dev/reverie/pull/162
+superseded-by: https://github.com/unkos-dev/reverie/pull/157, https://github.com/unkos-dev/reverie/pull/158, https://github.com/unkos-dev/reverie/pull/159, https://github.com/unkos-dev/reverie/pull/160, https://github.com/unkos-dev/reverie/pull/161, https://github.com/unkos-dev/reverie/pull/162, https://github.com/unkos-dev/reverie/pull/163
 ---
 
 # Runtime sqlx queries instead of compile-time macros
