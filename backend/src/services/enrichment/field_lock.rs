@@ -32,13 +32,13 @@ pub async fn is_locked(
     entity_type: EntityType,
     field: &str,
 ) -> sqlx::Result<bool> {
-    let hit: Option<Uuid> = sqlx::query_scalar(
-        "SELECT manifestation_id FROM field_locks \
+    let hit = sqlx::query_scalar!(
+        "SELECT 1 AS \"exists!\" FROM field_locks \
          WHERE manifestation_id = $1 AND entity_type = $2 AND field_name = $3",
+        manifestation_id,
+        entity_type.as_str(),
+        field,
     )
-    .bind(manifestation_id)
-    .bind(entity_type.as_str())
-    .bind(field)
     .fetch_optional(pool)
     .await?;
     Ok(hit.is_some())
@@ -51,13 +51,13 @@ pub async fn is_locked_tx(
     entity_type: EntityType,
     field: &str,
 ) -> sqlx::Result<bool> {
-    let hit: Option<Uuid> = sqlx::query_scalar(
-        "SELECT manifestation_id FROM field_locks \
+    let hit = sqlx::query_scalar!(
+        "SELECT 1 AS \"exists!\" FROM field_locks \
          WHERE manifestation_id = $1 AND entity_type = $2 AND field_name = $3",
+        manifestation_id,
+        entity_type.as_str(),
+        field,
     )
-    .bind(manifestation_id)
-    .bind(entity_type.as_str())
-    .bind(field)
     .fetch_optional(&mut *conn)
     .await?;
     Ok(hit.is_some())
@@ -70,15 +70,15 @@ pub async fn lock(
     field: &str,
     user_id: Uuid,
 ) -> sqlx::Result<()> {
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO field_locks (manifestation_id, entity_type, field_name, locked_by) \
          VALUES ($1, $2, $3, $4) \
          ON CONFLICT (manifestation_id, entity_type, field_name) DO NOTHING",
+        manifestation_id,
+        entity_type.as_str(),
+        field,
+        user_id,
     )
-    .bind(manifestation_id)
-    .bind(entity_type.as_str())
-    .bind(field)
-    .bind(user_id)
     .execute(pool)
     .await?;
     Ok(())
@@ -92,13 +92,13 @@ pub async fn unlock(
     entity_type: EntityType,
     field: &str,
 ) -> sqlx::Result<bool> {
-    let result = sqlx::query(
+    let result = sqlx::query!(
         "DELETE FROM field_locks \
          WHERE manifestation_id = $1 AND entity_type = $2 AND field_name = $3",
+        manifestation_id,
+        entity_type.as_str(),
+        field,
     )
-    .bind(manifestation_id)
-    .bind(entity_type.as_str())
-    .bind(field)
     .execute(pool)
     .await?;
     Ok(result.rows_affected() > 0)
@@ -110,23 +110,25 @@ mod tests {
     use crate::test_support::db::{app_pool_for, ingestion_pool_for};
 
     async fn setup_fixture(pool: &PgPool) -> (Uuid, Uuid) {
-        let work_id: Uuid = sqlx::query_scalar(
+        let work_id = sqlx::query_scalar!(
             "INSERT INTO works (title, sort_title) VALUES ('fl_test', 'fl_test') RETURNING id",
         )
         .fetch_one(pool)
         .await
         .unwrap();
-        let m_id: Uuid = sqlx::query_scalar(
+        let file_path = format!("/tmp/fl-test-{work_id}.epub");
+        let hash = format!("hash-fl-{work_id}");
+        let m_id = sqlx::query_scalar!(
             "INSERT INTO manifestations \
              (work_id, format, file_path, ingestion_file_hash, current_file_hash, \
               file_size_bytes, ingestion_status, validation_status) \
              VALUES ($1, 'epub'::manifestation_format, $2, $3, $3, 100, \
                      'complete'::ingestion_status, 'valid'::validation_status) \
              RETURNING id",
+            work_id,
+            file_path,
+            hash,
         )
-        .bind(work_id)
-        .bind(format!("/tmp/fl-test-{work_id}.epub"))
-        .bind(format!("hash-fl-{work_id}"))
         .fetch_one(pool)
         .await
         .unwrap();
@@ -134,13 +136,15 @@ mod tests {
     }
 
     async fn a_user(pool: &PgPool) -> Uuid {
-        sqlx::query_scalar(
+        let subject = Uuid::new_v4().to_string();
+        let email = format!("lock-test-{}@example.com", Uuid::new_v4());
+        sqlx::query_scalar!(
             "INSERT INTO users (oidc_subject, email, display_name, role, is_child) \
              VALUES ($1, $2, 'lock-test', 'adult'::user_role, false) \
              RETURNING id",
+            subject,
+            email,
         )
-        .bind(Uuid::new_v4().to_string())
-        .bind(format!("lock-test-{}@example.com", Uuid::new_v4()))
         .fetch_one(pool)
         .await
         .unwrap()

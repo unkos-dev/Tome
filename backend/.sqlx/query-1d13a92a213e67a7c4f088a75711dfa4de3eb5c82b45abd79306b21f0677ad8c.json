@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT publisher, publisher_version_id FROM manifestations WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "publisher",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "publisher_version_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true
+    ]
+  },
+  "hash": "1d13a92a213e67a7c4f088a75711dfa4de3eb5c82b45abd79306b21f0677ad8c"
+}

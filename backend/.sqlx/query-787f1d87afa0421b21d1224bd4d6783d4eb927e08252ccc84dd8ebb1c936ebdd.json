@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM field_locks WHERE manifestation_id = $1 AND entity_type = $2 AND field_name = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "787f1d87afa0421b21d1224bd4d6783d4eb927e08252ccc84dd8ebb1c936ebdd"
+}

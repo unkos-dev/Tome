@@ -87,7 +87,7 @@ pub async fn spawn_queue(
 /// Returns `Some((id, new_attempt_count))` when a row was claimed; `None`
 /// when the queue is empty (or every row is still in its backoff window).
 async fn claim_next(pool: &PgPool) -> sqlx::Result<Option<(Uuid, i32)>> {
-    let row: Option<(Uuid, i32)> = sqlx::query_as(
+    let row = sqlx::query!(
         r"WITH eligible AS (
              SELECT id, enrichment_attempt_count
              FROM manifestations
@@ -120,7 +120,7 @@ async fn claim_next(pool: &PgPool) -> sqlx::Result<Option<(Uuid, i32)>> {
     )
     .fetch_optional(pool)
     .await?;
-    Ok(row)
+    Ok(row.map(|r| (r.id, r.enrichment_attempt_count)))
 }
 
 /// Book-keeping after a `run_once` call.  Transitions rows to
@@ -169,12 +169,12 @@ async fn finish(
 }
 
 async fn mark_complete(pool: &PgPool, id: Uuid) -> sqlx::Result<()> {
-    sqlx::query(
+    sqlx::query!(
         "UPDATE manifestations \
          SET enrichment_status = 'complete', enrichment_error = NULL \
          WHERE id = $1",
+        id,
     )
-    .bind(id)
     .execute(pool)
     .await?;
     Ok(())
@@ -199,29 +199,33 @@ async fn mark_failed(
     // backoff window respects Retry-After semantics.
     if let Some(ra) = retry_after {
         let secs = i64::try_from(ra.as_secs()).unwrap_or(i64::MAX);
-        sqlx::query(
+        // `query!` borrows the bind argument; the `String` must outlive the
+        // macro expansion, so `secs.to_string()` cannot be inlined into the
+        // bind list below — keep this binding distinct.
+        let secs_str = secs.to_string();
+        sqlx::query!(
             "UPDATE manifestations \
-             SET enrichment_status = $1::enrichment_status, \
+             SET enrichment_status = ($1::text)::enrichment_status, \
                  enrichment_attempted_at = now() + ($2 || ' seconds')::interval, \
                  enrichment_error = $3 \
              WHERE id = $4",
+            next_status,
+            secs_str,
+            error,
+            id,
         )
-        .bind(next_status)
-        .bind(secs.to_string())
-        .bind(error)
-        .bind(id)
         .execute(pool)
         .await?;
     } else {
-        sqlx::query(
+        sqlx::query!(
             "UPDATE manifestations \
-             SET enrichment_status = $1::enrichment_status, \
+             SET enrichment_status = ($1::text)::enrichment_status, \
                  enrichment_error = $2 \
              WHERE id = $3",
+            next_status,
+            error,
+            id,
         )
-        .bind(next_status)
-        .bind(error)
-        .bind(id)
         .execute(pool)
         .await?;
     }
@@ -235,7 +239,7 @@ async fn mark_failed(
 /// Revert any rows that were mid-run at shutdown back to `pending` so the
 /// next worker can pick them up.
 async fn revert_in_progress(pool: &PgPool) -> sqlx::Result<()> {
-    let res = sqlx::query(
+    let res = sqlx::query!(
         "UPDATE manifestations \
          SET enrichment_status = 'pending' \
          WHERE enrichment_status = 'in_progress'",
@@ -345,33 +349,35 @@ mod tests {
         attempted_at_offset_secs: Option<i64>,
     ) -> (Uuid, Uuid, String) {
         let marker = Uuid::new_v4().simple().to_string();
-        let work_id: Uuid = sqlx::query_scalar(
+        let work_title = format!("QueueFixture-{marker}");
+        let work_id = sqlx::query_scalar!(
             "INSERT INTO works (title, sort_title) VALUES ($1, $1) RETURNING id",
+            work_title,
         )
-        .bind(format!("QueueFixture-{marker}"))
         .fetch_one(pool)
         .await
         .unwrap();
 
         let path = format!("/tmp/queue-{marker}.epub");
-        let manifestation_id: Uuid = sqlx::query_scalar(
+        let hash = format!("queue-hash-{marker}");
+        let manifestation_id = sqlx::query_scalar!(
             "INSERT INTO manifestations \
                (work_id, format, file_path, ingestion_file_hash, current_file_hash, \
                 file_size_bytes, ingestion_status, validation_status, \
                 enrichment_status, enrichment_attempt_count, enrichment_attempted_at) \
              VALUES ($1, 'epub'::manifestation_format, $2, $3, $3, 1000, \
                      'complete'::ingestion_status, 'valid'::validation_status, \
-                     $4::enrichment_status, $5, \
+                     ($4::text)::enrichment_status, $5, \
                      CASE WHEN $6::bigint IS NULL THEN NULL \
                           ELSE now() - ($6 || ' seconds')::interval END) \
              RETURNING id",
+            work_id,
+            path,
+            hash,
+            status,
+            attempt_count,
+            attempted_at_offset_secs,
         )
-        .bind(work_id)
-        .bind(&path)
-        .bind(format!("queue-hash-{marker}"))
-        .bind(status)
-        .bind(attempt_count)
-        .bind(attempted_at_offset_secs)
         .fetch_one(pool)
         .await
         .unwrap();
@@ -415,11 +421,11 @@ mod tests {
         );
 
         // Move attempted_at back 6 minutes (outside the window).
-        sqlx::query(
+        sqlx::query!(
             "UPDATE manifestations \
              SET enrichment_attempted_at = now() - INTERVAL '6 minutes' WHERE id = $1",
+            m_id,
         )
-        .bind(m_id)
         .execute(&pool)
         .await
         .unwrap();
@@ -455,12 +461,17 @@ mod tests {
         .await
         .unwrap();
 
-        let status: String =
-            sqlx::query_scalar("SELECT enrichment_status::text FROM manifestations WHERE id = $1")
-                .bind(m_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        // `enrichment_status` is `enrichment_status NOT NULL`, but `::text`
+        // casts drop NOT NULL inference; `AS "enrichment_status!"` restores
+        // it so the scalar type stays `String` instead of `Option<String>`.
+        let status = sqlx::query_scalar!(
+            "SELECT enrichment_status::text AS \"enrichment_status!\" \
+             FROM manifestations WHERE id = $1",
+            m_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
             status, "skipped",
             "row should be marked skipped at max_attempts"
@@ -481,10 +492,11 @@ mod tests {
         revert_in_progress(&pool).await.unwrap();
 
         for (id, expected) in [(m_a, "pending"), (m_b, "pending"), (m_c, "pending")] {
-            let s: String = sqlx::query_scalar(
-                "SELECT enrichment_status::text FROM manifestations WHERE id = $1",
+            let s = sqlx::query_scalar!(
+                "SELECT enrichment_status::text AS \"enrichment_status!\" \
+                 FROM manifestations WHERE id = $1",
+                id,
             )
-            .bind(id)
             .fetch_one(&pool)
             .await
             .unwrap();

@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE manifestations SET enrichment_status = 'pending' WHERE enrichment_status = 'in_progress'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "926ad6a472967f407a11acc8f49cc4b854d5b2503c7cf58828c96e19f698492b"
+}

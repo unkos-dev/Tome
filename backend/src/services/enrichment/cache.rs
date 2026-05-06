@@ -9,7 +9,6 @@
 
 use serde_json::Value;
 use sqlx::PgPool;
-use sqlx::Row;
 use time::OffsetDateTime;
 
 /// The kind of API response recorded in a cache row.
@@ -68,13 +67,16 @@ pub async fn read(
     source: &str,
     lookup_key: &str,
 ) -> sqlx::Result<Option<CachedResponse>> {
-    let row = sqlx::query(
-        "SELECT response, response_kind::text AS response_kind, http_status, fetched_at \
+    // `response_kind` is `api_cache_kind NOT NULL`, but `::text` casts drop
+    // NOT NULL inference; `AS "response_kind!"` restores it so the field
+    // type stays `String` instead of `Option<String>`.
+    let row = sqlx::query!(
+        "SELECT response, response_kind::text AS \"response_kind!\", http_status, fetched_at \
          FROM api_cache \
          WHERE source = $1 AND lookup_key = $2 AND expires_at > now()",
+        source,
+        lookup_key,
     )
-    .bind(source)
-    .bind(lookup_key)
     .fetch_optional(pool)
     .await?;
 
@@ -82,17 +84,13 @@ pub async fn read(
         return Ok(None);
     };
 
-    let response: Value = row.try_get("response")?;
-    let kind_str: String = row.try_get("response_kind")?;
-    let kind = kind_from_str(&kind_str)?;
-    let http_status: Option<i32> = row.try_get("http_status")?;
-    let fetched_at: OffsetDateTime = row.try_get("fetched_at")?;
+    let kind = kind_from_str(&row.response_kind)?;
 
     Ok(Some(CachedResponse {
-        response,
+        response: row.response,
         kind,
-        http_status,
-        fetched_at,
+        http_status: row.http_status,
+        fetched_at: row.fetched_at,
     }))
 }
 
@@ -118,24 +116,24 @@ pub async fn write(
     };
     let expires_at = now + ttl;
 
-    sqlx::query(
+    sqlx::query!(
         "INSERT INTO api_cache \
              (source, lookup_key, response, response_kind, http_status, fetched_at, expires_at) \
-         VALUES ($1, $2, $3, $4::api_cache_kind, $5, $6, $7) \
+         VALUES ($1, $2, $3, ($4::text)::api_cache_kind, $5, $6, $7) \
          ON CONFLICT (source, lookup_key) DO UPDATE SET \
              response      = EXCLUDED.response, \
              response_kind = EXCLUDED.response_kind, \
              http_status   = EXCLUDED.http_status, \
              fetched_at    = EXCLUDED.fetched_at, \
              expires_at    = EXCLUDED.expires_at",
+        source,
+        lookup_key,
+        response,
+        kind.as_str(),
+        http_status,
+        now,
+        expires_at,
     )
-    .bind(source)
-    .bind(lookup_key)
-    .bind(response)
-    .bind(kind.as_str())
-    .bind(http_status)
-    .bind(now)
-    .bind(expires_at)
     .execute(pool)
     .await?;
 
@@ -243,22 +241,22 @@ mod tests {
         .unwrap();
 
         // expires_at - fetched_at should differ: hit = 1h, miss = 5m.
-        let hit_gap: f64 = sqlx::query_scalar(
-            "SELECT EXTRACT(EPOCH FROM expires_at - fetched_at)::float8 \
+        let hit_gap = sqlx::query_scalar!(
+            "SELECT EXTRACT(EPOCH FROM expires_at - fetched_at)::float8 AS \"gap!\" \
              FROM api_cache WHERE source = $1 AND lookup_key = $2",
+            source,
+            key_hit,
         )
-        .bind(source)
-        .bind(key_hit)
         .fetch_one(&pool)
         .await
         .unwrap();
 
-        let miss_gap: f64 = sqlx::query_scalar(
-            "SELECT EXTRACT(EPOCH FROM expires_at - fetched_at)::float8 \
+        let miss_gap = sqlx::query_scalar!(
+            "SELECT EXTRACT(EPOCH FROM expires_at - fetched_at)::float8 AS \"gap!\" \
              FROM api_cache WHERE source = $1 AND lookup_key = $2",
+            source,
+            key_miss,
         )
-        .bind(source)
-        .bind(key_miss)
         .fetch_one(&pool)
         .await
         .unwrap();
