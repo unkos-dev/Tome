@@ -41,5 +41,7 @@ backend/src/models/user.rs:
 # (3, 4) test_support.rs file-blanket — set_config('app.system_context', ...) in after_connect callback (class 3) plus role-cast drift fixtures for admin/child/adult (class 4); test-only fixture module
 backend/src/test_support.rs:
 
-# (3) services/writeback/queue.rs RLS impostor test — set_config('app.current_user_id', ...)
-SELECT set_config('app.current_user_id'
+# (3) services/writeback/queue.rs:~1020 RLS impostor test — exact SQL string match
+# (not file-anchored because queue.rs is mostly macro-based business logic; a
+# blanket would over-allow future runtime drift in the file).
+SELECT set_config('app.current_user_id', $1, true)
