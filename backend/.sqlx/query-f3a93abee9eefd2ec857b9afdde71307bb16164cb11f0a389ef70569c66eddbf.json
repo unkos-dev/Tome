@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE writeback_jobs SET status = 'pending' WHERE status = 'in_progress'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "f3a93abee9eefd2ec857b9afdde71307bb16164cb11f0a389ef70569c66eddbf"
+}

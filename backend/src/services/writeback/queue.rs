@@ -101,7 +101,7 @@ pub async fn spawn_worker(
 /// serialisation primitive; the `NOT EXISTS` clause in the CTE is a
 /// common-path optimisation that avoids a unique-violation round-trip.
 pub async fn claim_next(pool: &PgPool) -> sqlx::Result<Option<(Uuid, i32)>> {
-    let result = sqlx::query_as::<_, (Uuid, i32)>(
+    let result = sqlx::query!(
         r"WITH eligible AS (
              SELECT wj.id, wj.attempt_count
              FROM writeback_jobs wj
@@ -141,7 +141,7 @@ pub async fn claim_next(pool: &PgPool) -> sqlx::Result<Option<(Uuid, i32)>> {
     .await;
 
     match result {
-        Ok(row) => Ok(row),
+        Ok(row) => Ok(row.map(|r| (r.id, r.attempt_count))),
         // A peer worker beat us to the in_progress slot for this
         // manifestation. The partial UNIQUE index did its job; treat as a
         // lost race and let the caller poll again.
@@ -214,10 +214,10 @@ async fn finish(
             // row is gone or the lookup fails, so every terminal
             // transition still produces an event that downstream consumers
             // can correlate against the job id.
-            let mid = match sqlx::query_scalar::<_, Uuid>(
+            let mid = match sqlx::query_scalar!(
                 "SELECT manifestation_id FROM writeback_jobs WHERE id = $1",
+                id,
             )
-            .bind(id)
             .fetch_optional(pool)
             .await
             {
@@ -251,24 +251,24 @@ async fn finish(
 }
 
 async fn mark_skipped(pool: &PgPool, id: Uuid, reason: &str) -> sqlx::Result<()> {
-    sqlx::query(
+    sqlx::query!(
         "UPDATE writeback_jobs \
          SET status = 'skipped', completed_at = now(), error = $1 \
          WHERE id = $2",
+        reason,
+        id,
     )
-    .bind(reason)
-    .bind(id)
     .execute(pool)
     .await?;
     Ok(())
 }
 
 async fn mark_complete(pool: &PgPool, id: Uuid) -> sqlx::Result<()> {
-    sqlx::query(
+    sqlx::query!(
         "UPDATE writeback_jobs SET status = 'complete', completed_at = now(), error = NULL \
          WHERE id = $1",
+        id,
     )
-    .bind(id)
     .execute(pool)
     .await?;
     Ok(())
@@ -296,14 +296,16 @@ async fn mark_failed(
             "writeback: job exhausted retries, transitioning to skipped"
         );
     }
-    sqlx::query(
+    sqlx::query!(
+        // sqlx macros have no built-in &str→enum mapping for `writeback_status`,
+        // so $1 binds as text and the cast to the DB enum happens in SQL.
         "UPDATE writeback_jobs \
-         SET status = $1::writeback_status, error = $2 \
+         SET status = ($1::text)::writeback_status, error = $2 \
          WHERE id = $3",
+        next_status,
+        error,
+        id,
     )
-    .bind(next_status)
-    .bind(error)
-    .bind(id)
     .execute(pool)
     .await?;
     Ok(())
@@ -312,7 +314,7 @@ async fn mark_failed(
 /// Revert any `in_progress` rows back to `pending`.  Called on shutdown
 /// AND on worker startup (crash recovery).
 pub async fn revert_in_progress(pool: &PgPool) -> sqlx::Result<()> {
-    let res = sqlx::query(
+    let res = sqlx::query!(
         "UPDATE writeback_jobs SET status = 'pending' \
          WHERE status = 'in_progress'",
     )
@@ -405,14 +407,17 @@ mod tests {
 
     /// Insert a minimal work + manifestation fixture and return ids.
     async fn insert_fixture(pool: &PgPool, marker: &str) -> (Uuid, Uuid) {
-        let work_id: Uuid = sqlx::query_scalar(
+        let title = format!("WritebackFixture-{marker}");
+        let work_id = sqlx::query_scalar!(
             "INSERT INTO works (title, sort_title) VALUES ($1, $1) RETURNING id",
+            title,
         )
-        .bind(format!("WritebackFixture-{marker}"))
         .fetch_one(pool)
         .await
         .unwrap();
-        let m_id: Uuid = sqlx::query_scalar(
+        let file_path = format!("/tmp/wb-{marker}.epub");
+        let hash = format!("wb-hash-{marker}");
+        let m_id = sqlx::query_scalar!(
             // Set enrichment_status = 'complete' so these fixtures don't
             // leak into the enrichment queue's claim_next under parallel
             // test execution (the column defaults to 'pending').
@@ -423,10 +428,10 @@ mod tests {
                      'complete'::ingestion_status, 'valid'::validation_status, \
                      'complete'::enrichment_status) \
              RETURNING id",
+            work_id,
+            file_path,
+            hash,
         )
-        .bind(work_id)
-        .bind(format!("/tmp/wb-{marker}.epub"))
-        .bind(format!("wb-hash-{marker}"))
         .fetch_one(pool)
         .await
         .unwrap();
@@ -434,11 +439,11 @@ mod tests {
     }
 
     async fn insert_job(pool: &PgPool, manifestation_id: Uuid, reason: &str) -> Uuid {
-        sqlx::query_scalar(
+        sqlx::query_scalar!(
             "INSERT INTO writeback_jobs (manifestation_id, reason) VALUES ($1, $2) RETURNING id",
+            manifestation_id,
+            reason,
         )
-        .bind(manifestation_id)
-        .bind(reason)
         .fetch_one(pool)
         .await
         .unwrap()
@@ -462,13 +467,15 @@ mod tests {
         let _job_b = insert_job(&ing_pool, m_id, "metadata").await;
         let _job_c = insert_job(&ing_pool, m_id, "metadata").await;
 
-        sqlx::query("UPDATE writeback_jobs SET status = 'in_progress' WHERE id = $1")
-            .bind(job_a)
-            .execute(&app_pool)
-            .await
-            .unwrap();
+        sqlx::query!(
+            "UPDATE writeback_jobs SET status = 'in_progress' WHERE id = $1",
+            job_a
+        )
+        .execute(&app_pool)
+        .await
+        .unwrap();
 
-        let count_eligible_siblings: i64 = sqlx::query_scalar(
+        let count_eligible_siblings = sqlx::query_scalar!(
             "SELECT count(*) FROM writeback_jobs wj \
              WHERE wj.manifestation_id = $1 \
                AND wj.status = 'pending' \
@@ -477,13 +484,14 @@ mod tests {
                  WHERE other.manifestation_id = wj.manifestation_id \
                    AND other.status = 'in_progress' \
                )",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&app_pool)
         .await
         .unwrap();
         assert_eq!(
-            count_eligible_siblings, 0,
+            count_eligible_siblings,
+            Some(0),
             "sibling pending jobs must not be eligible while one is in_progress"
         );
     }
@@ -515,12 +523,12 @@ mod tests {
         let t1 = tokio::spawn(async move {
             let mut tx = pool_a.begin().await.unwrap();
             b1.wait().await;
-            let res = sqlx::query(
+            let res = sqlx::query!(
                 "UPDATE writeback_jobs SET status = 'in_progress', \
                  last_attempted_at = now(), attempt_count = attempt_count + 1 \
                  WHERE id = $1",
+                job_a,
             )
-            .bind(job_a)
             .execute(&mut *tx)
             .await;
             // Hold the transaction briefly so the peer definitely blocks
@@ -548,12 +556,12 @@ mod tests {
             // passes — it just doesn't deterministically exercise the
             // "blocked on peer" path.
             tokio::time::sleep(Duration::from_millis(25)).await;
-            let res = sqlx::query(
+            let res = sqlx::query!(
                 "UPDATE writeback_jobs SET status = 'in_progress', \
                  last_attempted_at = now(), attempt_count = attempt_count + 1 \
                  WHERE id = $1",
+                job_b,
             )
-            .bind(job_b)
             .execute(&mut *tx)
             .await;
             match res {
@@ -594,15 +602,15 @@ mod tests {
         );
 
         // Final state: exactly one in_progress row for this manifestation.
-        let in_progress_count: i64 = sqlx::query_scalar(
+        let in_progress_count = sqlx::query_scalar!(
             "SELECT count(*) FROM writeback_jobs \
              WHERE manifestation_id = $1 AND status = 'in_progress'",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&ing_pool)
         .await
         .unwrap();
-        assert_eq!(in_progress_count, 1);
+        assert_eq!(in_progress_count, Some(1));
     }
 
     /// Jobs on distinct manifestations can run in parallel — i.e. the
@@ -621,22 +629,24 @@ mod tests {
         let _job_b = insert_job(&ing_pool, m_b, "metadata").await;
 
         // Mark m_a's job in_progress directly — simulating an active worker.
-        sqlx::query("UPDATE writeback_jobs SET status = 'in_progress' WHERE manifestation_id = $1")
-            .bind(m_a)
-            .execute(&app_pool)
-            .await
-            .unwrap();
+        sqlx::query!(
+            "UPDATE writeback_jobs SET status = 'in_progress' WHERE manifestation_id = $1",
+            m_a,
+        )
+        .execute(&app_pool)
+        .await
+        .unwrap();
 
         // m_b's job must still be eligible — NOT EXISTS clause compares on
         // m_b's manifestation_id, which is distinct from m_a's.
-        let m_b_eligible: bool = sqlx::query_scalar(
-            "SELECT NOT EXISTS (
+        let m_b_eligible = sqlx::query_scalar!(
+            r#"SELECT NOT EXISTS (
                SELECT 1 FROM writeback_jobs
                 WHERE manifestation_id = $1
                   AND status = 'in_progress'
-             )",
+             ) AS "exists!""#,
+            m_b,
         )
-        .bind(m_b)
         .fetch_one(&app_pool)
         .await
         .unwrap();
@@ -656,13 +666,13 @@ mod tests {
         let marker = Uuid::new_v4().simple().to_string();
         let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
 
-        let job_id: Uuid = sqlx::query_scalar(
+        let job_id = sqlx::query_scalar!(
             "INSERT INTO writeback_jobs \
                (manifestation_id, reason, status, attempt_count, last_attempted_at) \
              VALUES ($1, 'metadata', 'failed', 2, now() - INTERVAL '25 minutes') \
              RETURNING id",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&ing_pool)
         .await
         .unwrap();
@@ -671,11 +681,11 @@ mod tests {
         // attempt_count=2 (30-minute window).  Asserting eligibility at
         // the SQL level instead of via claim_next keeps the test safe
         // against parallel runs that might claim our row before we check.
-        let eligible_inside: bool = sqlx::query_scalar(
-            "SELECT (last_attempted_at < now() - INTERVAL '30 minutes') \
-             FROM writeback_jobs WHERE id = $1",
+        let eligible_inside = sqlx::query_scalar!(
+            r#"SELECT (last_attempted_at < now() - INTERVAL '30 minutes') AS "elig!"
+               FROM writeback_jobs WHERE id = $1"#,
+            job_id,
         )
-        .bind(job_id)
         .fetch_one(&app_pool)
         .await
         .unwrap();
@@ -685,20 +695,20 @@ mod tests {
         );
 
         // Move back past the window (UPDATE grant is on app_pool only).
-        sqlx::query(
+        sqlx::query!(
             "UPDATE writeback_jobs \
              SET last_attempted_at = now() - INTERVAL '35 minutes' WHERE id = $1",
+            job_id,
         )
-        .bind(job_id)
         .execute(&app_pool)
         .await
         .unwrap();
 
-        let eligible_outside: bool = sqlx::query_scalar(
-            "SELECT (last_attempted_at < now() - INTERVAL '30 minutes') \
-             FROM writeback_jobs WHERE id = $1",
+        let eligible_outside = sqlx::query_scalar!(
+            r#"SELECT (last_attempted_at < now() - INTERVAL '30 minutes') AS "elig!"
+               FROM writeback_jobs WHERE id = $1"#,
+            job_id,
         )
-        .bind(job_id)
         .fetch_one(&app_pool)
         .await
         .unwrap();
@@ -715,23 +725,24 @@ mod tests {
         let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
         let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
-        let job_id: Uuid = sqlx::query_scalar(
+        let job_id = sqlx::query_scalar!(
             "INSERT INTO writeback_jobs (manifestation_id, reason, status) \
              VALUES ($1, 'metadata', 'in_progress') RETURNING id",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&ing_pool)
         .await
         .unwrap();
 
         revert_in_progress(&app_pool).await.unwrap();
 
-        let status: String =
-            sqlx::query_scalar("SELECT status::text FROM writeback_jobs WHERE id = $1")
-                .bind(job_id)
-                .fetch_one(&ing_pool)
-                .await
-                .unwrap();
+        let status = sqlx::query_scalar!(
+            r#"SELECT status::text AS "status!" FROM writeback_jobs WHERE id = $1"#,
+            job_id,
+        )
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
         assert_eq!(status, "pending");
     }
 
@@ -749,12 +760,13 @@ mod tests {
             .await
             .unwrap();
 
-        let status: String =
-            sqlx::query_scalar("SELECT status::text FROM writeback_jobs WHERE id = $1")
-                .bind(job_id)
-                .fetch_one(&ing_pool)
-                .await
-                .unwrap();
+        let status = sqlx::query_scalar!(
+            r#"SELECT status::text AS "status!" FROM writeback_jobs WHERE id = $1"#,
+            job_id,
+        )
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
         assert_eq!(status, "skipped");
     }
 
@@ -767,11 +779,11 @@ mod tests {
         let ing_pool = ingestion_pool_for(&pool).await;
         let marker = Uuid::new_v4().simple().to_string();
         let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
-        let job_id: Uuid = sqlx::query_scalar(
+        let job_id = sqlx::query_scalar!(
             "INSERT INTO writeback_jobs (manifestation_id, reason, status) \
              VALUES ($1, 'metadata', 'in_progress') RETURNING id",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&ing_pool)
         .await
         .unwrap();
@@ -791,12 +803,13 @@ mod tests {
         cancel.cancel();
         handle.await.unwrap();
 
-        let status: String =
-            sqlx::query_scalar("SELECT status::text FROM writeback_jobs WHERE id = $1")
-                .bind(job_id)
-                .fetch_one(&ing_pool)
-                .await
-                .unwrap();
+        let status = sqlx::query_scalar!(
+            r#"SELECT status::text AS "status!" FROM writeback_jobs WHERE id = $1"#,
+            job_id,
+        )
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
         assert_ne!(
             status, "in_progress",
             "crash-recovery should have moved the row out of in_progress"
@@ -835,14 +848,15 @@ mod tests {
         .await
         .unwrap();
 
-        let (status, error): (String, Option<String>) =
-            sqlx::query_as("SELECT status::text, error FROM writeback_jobs WHERE id = $1")
-                .bind(job_id)
-                .fetch_one(&ing_pool)
-                .await
-                .unwrap();
-        assert_eq!(status, "complete");
-        assert_eq!(error, None);
+        let row = sqlx::query!(
+            r#"SELECT status::text AS "status!", error FROM writeback_jobs WHERE id = $1"#,
+            job_id,
+        )
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
+        assert_eq!(row.status, "complete");
+        assert_eq!(row.error, None);
     }
 
     /// `finish(Ok(Skipped))` transitions to `skipped` and records the
@@ -870,14 +884,15 @@ mod tests {
         .await
         .unwrap();
 
-        let (status, error): (String, Option<String>) =
-            sqlx::query_as("SELECT status::text, error FROM writeback_jobs WHERE id = $1")
-                .bind(job_id)
-                .fetch_one(&ing_pool)
-                .await
-                .unwrap();
-        assert_eq!(status, "skipped");
-        assert_eq!(error.as_deref(), Some("format_unsupported: pdf"));
+        let row = sqlx::query!(
+            r#"SELECT status::text AS "status!", error FROM writeback_jobs WHERE id = $1"#,
+            job_id,
+        )
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
+        assert_eq!(row.status, "skipped");
+        assert_eq!(row.error.as_deref(), Some("format_unsupported: pdf"));
     }
 
     /// `finish(Ok(Failed))` with `attempt_count < max_attempts` leaves
@@ -904,14 +919,15 @@ mod tests {
         .await
         .unwrap();
 
-        let (status, error): (String, Option<String>) =
-            sqlx::query_as("SELECT status::text, error FROM writeback_jobs WHERE id = $1")
-                .bind(job_id)
-                .fetch_one(&ing_pool)
-                .await
-                .unwrap();
-        assert_eq!(status, "failed");
-        assert_eq!(error.as_deref(), Some("regression"));
+        let row = sqlx::query!(
+            r#"SELECT status::text AS "status!", error FROM writeback_jobs WHERE id = $1"#,
+            job_id,
+        )
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
+        assert_eq!(row.status, "failed");
+        assert_eq!(row.error.as_deref(), Some("regression"));
     }
 
     /// RLS system-context policy: a writeback pool (which sets
@@ -926,12 +942,14 @@ mod tests {
         let marker = Uuid::new_v4().simple().to_string();
         let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
 
-        let res = sqlx::query("UPDATE manifestations SET current_file_hash = $1 WHERE id = $2")
-            .bind("system-context-hash")
-            .bind(m_id)
-            .execute(&wb_pool)
-            .await
-            .unwrap();
+        let res = sqlx::query!(
+            "UPDATE manifestations SET current_file_hash = $1 WHERE id = $2",
+            "system-context-hash",
+            m_id,
+        )
+        .execute(&wb_pool)
+        .await
+        .unwrap();
         assert_eq!(
             res.rows_affected(),
             1,
@@ -954,24 +972,24 @@ mod tests {
         let (_work_id, m_id) = insert_fixture(&ing_pool, &marker).await;
 
         // SELECT with no user context, no system context → must return 0 rows.
-        let visible: Option<Uuid> =
-            sqlx::query_scalar("SELECT id FROM manifestations WHERE id = $1")
-                .bind(m_id)
-                .fetch_optional(&app_pool)
-                .await
-                .unwrap();
+        let visible = sqlx::query_scalar!("SELECT id FROM manifestations WHERE id = $1", m_id,)
+            .fetch_optional(&app_pool)
+            .await
+            .unwrap();
         assert!(
             visible.is_none(),
             "a reverie_app session with neither app.current_user_id nor app.system_context must NOT see manifestations rows"
         );
 
         // UPDATE with no user context, no system context → must affect 0 rows.
-        let res = sqlx::query("UPDATE manifestations SET current_file_hash = $1 WHERE id = $2")
-            .bind("should-not-apply")
-            .bind(m_id)
-            .execute(&app_pool)
-            .await
-            .unwrap();
+        let res = sqlx::query!(
+            "UPDATE manifestations SET current_file_hash = $1 WHERE id = $2",
+            "should-not-apply",
+            m_id,
+        )
+        .execute(&app_pool)
+        .await
+        .unwrap();
         assert_eq!(
             res.rows_affected(),
             0,
@@ -993,20 +1011,27 @@ mod tests {
         // Random UUID that will not match any users row.
         let imposter = Uuid::new_v4();
 
-        let mut conn = app_pool.acquire().await.unwrap();
-        sqlx::query("BEGIN").execute(&mut *conn).await.unwrap();
+        let mut tx = app_pool.begin().await.unwrap();
+        // CARVE-OUT (UNK-167): SELECT set_config(...) is the documented
+        // GUC-mutation carve-out — sqlx macros cannot validate Postgres
+        // session-config calls against the schema at prepare time. The
+        // BEGIN/ROLLBACK shell around it is the proper sqlx transaction
+        // API; only the set_config remains runtime.
+        let imposter_str = imposter.to_string();
         sqlx::query("SELECT set_config('app.current_user_id', $1, true)")
-            .bind(imposter.to_string())
-            .execute(&mut *conn)
+            .bind(&imposter_str)
+            .execute(&mut *tx)
             .await
             .unwrap();
-        let res = sqlx::query("UPDATE manifestations SET current_file_hash = $1 WHERE id = $2")
-            .bind("imposter-hash")
-            .bind(m_id)
-            .execute(&mut *conn)
-            .await
-            .unwrap();
-        sqlx::query("ROLLBACK").execute(&mut *conn).await.unwrap();
+        let res = sqlx::query!(
+            "UPDATE manifestations SET current_file_hash = $1 WHERE id = $2",
+            "imposter-hash",
+            m_id,
+        )
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        tx.rollback().await.unwrap();
 
         assert_eq!(
             res.rows_affected(),
@@ -1038,14 +1063,17 @@ mod tests {
         .await
         .unwrap();
 
-        let (status, error): (String, Option<String>) =
-            sqlx::query_as("SELECT status::text, error FROM writeback_jobs WHERE id = $1")
-                .bind(job_id)
-                .fetch_one(&ing_pool)
-                .await
-                .unwrap();
-        assert_eq!(status, "failed");
-        let err_text = error.expect("error column should record the run_once error");
+        let row = sqlx::query!(
+            r#"SELECT status::text AS "status!", error FROM writeback_jobs WHERE id = $1"#,
+            job_id,
+        )
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
+        assert_eq!(row.status, "failed");
+        let err_text = row
+            .error
+            .expect("error column should record the run_once error");
         assert!(
             err_text.contains("transient-disk-error"),
             "error should describe the Persist error: {err_text}"
@@ -1074,17 +1102,20 @@ mod tests {
         .await
         .unwrap();
 
-        let (status, error): (String, Option<String>) =
-            sqlx::query_as("SELECT status::text, error FROM writeback_jobs WHERE id = $1")
-                .bind(job_id)
-                .fetch_one(&ing_pool)
-                .await
-                .unwrap();
+        let row = sqlx::query!(
+            r#"SELECT status::text AS "status!", error FROM writeback_jobs WHERE id = $1"#,
+            job_id,
+        )
+        .fetch_one(&ing_pool)
+        .await
+        .unwrap();
         assert_eq!(
-            status, "skipped",
+            row.status, "skipped",
             "JobNotFound must route to skipped (retry budget would be wasted on a vanished row)"
         );
-        let err_text = error.expect("error column should record the JobNotFound error");
+        let err_text = row
+            .error
+            .expect("error column should record the JobNotFound error");
         assert!(
             err_text.contains("not found"),
             "error should describe the JobNotFound: {err_text}"
