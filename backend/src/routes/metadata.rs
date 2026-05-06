@@ -59,31 +59,6 @@ struct MetadataRow {
     observation_count: i32,
 }
 
-type MetadataRowRaw = (Uuid, String, String, Value, String, f32, String, i32);
-
-fn raw_to_row(raw: MetadataRowRaw) -> MetadataRow {
-    let (
-        id,
-        field_name,
-        source,
-        new_value,
-        status,
-        confidence_score,
-        match_type,
-        observation_count,
-    ) = raw;
-    MetadataRow {
-        id,
-        field_name,
-        source,
-        new_value,
-        status,
-        confidence_score,
-        match_type,
-        observation_count,
-    }
-}
-
 async fn get_manifestation_metadata(
     current_user: CurrentUser,
     State(state): State<AppState>,
@@ -108,20 +83,35 @@ async fn get_work_metadata(
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-    let rows: Vec<MetadataRowRaw> = sqlx::query_as(
-        "SELECT mv.id, mv.field_name, mv.source, mv.new_value, mv.status::text, \
-                mv.confidence_score, mv.match_type, mv.observation_count \
+    let rows = sqlx::query!(
+        "SELECT mv.id, mv.field_name, mv.source, \
+                mv.new_value AS \"new_value!\", \
+                mv.status::text AS \"status!\", \
+                mv.confidence_score AS \"confidence_score!\", \
+                mv.match_type, mv.observation_count \
          FROM metadata_versions mv \
          JOIN manifestations m ON m.id = mv.manifestation_id \
          WHERE m.work_id = $1 \
          ORDER BY mv.last_seen_at DESC",
+        work_id,
     )
-    .bind(work_id)
     .fetch_all(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
 
-    let rows: Vec<MetadataRow> = rows.into_iter().map(raw_to_row).collect();
+    let rows: Vec<MetadataRow> = rows
+        .into_iter()
+        .map(|r| MetadataRow {
+            id: r.id,
+            field_name: r.field_name,
+            source: r.source,
+            new_value: r.new_value,
+            status: r.status,
+            confidence_score: r.confidence_score,
+            match_type: r.match_type,
+            observation_count: r.observation_count,
+        })
+        .collect();
     Ok(axum::Json(rows))
 }
 
@@ -129,19 +119,34 @@ async fn load_versions(
     tx: &mut sqlx::PgConnection,
     manifestation_id: Uuid,
 ) -> Result<Vec<MetadataRow>, AppError> {
-    let rows: Vec<MetadataRowRaw> = sqlx::query_as(
-        "SELECT id, field_name, source, new_value, status::text, \
-                confidence_score, match_type, observation_count \
+    let rows = sqlx::query!(
+        "SELECT id, field_name, source, \
+                new_value AS \"new_value!\", \
+                status::text AS \"status!\", \
+                confidence_score AS \"confidence_score!\", \
+                match_type, observation_count \
          FROM metadata_versions \
          WHERE manifestation_id = $1 \
          ORDER BY last_seen_at DESC",
+        manifestation_id,
     )
-    .bind(manifestation_id)
     .fetch_all(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
 
-    Ok(rows.into_iter().map(raw_to_row).collect())
+    Ok(rows
+        .into_iter()
+        .map(|r| MetadataRow {
+            id: r.id,
+            field_name: r.field_name,
+            source: r.source,
+            new_value: r.new_value,
+            status: r.status,
+            confidence_score: r.confidence_score,
+            match_type: r.match_type,
+            observation_count: r.observation_count,
+        })
+        .collect())
 }
 
 // ── accept / reject / revert / lock ────────────────────────────────────────
@@ -176,21 +181,27 @@ async fn accept_manifestation(
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-    let row: Option<(Uuid, String, Value, Uuid)> = sqlx::query_as(
-        "SELECT mv.id, mv.field_name, mv.new_value, m.work_id \
+    let row = sqlx::query!(
+        "SELECT mv.id, mv.field_name, \
+                mv.new_value AS \"new_value!\", \
+                m.work_id \
          FROM metadata_versions mv \
          JOIN manifestations m ON m.id = mv.manifestation_id \
          JOIN works w ON w.id = m.work_id \
          WHERE mv.id = $1 AND mv.manifestation_id = $2 \
          FOR UPDATE OF m, w",
+        payload.version_id,
+        manifestation_id,
     )
-    .bind(payload.version_id)
-    .bind(manifestation_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
 
-    let (version_id, field_name, new_value, work_id) = row.ok_or(AppError::NotFound)?;
+    let row = row.ok_or(AppError::NotFound)?;
+    let version_id = row.id;
+    let field_name = row.field_name;
+    let new_value = row.new_value;
+    let work_id = row.work_id;
 
     apply_version(
         &mut tx,
@@ -227,14 +238,14 @@ async fn reject_manifestation(
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         "UPDATE metadata_versions \
          SET status = 'rejected', resolved_by = $1, resolved_at = now() \
          WHERE id = $2 AND manifestation_id = $3",
+        current_user.user_id,
+        payload.version_id,
+        manifestation_id,
     )
-    .bind(current_user.user_id)
-    .bind(payload.version_id)
-    .bind(manifestation_id)
     .execute(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
@@ -264,12 +275,12 @@ async fn revert_manifestation(
     // Lock both the manifestation row and its work row so concurrent
     // accept/revert calls on sibling manifestations of the same work
     // serialise on `works.{title,description,language}` updates.
-    let work_id: Option<Uuid> = sqlx::query_scalar(
+    let work_id: Option<Uuid> = sqlx::query_scalar!(
         "SELECT m.work_id FROM manifestations m \
          JOIN works w ON w.id = m.work_id \
          WHERE m.id = $1 FOR UPDATE OF m, w",
+        manifestation_id,
     )
-    .bind(manifestation_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
@@ -277,12 +288,12 @@ async fn revert_manifestation(
 
     match payload.version_id {
         Some(vid) => {
-            let new_value: Option<Value> = sqlx::query_scalar(
-                "SELECT new_value FROM metadata_versions \
+            let new_value: Option<Value> = sqlx::query_scalar!(
+                "SELECT new_value AS \"new_value!\" FROM metadata_versions \
                  WHERE id = $1 AND manifestation_id = $2",
+                vid,
+                manifestation_id,
             )
-            .bind(vid)
-            .bind(manifestation_id)
             .fetch_optional(&mut *tx)
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
@@ -357,6 +368,10 @@ fn parse_entity(s: &str) -> Result<EntityType, AppError> {
 
 /// Apply a specific version to its canonical column + pointer.
 /// Reused by `/accept` and `/revert`.
+//
+// Field-dispatch with one `sqlx::query!` per supported field; macro-form
+// expansion pushed this just past clippy's 100-line threshold.
+#[allow(clippy::too_many_lines)]
 async fn apply_version(
     tx: &mut Transaction<'_, Postgres>,
     field: &str,
@@ -370,74 +385,92 @@ async fn apply_version(
         .map_or_else(|| value.to_string(), str::to_owned);
     match field {
         "title" => {
-            exec(
-                tx,
-                "UPDATE works SET title = $1, sort_title = lower($1), title_version_id = $2 WHERE id = $3",
-                &str_val,
+            sqlx::query!(
+                "UPDATE works \
+                 SET title = $1, sort_title = lower($1), title_version_id = $2 \
+                 WHERE id = $3",
+                str_val,
                 version_id,
                 work_id,
             )
-            .await?;
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
         }
         "description" => {
-            exec(
-                tx,
-                "UPDATE works SET description = $1, description_version_id = $2 WHERE id = $3",
-                &str_val,
+            sqlx::query!(
+                "UPDATE works SET description = $1, description_version_id = $2 \
+                 WHERE id = $3",
+                str_val,
                 version_id,
                 work_id,
             )
-            .await?;
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
         }
         "language" => {
-            exec(
-                tx,
-                "UPDATE works SET language = $1, language_version_id = $2 WHERE id = $3",
-                &str_val,
+            sqlx::query!(
+                "UPDATE works SET language = $1, language_version_id = $2 \
+                 WHERE id = $3",
+                str_val,
                 version_id,
                 work_id,
             )
-            .await?;
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
         }
         "publisher" => {
-            exec(
-                tx,
-                "UPDATE manifestations SET publisher = $1, publisher_version_id = $2 WHERE id = $3",
-                &str_val,
+            sqlx::query!(
+                "UPDATE manifestations \
+                 SET publisher = $1, publisher_version_id = $2 \
+                 WHERE id = $3",
+                str_val,
                 version_id,
                 manifestation_id,
             )
-            .await?;
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
         }
         "isbn_10" => {
-            exec(
-                tx,
-                "UPDATE manifestations SET isbn_10 = $1, isbn_10_version_id = $2 WHERE id = $3",
-                &str_val,
+            sqlx::query!(
+                "UPDATE manifestations \
+                 SET isbn_10 = $1, isbn_10_version_id = $2 \
+                 WHERE id = $3",
+                str_val,
                 version_id,
                 manifestation_id,
             )
-            .await?;
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
         }
         "isbn_13" => {
-            exec(
-                tx,
-                "UPDATE manifestations SET isbn_13 = $1, isbn_13_version_id = $2 WHERE id = $3",
-                &str_val,
+            sqlx::query!(
+                "UPDATE manifestations \
+                 SET isbn_13 = $1, isbn_13_version_id = $2 \
+                 WHERE id = $3",
+                str_val,
                 version_id,
                 manifestation_id,
             )
-            .await?;
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
         }
         "pub_date" => {
             let date = parse_iso_date(&str_val)
                 .map_err(|e| AppError::Validation(format!("invalid pub_date: {e}")))?;
-            sqlx::query(
-                "UPDATE manifestations SET pub_date = $1, pub_date_version_id = $2 WHERE id = $3",
+            sqlx::query!(
+                "UPDATE manifestations \
+                 SET pub_date = $1, pub_date_version_id = $2 \
+                 WHERE id = $3",
+                date,
+                version_id,
+                manifestation_id,
             )
-            .bind(date)
-            .bind(version_id)
-            .bind(manifestation_id)
             .execute(&mut **tx)
             .await
             .map_err(|e| AppError::Internal(e.into()))?;
@@ -465,12 +498,14 @@ async fn enqueue_writeback(
     } else {
         "metadata"
     };
-    sqlx::query("INSERT INTO writeback_jobs (manifestation_id, reason) VALUES ($1, $2)")
-        .bind(manifestation_id)
-        .bind(reason)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+    sqlx::query!(
+        "INSERT INTO writeback_jobs (manifestation_id, reason) VALUES ($1, $2)",
+        manifestation_id,
+        reason,
+    )
+    .execute(&mut **tx)
+    .await
+    .map_err(|e| AppError::Internal(e.into()))?;
     Ok(())
 }
 
@@ -480,69 +515,81 @@ async fn clear_field(
     manifestation_id: Uuid,
     work_id: Uuid,
 ) -> Result<(), AppError> {
-    let sql = match field {
+    match field {
         "title" => {
             return Err(AppError::Validation(
                 "cannot clear title — revert to a specific version instead".into(),
             ));
         }
-        "description" => Some(("works", "description", "description_version_id", work_id)),
-        "language" => Some(("works", "language", "language_version_id", work_id)),
-        "publisher" => Some((
-            "manifestations",
-            "publisher",
-            "publisher_version_id",
-            manifestation_id,
-        )),
-        "pub_date" => Some((
-            "manifestations",
-            "pub_date",
-            "pub_date_version_id",
-            manifestation_id,
-        )),
-        "isbn_10" => Some((
-            "manifestations",
-            "isbn_10",
-            "isbn_10_version_id",
-            manifestation_id,
-        )),
-        "isbn_13" => Some((
-            "manifestations",
-            "isbn_13",
-            "isbn_13_version_id",
-            manifestation_id,
-        )),
+        "description" => {
+            sqlx::query!(
+                "UPDATE works SET description = NULL, description_version_id = NULL \
+                 WHERE id = $1",
+                work_id,
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+        }
+        "language" => {
+            sqlx::query!(
+                "UPDATE works SET language = NULL, language_version_id = NULL \
+                 WHERE id = $1",
+                work_id,
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+        }
+        "publisher" => {
+            sqlx::query!(
+                "UPDATE manifestations \
+                 SET publisher = NULL, publisher_version_id = NULL \
+                 WHERE id = $1",
+                manifestation_id,
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+        }
+        "pub_date" => {
+            sqlx::query!(
+                "UPDATE manifestations \
+                 SET pub_date = NULL, pub_date_version_id = NULL \
+                 WHERE id = $1",
+                manifestation_id,
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+        }
+        "isbn_10" => {
+            sqlx::query!(
+                "UPDATE manifestations \
+                 SET isbn_10 = NULL, isbn_10_version_id = NULL \
+                 WHERE id = $1",
+                manifestation_id,
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+        }
+        "isbn_13" => {
+            sqlx::query!(
+                "UPDATE manifestations \
+                 SET isbn_13 = NULL, isbn_13_version_id = NULL \
+                 WHERE id = $1",
+                manifestation_id,
+            )
+            .execute(&mut **tx)
+            .await
+            .map_err(|e| AppError::Internal(e.into()))?;
+        }
         other => {
             return Err(AppError::Validation(format!("unsupported field '{other}'")));
         }
-    };
-    let Some((table, col, vid_col, row_id)) = sql else {
-        return Ok(());
-    };
-    let q = format!("UPDATE {table} SET {col} = NULL, {vid_col} = NULL WHERE id = $1");
-    sqlx::query(&q)
-        .bind(row_id)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+    }
     enqueue_writeback(tx, manifestation_id, field).await?;
-    Ok(())
-}
-
-async fn exec(
-    tx: &mut Transaction<'_, Postgres>,
-    sql: &str,
-    value: &str,
-    version_id: Uuid,
-    row_id: Uuid,
-) -> Result<(), AppError> {
-    sqlx::query(sql)
-        .bind(value)
-        .bind(version_id)
-        .bind(row_id)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
     Ok(())
 }
 
@@ -622,17 +669,18 @@ mod tests {
         field: &str,
         value: serde_json::Value,
     ) -> Uuid {
-        sqlx::query_scalar(
+        let hash = format!("hash-{}", Uuid::new_v4()).into_bytes();
+        sqlx::query_scalar!(
             "INSERT INTO metadata_versions \
                 (manifestation_id, source, field_name, new_value, value_hash, \
                  match_type, confidence_score, status) \
              VALUES ($1, 'openlibrary', $2, $3, $4, 'isbn', 0.96, 'pending'::metadata_review_status) \
              RETURNING id",
+            manifestation_id,
+            field,
+            value,
+            hash,
         )
-        .bind(manifestation_id)
-        .bind(field)
-        .bind(&value)
-        .bind(format!("hash-{}", Uuid::new_v4()).into_bytes())
         .fetch_one(ingestion_pool)
         .await
         .expect("insert metadata_versions")
@@ -664,28 +712,27 @@ mod tests {
             response.text()
         );
 
-        let title: String = sqlx::query_scalar("SELECT title FROM works WHERE id = $1")
-            .bind(work_id)
+        let title: String = sqlx::query_scalar!("SELECT title FROM works WHERE id = $1", work_id)
             .fetch_one(&app_pool)
             .await
             .expect("fetch title");
         assert_eq!(title, new_title, "canonical title not written");
 
         let pointer: Option<Uuid> =
-            sqlx::query_scalar("SELECT title_version_id FROM works WHERE id = $1")
-                .bind(work_id)
+            sqlx::query_scalar!("SELECT title_version_id FROM works WHERE id = $1", work_id)
                 .fetch_one(&app_pool)
                 .await
                 .expect("fetch title_version_id");
         assert_eq!(pointer, Some(version_id), "version pointer not wired");
 
         // Accept must have enqueued exactly one writeback_jobs row.
-        let job_count: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM writeback_jobs WHERE manifestation_id = $1")
-                .bind(m_id)
-                .fetch_one(&app_pool)
-                .await
-                .expect("fetch job count");
+        let job_count: i64 = sqlx::query_scalar!(
+            "SELECT count(*) AS \"count!\" FROM writeback_jobs WHERE manifestation_id = $1",
+            m_id,
+        )
+        .fetch_one(&app_pool)
+        .await
+        .expect("fetch job count");
         assert_eq!(
             job_count, 1,
             "accept must enqueue exactly one writeback job; got {job_count}"
@@ -716,23 +763,29 @@ mod tests {
             .await;
         assert_eq!(response.status_code(), StatusCode::OK);
 
-        let row: (String, Option<Uuid>) =
-            sqlx::query_as("SELECT status::text, resolved_by FROM metadata_versions WHERE id = $1")
-                .bind(version_id)
-                .fetch_one(&app_pool)
-                .await
-                .expect("fetch version");
-        assert_eq!(row.0, "rejected");
-        assert_eq!(row.1, Some(admin_id), "resolved_by should record admin id");
+        let row = sqlx::query!(
+            "SELECT status::text AS status, resolved_by FROM metadata_versions WHERE id = $1",
+            version_id,
+        )
+        .fetch_one(&app_pool)
+        .await
+        .expect("fetch version");
+        assert_eq!(row.status.as_deref(), Some("rejected"));
+        assert_eq!(
+            row.resolved_by,
+            Some(admin_id),
+            "resolved_by should record admin id"
+        );
 
         // Reject does NOT change the canonical pointer, so it must NOT
         // enqueue a writeback job.
-        let job_count: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM writeback_jobs WHERE manifestation_id = $1")
-                .bind(m_id)
-                .fetch_one(&app_pool)
-                .await
-                .expect("fetch job count");
+        let job_count: i64 = sqlx::query_scalar!(
+            "SELECT count(*) AS \"count!\" FROM writeback_jobs WHERE manifestation_id = $1",
+            m_id,
+        )
+        .fetch_one(&app_pool)
+        .await
+        .expect("fetch job count");
         assert_eq!(
             job_count, 0,
             "reject must NOT enqueue writeback; got {job_count}"
@@ -753,13 +806,15 @@ mod tests {
         let initial = format!("To Be Cleared {marker}");
         let version_id =
             insert_version(&ing_pool, m_id, "description", serde_json::json!(&initial)).await;
-        sqlx::query("UPDATE works SET description = $1, description_version_id = $2 WHERE id = $3")
-            .bind(&initial)
-            .bind(version_id)
-            .bind(work_id)
-            .execute(&ing_pool)
-            .await
-            .expect("seed description");
+        sqlx::query!(
+            "UPDATE works SET description = $1, description_version_id = $2 WHERE id = $3",
+            initial,
+            version_id,
+            work_id,
+        )
+        .execute(&ing_pool)
+        .await
+        .expect("seed description");
 
         let server = test_support::db::server_with_real_pools(&app_pool, &ing_pool);
         let response = server
@@ -777,23 +832,28 @@ mod tests {
             response.text()
         );
 
-        let row: (Option<String>, Option<Uuid>) =
-            sqlx::query_as("SELECT description, description_version_id FROM works WHERE id = $1")
-                .bind(work_id)
-                .fetch_one(&app_pool)
-                .await
-                .expect("fetch work");
-        assert_eq!(row.0, None, "description should be cleared");
-        assert_eq!(row.1, None, "version pointer should be cleared");
+        let row = sqlx::query!(
+            "SELECT description, description_version_id FROM works WHERE id = $1",
+            work_id,
+        )
+        .fetch_one(&app_pool)
+        .await
+        .expect("fetch work");
+        assert_eq!(row.description, None, "description should be cleared");
+        assert_eq!(
+            row.description_version_id, None,
+            "version pointer should be cleared"
+        );
 
         // Revert must enqueue exactly one writeback_jobs row — the OPF
         // still needs the field cleared on disk.
-        let job_count: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM writeback_jobs WHERE manifestation_id = $1")
-                .bind(m_id)
-                .fetch_one(&app_pool)
-                .await
-                .expect("fetch job count");
+        let job_count: i64 = sqlx::query_scalar!(
+            "SELECT count(*) AS \"count!\" FROM writeback_jobs WHERE manifestation_id = $1",
+            m_id,
+        )
+        .fetch_one(&app_pool)
+        .await
+        .expect("fetch job count");
         assert_eq!(
             job_count, 1,
             "revert must enqueue exactly one writeback job; got {job_count}"
@@ -835,12 +895,13 @@ mod tests {
         }
 
         // Emitter does NOT dedup; worker does.  Two accepts → two rows.
-        let job_count: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM writeback_jobs WHERE manifestation_id = $1")
-                .bind(m_id)
-                .fetch_one(&app_pool)
-                .await
-                .expect("fetch job count");
+        let job_count: i64 = sqlx::query_scalar!(
+            "SELECT count(*) AS \"count!\" FROM writeback_jobs WHERE manifestation_id = $1",
+            m_id,
+        )
+        .fetch_one(&app_pool)
+        .await
+        .expect("fetch job count");
         assert_eq!(job_count, 2, "two accepts must enqueue two rows (no dedup)");
     }
 }

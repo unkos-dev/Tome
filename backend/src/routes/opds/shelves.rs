@@ -47,17 +47,17 @@ async fn assert_shelf_owned(
     let mut tx = db::acquire_with_rls(&state.pool, user_id)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
-    let row: Option<(String,)> = sqlx::query_as(
+    let row = sqlx::query_scalar!(
         "SELECT name FROM shelves \
          WHERE id = $1 \
            AND user_id = current_setting('app.current_user_id', true)::uuid \
          LIMIT 1",
+        shelf_id,
     )
-    .bind(shelf_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
-    row.map(|(name,)| name).ok_or(AppError::NotFound)
+    row.ok_or(AppError::NotFound)
 }
 
 async fn shelf_root(

@@ -38,15 +38,15 @@ async fn trigger(
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         "UPDATE manifestations \
          SET enrichment_status = 'pending', \
              enrichment_attempt_count = 0, \
              enrichment_attempted_at = NULL, \
              enrichment_error = NULL \
          WHERE id = $1",
+        id,
     )
-    .bind(id)
     .execute(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
@@ -76,8 +76,7 @@ async fn dry_run(
     let mut tx = db::acquire_with_rls(&state.pool, current_user.user_id)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
-    let visible: Option<Uuid> = sqlx::query_scalar("SELECT id FROM manifestations WHERE id = $1")
-        .bind(id)
+    let visible = sqlx::query_scalar!("SELECT id FROM manifestations WHERE id = $1", id)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
@@ -111,8 +110,8 @@ async fn status(
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-    let rows: Vec<(String, i64)> = sqlx::query_as(
-        "SELECT enrichment_status::text, COUNT(*)::bigint \
+    let rows = sqlx::query!(
+        "SELECT enrichment_status::text AS \"status!\", COUNT(*)::bigint AS \"count!\" \
          FROM manifestations \
          GROUP BY enrichment_status",
     )
@@ -127,13 +126,13 @@ async fn status(
         failed: 0,
         skipped: 0,
     };
-    for (k, v) in rows {
-        match k.as_str() {
-            "pending" => summary.pending = v,
-            "in_progress" => summary.in_progress = v,
-            "complete" => summary.complete = v,
-            "failed" => summary.failed = v,
-            "skipped" => summary.skipped = v,
+    for r in rows {
+        match r.status.as_str() {
+            "pending" => summary.pending = r.count,
+            "in_progress" => summary.in_progress = r.count,
+            "complete" => summary.complete = r.count,
+            "failed" => summary.failed = r.count,
+            "skipped" => summary.skipped = r.count,
             _ => {}
         }
     }
@@ -187,15 +186,15 @@ mod tests {
             test_support::db::insert_work_and_manifestation(&ing_pool, &marker).await;
 
         // Pre-set the manifestation to a "failed" state with retries logged.
-        sqlx::query(
+        sqlx::query!(
             "UPDATE manifestations \
              SET enrichment_status = 'failed'::enrichment_status, \
                  enrichment_attempt_count = 3, \
                  enrichment_attempted_at = now(), \
                  enrichment_error = 'simulated failure' \
              WHERE id = $1",
+            m_id,
         )
-        .bind(m_id)
         .execute(&ing_pool)
         .await
         .expect("seed failed state");
@@ -214,16 +213,21 @@ mod tests {
 
         // Verify via ingestion_pool — `manifestations` is RLS-gated under
         // `reverie_app` and the verification SELECT carries no session context.
-        let row: (String, i32, Option<String>) = sqlx::query_as(
-            "SELECT enrichment_status::text, enrichment_attempt_count, enrichment_error \
+        let row = sqlx::query!(
+            "SELECT enrichment_status::text AS status, \
+                    enrichment_attempt_count, enrichment_error \
              FROM manifestations WHERE id = $1",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&ing_pool)
         .await
         .expect("fetch manifestation");
-        assert_eq!(row.0, "pending", "enrichment_status not reset");
-        assert_eq!(row.1, 0, "attempt_count not reset");
-        assert_eq!(row.2, None, "enrichment_error not cleared");
+        assert_eq!(
+            row.status.as_deref(),
+            Some("pending"),
+            "enrichment_status not reset"
+        );
+        assert_eq!(row.enrichment_attempt_count, 0, "attempt_count not reset");
+        assert_eq!(row.enrichment_error, None, "enrichment_error not cleared");
     }
 }

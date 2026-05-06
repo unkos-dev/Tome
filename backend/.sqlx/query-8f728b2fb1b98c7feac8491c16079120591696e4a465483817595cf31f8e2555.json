@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE users SET theme_preference = $1, updated_at = now() WHERE id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        {
+          "Custom": {
+            "name": "theme_preference",
+            "kind": {
+              "Enum": [
+                "system",
+                "light",
+                "dark"
+              ]
+            }
+          }
+        },
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8f728b2fb1b98c7feac8491c16079120591696e4a465483817595cf31f8e2555"
+}

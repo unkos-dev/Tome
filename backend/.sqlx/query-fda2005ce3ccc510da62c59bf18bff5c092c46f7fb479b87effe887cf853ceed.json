@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT mv.id, mv.field_name, mv.new_value AS \"new_value!\", m.work_id FROM metadata_versions mv JOIN manifestations m ON m.id = mv.manifestation_id JOIN works w ON w.id = m.work_id WHERE mv.id = $1 AND mv.manifestation_id = $2 FOR UPDATE OF m, w",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "field_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "new_value!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "work_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "fda2005ce3ccc510da62c59bf18bff5c092c46f7fb479b87effe887cf853ceed"
+}

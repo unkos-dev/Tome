@@ -7,7 +7,6 @@ use axum::http::{StatusCode, header};
 use axum::response::Response;
 use axum::routing::get;
 use time::OffsetDateTime;
-use uuid::Uuid;
 
 use crate::auth::basic_only::BasicOnly;
 use crate::db;
@@ -50,7 +49,7 @@ async fn opds_root(
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-    let shelves: Vec<(Uuid, String)> = sqlx::query_as(
+    let shelves = sqlx::query!(
         "SELECT id, name FROM shelves \
          WHERE user_id = current_setting('app.current_user_id', true)::uuid \
          ORDER BY name ASC",
@@ -68,11 +67,11 @@ async fn opds_root(
     );
     fb.add_search_link("/opds/library/opensearch.xml");
     fb.add_navigation_entry(&feed_urn("/opds/library"), "Library", "/opds/library", true);
-    for (shelf_id, name) in shelves {
+    for row in shelves {
         fb.add_navigation_entry(
-            &shelf_urn(shelf_id),
-            &name,
-            &format!("/opds/shelves/{shelf_id}"),
+            &shelf_urn(row.id),
+            &row.name,
+            &format!("/opds/shelves/{}", row.id),
             true,
         );
     }

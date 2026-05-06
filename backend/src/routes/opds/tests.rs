@@ -41,25 +41,26 @@ async fn insert_epub_manifestation(
         .map(|b| format!("{b:02x}"))
         .collect();
 
-    let work_id: Uuid =
-        sqlx::query_scalar("INSERT INTO works (title, sort_title) VALUES ($1, $1) RETURNING id")
-            .bind(title)
-            .fetch_one(ingestion_pool)
-            .await
-            .expect("insert work");
+    let work_id: Uuid = sqlx::query_scalar!(
+        "INSERT INTO works (title, sort_title) VALUES ($1, $1) RETURNING id",
+        title,
+    )
+    .fetch_one(ingestion_pool)
+    .await
+    .expect("insert work");
 
-    let m_id: Uuid = sqlx::query_scalar(
+    let m_id: Uuid = sqlx::query_scalar!(
         "INSERT INTO manifestations \
             (work_id, format, file_path, ingestion_file_hash, current_file_hash, \
              file_size_bytes, ingestion_status, validation_status) \
          VALUES ($1, 'epub'::manifestation_format, $2, $3, $3, $4, \
                  'complete'::ingestion_status, 'valid'::validation_status) \
          RETURNING id",
+        work_id,
+        file_path,
+        hash,
+        epub_bytes.len() as i64,
     )
-    .bind(work_id)
-    .bind(&file_path)
-    .bind(&hash)
-    .bind(epub_bytes.len() as i64)
     .fetch_one(ingestion_pool)
     .await
     .expect("insert manifestation");
@@ -153,11 +154,13 @@ async fn revoked_token_rejected(pool: PgPool) {
     let ingestion_pool = test_support::db::ingestion_pool_for(&pool).await;
     let (user_id, basic) = test_support::db::create_admin_and_basic_auth(&app_pool).await;
     // Revoke the only token for the user.
-    sqlx::query("UPDATE device_tokens SET revoked_at = now() WHERE user_id = $1")
-        .bind(user_id)
-        .execute(&app_pool)
-        .await
-        .expect("revoke");
+    sqlx::query!(
+        "UPDATE device_tokens SET revoked_at = now() WHERE user_id = $1",
+        user_id,
+    )
+    .execute(&app_pool)
+    .await
+    .expect("revoke");
 
     let tmp = tempfile::TempDir::new().unwrap();
     let server = test_support::db::server_with_opds_enabled(&app_pool, &ingestion_pool, tmp.path());
@@ -444,22 +447,23 @@ async fn download_streams_and_path_traversal_403(pool: PgPool) {
     std::fs::write(&outside_file, b"not real epub").unwrap();
     let outside_abs = std::fs::canonicalize(&outside_file).unwrap();
 
-    let work_id: Uuid = sqlx::query_scalar(
+    let work_id: Uuid = sqlx::query_scalar!(
         "INSERT INTO works (title, sort_title) VALUES ('Outside', 'Outside') RETURNING id",
     )
     .fetch_one(&ingestion_pool)
     .await
     .unwrap();
-    let outside_m: Uuid = sqlx::query_scalar(
+    let outside_path = outside_abs.to_string_lossy().into_owned();
+    let outside_m: Uuid = sqlx::query_scalar!(
         "INSERT INTO manifestations \
             (work_id, format, file_path, ingestion_file_hash, current_file_hash, \
              file_size_bytes, ingestion_status, validation_status) \
          VALUES ($1, 'epub'::manifestation_format, $2, 'outside-hash', 'outside-hash', 13, \
                  'complete'::ingestion_status, 'valid'::validation_status) \
          RETURNING id",
+        work_id,
+        outside_path,
     )
-    .bind(work_id)
-    .bind(outside_abs.to_string_lossy().into_owned())
     .fetch_one(&ingestion_pool)
     .await
     .unwrap();
@@ -554,7 +558,7 @@ async fn series_feed_renders_all_manifestations(pool: PgPool) {
     let (_admin, basic) = test_support::db::create_admin_and_basic_auth(&app_pool).await;
     let tmp = tempfile::TempDir::new().unwrap();
 
-    let series_id: Uuid = sqlx::query_scalar(
+    let series_id: Uuid = sqlx::query_scalar!(
         "INSERT INTO series (name, sort_name) VALUES ('Long Saga', 'Long Saga') RETURNING id",
     )
     .fetch_one(&ingestion_pool)
@@ -567,40 +571,47 @@ async fn series_feed_renders_all_manifestations(pool: PgPool) {
     // filtered out. Fix: no cursor on series, whole series on one page.
     let mut expected: Vec<Uuid> = Vec::with_capacity(51);
     for i in 0..51u32 {
-        let work_id: Uuid = sqlx::query_scalar(
+        let title = format!("Volume {i:03}");
+        let work_id: Uuid = sqlx::query_scalar!(
             "INSERT INTO works (title, sort_title) VALUES ($1, $1) RETURNING id",
+            title,
         )
-        .bind(format!("Volume {i:03}"))
         .fetch_one(&ingestion_pool)
         .await
         .expect("insert work");
         let created_at = if i == 50 {
-            "2023-01-01T00:00:00Z"
+            time::macros::datetime!(2023-01-01 00:00:00 UTC)
         } else {
-            "2020-01-01T00:00:00Z"
+            time::macros::datetime!(2020-01-01 00:00:00 UTC)
         };
-        let m_id: Uuid = sqlx::query_scalar(
+        let file_path = format!("/tmp/series-{i}.epub");
+        let hash = format!("series-hash-{i}");
+        let m_id: Uuid = sqlx::query_scalar!(
             "INSERT INTO manifestations \
                 (work_id, format, file_path, ingestion_file_hash, current_file_hash, \
                  file_size_bytes, ingestion_status, validation_status, created_at) \
              VALUES ($1, 'epub'::manifestation_format, $2, $3, $3, 1000, \
-                     'complete'::ingestion_status, 'valid'::validation_status, $4::timestamptz) \
+                     'complete'::ingestion_status, 'valid'::validation_status, $4) \
              RETURNING id",
+            work_id,
+            file_path,
+            hash,
+            created_at,
         )
-        .bind(work_id)
-        .bind(format!("/tmp/series-{i}.epub"))
-        .bind(format!("series-hash-{i}"))
-        .bind(created_at)
         .fetch_one(&ingestion_pool)
         .await
         .expect("insert manifestation");
-        sqlx::query("INSERT INTO series_works (series_id, work_id, position) VALUES ($1, $2, $3)")
-            .bind(series_id)
-            .bind(work_id)
-            .bind(i as i32 + 1)
-            .execute(&ingestion_pool)
-            .await
-            .expect("insert series_works");
+        let position = f64::from(i as i32 + 1);
+        sqlx::query!(
+            "INSERT INTO series_works (series_id, work_id, position) \
+             VALUES ($1, $2, $3::float8)",
+            series_id,
+            work_id,
+            position,
+        )
+        .execute(&ingestion_pool)
+        .await
+        .expect("insert series_works");
         expected.push(m_id);
     }
 
@@ -786,23 +797,26 @@ async fn exact_page_size_has_no_next_link(pool: PgPool) {
     // Sentinel for `has_more = rows.len() > page_size`. page_size=50 in
     // server_with_opds_enabled, so insert exactly 50 rows.
     for i in 0..50u32 {
-        let work_id: Uuid = sqlx::query_scalar(
+        let title = format!("Book {i:03}");
+        let work_id: Uuid = sqlx::query_scalar!(
             "INSERT INTO works (title, sort_title) VALUES ($1, $1) RETURNING id",
+            title,
         )
-        .bind(format!("Book {i:03}"))
         .fetch_one(&ingestion_pool)
         .await
         .expect("insert work");
-        sqlx::query(
+        let file_path = format!("/tmp/exact-{i}.epub");
+        let hash = format!("exact-hash-{i}");
+        sqlx::query!(
             "INSERT INTO manifestations \
                 (work_id, format, file_path, ingestion_file_hash, current_file_hash, \
                  file_size_bytes, ingestion_status, validation_status) \
              VALUES ($1, 'epub'::manifestation_format, $2, $3, $3, 1000, \
                      'complete'::ingestion_status, 'valid'::validation_status)",
+            work_id,
+            file_path,
+            hash,
         )
-        .bind(work_id)
-        .bind(format!("/tmp/exact-{i}.epub"))
-        .bind(format!("exact-hash-{i}"))
         .execute(&ingestion_pool)
         .await
         .expect("insert manifestation");
