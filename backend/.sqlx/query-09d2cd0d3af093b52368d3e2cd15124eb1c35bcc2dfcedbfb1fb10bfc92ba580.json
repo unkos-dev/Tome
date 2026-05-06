@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT a.name FROM authors a JOIN work_authors wa ON wa.author_id = a.id JOIN manifestations m ON m.work_id = wa.work_id WHERE m.file_path = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "09d2cd0d3af093b52368d3e2cd15124eb1c35bcc2dfcedbfb1fb10bfc92ba580"
+}

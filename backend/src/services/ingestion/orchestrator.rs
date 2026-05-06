@@ -88,18 +88,16 @@ pub async fn scan_once(config: &Config, pool: &PgPool) -> Result<ScanResult, any
     // lock (released when the connection returns to the pool) rather than a
     // transaction-level lock, because the scan spans many transactions.
     let mut lock_conn = pool.acquire().await?;
-    sqlx::query("SELECT pg_advisory_lock($1)")
-        .bind(SCAN_ADVISORY_LOCK_ID)
-        .execute(&mut *lock_conn)
+    sqlx::query!("SELECT pg_advisory_lock($1)", SCAN_ADVISORY_LOCK_ID)
+        .fetch_one(&mut *lock_conn)
         .await?;
 
     let result = scan_once_inner(config, pool).await;
 
     // Release the advisory lock explicitly (also released on connection drop).
     // Log a warning if the unlock fails — the lock will still release on connection drop.
-    if let Err(e) = sqlx::query("SELECT pg_advisory_unlock($1)")
-        .bind(SCAN_ADVISORY_LOCK_ID)
-        .execute(&mut *lock_conn)
+    if let Err(e) = sqlx::query!("SELECT pg_advisory_unlock($1)", SCAN_ADVISORY_LOCK_ID)
+        .fetch_one(&mut *lock_conn)
         .await
     {
         tracing::warn!(error = %e, "failed to explicitly release advisory scan lock; will release on connection drop");
@@ -291,11 +289,11 @@ async fn process_file(
     };
 
     // Step 2: Duplicate check BEFORE copying
-    let duplicate = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS(SELECT 1 FROM manifestations WHERE ingestion_file_hash = $1 OR file_path = $2)",
+    let duplicate = sqlx::query_scalar!(
+        "SELECT EXISTS(SELECT 1 FROM manifestations WHERE ingestion_file_hash = $1 OR file_path = $2) AS \"exists!\"",
+        &source_hash,
+        &dest_path_str,
     )
-    .bind(&source_hash)
-    .bind(&dest_path_str)
     .fetch_one(pool)
     .await;
 
@@ -585,21 +583,26 @@ async fn commit_ingest(
     };
 
     // 2. Insert manifestation with NULL canonical + NULL pointers.
-    let manifestation_id: Uuid = sqlx::query_scalar(
+    //    `format` and `ingestion_status` are bound as their typed Rust enums
+    //    (sqlx::Type impls). `validation_status` has no Rust counterpart and
+    //    is bound as text + cast in SQL (`($N::text)::validation_status`).
+    let file_size = copy_result.file_size.cast_signed();
+    let ingestion_status = IngestionStatus::Complete;
+    let manifestation_id = sqlx::query_scalar!(
         "INSERT INTO manifestations \
              (work_id, format, file_path, ingestion_file_hash, current_file_hash, \
               file_size_bytes, ingestion_status, validation_status, accessibility_metadata) \
-         VALUES ($1, $2, $3, $4, $4, $5, $6, $7::validation_status, $8) \
+         VALUES ($1, $2, $3, $4, $4, $5, $6, ($7::text)::validation_status, $8) \
          RETURNING id",
+        work_id,
+        format as ManifestationFormat,
+        final_path_str,
+        &copy_result.sha256,
+        file_size,
+        ingestion_status as IngestionStatus,
+        validation_status_str,
+        accessibility_metadata.as_ref(),
     )
-    .bind(work_id)
-    .bind(format)
-    .bind(final_path_str)
-    .bind(&copy_result.sha256)
-    .bind(copy_result.file_size.cast_signed())
-    .bind(IngestionStatus::Complete)
-    .bind(validation_status_str)
-    .bind(accessibility_metadata)
     .fetch_one(&mut *tx)
     .await?;
 
@@ -646,22 +649,22 @@ async fn commit_ingest(
     let publisher = extracted.as_ref().and_then(|m| m.publisher.clone());
     let pub_date = extracted.as_ref().and_then(|m| m.pub_date);
 
-    sqlx::query(
+    sqlx::query!(
         "UPDATE manifestations SET \
             isbn_10 = $1, isbn_13 = $2, publisher = $3, pub_date = $4, \
             isbn_10_version_id = $5, isbn_13_version_id = $6, \
             publisher_version_id = $7, pub_date_version_id = $8 \
          WHERE id = $9",
+        isbn_10.as_deref(),
+        isbn_13.as_deref(),
+        publisher.as_deref(),
+        pub_date,
+        draft_ids.get("isbn_10").copied(),
+        draft_ids.get("isbn_13").copied(),
+        draft_ids.get("publisher").copied(),
+        draft_ids.get("pub_date").copied(),
+        manifestation_id,
     )
-    .bind(&isbn_10)
-    .bind(&isbn_13)
-    .bind(&publisher)
-    .bind(pub_date)
-    .bind(draft_ids.get("isbn_10").copied())
-    .bind(draft_ids.get("isbn_13").copied())
-    .bind(draft_ids.get("publisher").copied())
-    .bind(draft_ids.get("pub_date").copied())
-    .bind(manifestation_id)
     .execute(&mut *tx)
     .await?;
 
@@ -804,12 +807,14 @@ mod tests {
         );
 
         // Manifestation row should exist
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM manifestations WHERE file_path = $1")
-                .bind(dest.to_str().unwrap())
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let dest_str = dest.to_str().unwrap();
+        let count = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM manifestations WHERE file_path = $1",
+            dest_str,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(count, 1, "expected 1 manifestation row");
     }
 
@@ -940,46 +945,48 @@ mod tests {
         );
 
         // Verify work title
-        let title: String = sqlx::query_scalar(
+        let dest_str = dest.to_str().unwrap();
+        let title = sqlx::query_scalar!(
             "SELECT w.title FROM works w \
              JOIN manifestations m ON m.work_id = w.id \
              WHERE m.file_path = $1",
+            dest_str,
         )
-        .bind(dest.to_str().unwrap())
         .fetch_one(&pool)
         .await
         .unwrap();
         assert_eq!(title, "The Integration Test");
 
         // Verify author was created and linked
-        let author_name: String = sqlx::query_scalar(
+        let author_name = sqlx::query_scalar!(
             "SELECT a.name FROM authors a \
              JOIN work_authors wa ON wa.author_id = a.id \
              JOIN manifestations m ON m.work_id = wa.work_id \
              WHERE m.file_path = $1",
+            dest_str,
         )
-        .bind(dest.to_str().unwrap())
         .fetch_one(&pool)
         .await
         .unwrap();
         assert_eq!(author_name, "Test McAuthor");
 
         // Verify ISBN was populated on the manifestation
-        let isbn: Option<String> =
-            sqlx::query_scalar("SELECT isbn_13 FROM manifestations WHERE file_path = $1")
-                .bind(dest.to_str().unwrap())
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let isbn = sqlx::query_scalar!(
+            "SELECT isbn_13 FROM manifestations WHERE file_path = $1",
+            dest_str,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(isbn.as_deref(), Some("9780306406157"));
 
         // Verify metadata_versions drafts were created
-        let draft_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM metadata_versions mv \
+        let draft_count = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM metadata_versions mv \
              JOIN manifestations m ON m.id = mv.manifestation_id \
              WHERE m.file_path = $1 AND mv.source = 'opf' AND mv.status::text = 'pending'",
+            dest_str,
         )
-        .bind(dest.to_str().unwrap())
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -989,12 +996,12 @@ mod tests {
         );
 
         // Verify series was created
-        let series_count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM series_works sw \
+        let series_count = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM series_works sw \
              JOIN manifestations m ON m.work_id = sw.work_id \
              WHERE m.file_path = $1",
+            dest_str,
         )
-        .bind(dest.to_str().unwrap())
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -1027,10 +1034,11 @@ mod tests {
         assert!(dest.exists(), "expected file at {}", dest.display());
 
         // validation_status must be 'valid' for a clean EPUB
-        let status: String = sqlx::query_scalar(
-            "SELECT validation_status::text FROM manifestations WHERE file_path = $1",
+        let dest_str = dest.to_str().unwrap();
+        let status = sqlx::query_scalar!(
+            "SELECT validation_status::text AS \"validation_status!\" FROM manifestations WHERE file_path = $1",
+            dest_str,
         )
-        .bind(dest.to_str().unwrap())
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -1073,12 +1081,14 @@ mod tests {
         assert!(!dest.exists(), "corrupt EPUB must not remain in library");
 
         // No manifestation row must have been written
-        let count: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM manifestations WHERE file_path = $1")
-                .bind(dest.to_str().unwrap())
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let dest_str = dest.to_str().unwrap();
+        let count = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM manifestations WHERE file_path = $1",
+            dest_str,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
             count, 0,
             "no manifestation row should exist for quarantined EPUB"
@@ -1145,7 +1155,10 @@ mod tests {
         assert!(dest.exists(), "expected file at {}", dest.display());
 
         // Pull every canonical field + its pointer in one query.
-        #[derive(sqlx::FromRow)]
+        // `w.title` is NOT NULL in the schema; force it to nullable via
+        // `AS "title?"` so the field type stays `Option<String>` matching
+        // the truly-nullable peers. The uniform `if x.is_some()` asserts
+        // below then handle every canonical/pointer pair the same way.
         struct Invariant {
             title: Option<String>,
             title_version_id: Option<uuid::Uuid>,
@@ -1157,8 +1170,10 @@ mod tests {
             isbn_13: Option<String>,
             isbn_13_version_id: Option<uuid::Uuid>,
         }
-        let inv: Invariant = sqlx::query_as(
-            "SELECT w.title, w.title_version_id, \
+        let dest_str = dest.to_str().unwrap();
+        let inv = sqlx::query_as!(
+            Invariant,
+            "SELECT w.title AS \"title?\", w.title_version_id, \
                     w.language, w.language_version_id, \
                     m.publisher, m.publisher_version_id, \
                     m.pub_date_version_id, \
@@ -1166,8 +1181,8 @@ mod tests {
              FROM manifestations m \
              JOIN works w ON w.id = m.work_id \
              WHERE m.file_path = $1",
+            dest_str,
         )
-        .bind(dest.to_str().unwrap())
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -1217,14 +1232,15 @@ mod tests {
         .into_iter()
         .flatten()
         {
-            let source_for_ptr: String =
-                sqlx::query_scalar("SELECT source FROM metadata_versions WHERE id = $1")
-                    .bind(pointer)
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap_or_else(|e| {
-                        panic!("pointer {pointer} did not resolve to a metadata_versions row: {e}")
-                    });
+            let source_for_ptr = sqlx::query_scalar!(
+                "SELECT source FROM metadata_versions WHERE id = $1",
+                pointer,
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap_or_else(|e| {
+                panic!("pointer {pointer} did not resolve to a metadata_versions row: {e}")
+            });
             assert_eq!(
                 source_for_ptr, "opf",
                 "pointer {pointer} resolved to source '{source_for_ptr}', expected 'opf'"
@@ -1265,32 +1281,38 @@ mod tests {
 
         // The work should have its title_version_id pointing at the heuristic
         // row, which must have source='opf', field_name='title', confidence=0.2.
-        let (title_ptr, title): (Option<uuid::Uuid>, String) = sqlx::query_as(
+        let dest_str = dest.to_str().unwrap();
+        let row = sqlx::query!(
             "SELECT w.title_version_id, w.title FROM works w \
              JOIN manifestations m ON m.work_id = w.id \
              WHERE m.file_path = $1",
+            dest_str,
         )
-        .bind(dest.to_str().unwrap())
         .fetch_one(&pool)
         .await
         .unwrap();
         assert!(
-            title.contains("Heuristic Title"),
-            "title should include heuristic value, got '{title}'"
+            row.title.contains("Heuristic Title"),
+            "title should include heuristic value, got '{}'",
+            row.title,
         );
-        let ptr = title_ptr.expect("title_version_id must be wired for heuristic row");
+        let ptr = row
+            .title_version_id
+            .expect("title_version_id must be wired for heuristic row");
 
-        let (src, field_name, confidence_score): (String, String, Option<f32>) = sqlx::query_as(
+        let row = sqlx::query!(
             "SELECT source, field_name, confidence_score \
              FROM metadata_versions WHERE id = $1",
+            ptr,
         )
-        .bind(ptr)
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(src, "opf");
-        assert_eq!(field_name, "title");
-        let score = confidence_score.expect("confidence_score must be set for heuristic row");
+        assert_eq!(row.source, "opf");
+        assert_eq!(row.field_name, "title");
+        let score = row
+            .confidence_score
+            .expect("confidence_score must be set for heuristic row");
         assert!(
             (score - 0.2).abs() < 1e-4,
             "heuristic confidence should be ~0.2, got {score}"
@@ -1324,28 +1346,33 @@ mod tests {
 
         // Every work_author row for this work must carry a source_version_id
         // pointing at a metadata_versions row with field_name='creators'.
-        let rows: Vec<(uuid::Uuid, Option<uuid::Uuid>)> = sqlx::query_as(
+        let dest_str = dest.to_str().unwrap();
+        let rows = sqlx::query!(
             "SELECT wa.author_id, wa.source_version_id \
              FROM work_authors wa \
              JOIN manifestations m ON m.work_id = wa.work_id \
              WHERE m.file_path = $1",
+            dest_str,
         )
-        .bind(dest.to_str().unwrap())
         .fetch_all(&pool)
         .await
         .unwrap();
         assert!(!rows.is_empty(), "expected at least one work_author row");
 
-        for (author_id, source_version_id) in rows {
-            let ptr = source_version_id.unwrap_or_else(|| {
-                panic!("work_authors.source_version_id NULL for author {author_id}")
+        for row in rows {
+            let ptr = row.source_version_id.unwrap_or_else(|| {
+                panic!(
+                    "work_authors.source_version_id NULL for author {}",
+                    row.author_id
+                )
             });
-            let field_name: String =
-                sqlx::query_scalar("SELECT field_name FROM metadata_versions WHERE id = $1")
-                    .bind(ptr)
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap();
+            let field_name = sqlx::query_scalar!(
+                "SELECT field_name FROM metadata_versions WHERE id = $1",
+                ptr,
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
             assert_eq!(
                 field_name, "creators",
                 "source_version_id should reference a 'creators' journal row"

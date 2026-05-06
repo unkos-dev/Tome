@@ -167,7 +167,7 @@ async fn insert_draft(
     match_type: &str,
 ) -> Result<Uuid, sqlx::Error> {
     let hash = value_hash::value_hash(field_name, new_value);
-    let id: Uuid = sqlx::query_scalar(
+    let id = sqlx::query_scalar!(
         "INSERT INTO metadata_versions \
              (manifestation_id, source, field_name, new_value, value_hash, match_type, confidence_score) \
          VALUES ($1, 'opf', $2, $3, $4, $5, $6) \
@@ -175,13 +175,13 @@ async fn insert_draft(
          DO UPDATE SET last_seen_at = now(), \
                        observation_count = metadata_versions.observation_count + 1 \
          RETURNING id",
+        manifestation_id,
+        field_name,
+        new_value,
+        &hash,
+        match_type,
+        confidence,
     )
-    .bind(manifestation_id)
-    .bind(field_name)
-    .bind(new_value)
-    .bind(&hash)
-    .bind(match_type)
-    .bind(confidence)
     .fetch_one(conn)
     .await?;
     Ok(id)
@@ -200,24 +200,26 @@ mod tests {
     use sqlx::PgPool;
 
     async fn setup_manifestation(pool: &PgPool) -> (Uuid, Uuid) {
-        let work_id: Uuid = sqlx::query_scalar(
+        let work_id = sqlx::query_scalar!(
             "INSERT INTO works (title, sort_title) VALUES ('draft_test', 'draft_test') RETURNING id",
         )
         .fetch_one(pool)
         .await
         .unwrap();
 
-        let manifestation_id: Uuid = sqlx::query_scalar(
+        let file_path = format!("/tmp/draft-test-{work_id}.epub");
+        let hash = format!("hash-{work_id}");
+        let manifestation_id = sqlx::query_scalar!(
             "INSERT INTO manifestations \
              (work_id, format, file_path, ingestion_file_hash, current_file_hash, \
               file_size_bytes, ingestion_status, validation_status) \
              VALUES ($1, 'epub'::manifestation_format, $2, $3, $3, 100, \
                      'complete'::ingestion_status, 'valid'::validation_status) \
              RETURNING id",
+            work_id,
+            file_path,
+            hash,
         )
-        .bind(work_id)
-        .bind(format!("/tmp/draft-test-{work_id}.epub"))
-        .bind(format!("hash-{work_id}"))
         .fetch_one(pool)
         .await
         .unwrap();
@@ -271,11 +273,11 @@ mod tests {
         assert!(ids.contains_key("creators"));
         assert_eq!(ids.len(), 8, "expected 8 field ids, got {}", ids.len());
 
-        let isbn_match_type: String = sqlx::query_scalar(
+        let isbn_match_type = sqlx::query_scalar!(
             "SELECT match_type FROM metadata_versions \
              WHERE manifestation_id = $1 AND field_name = 'isbn_13'",
+            manifestation_id,
         )
-        .bind(manifestation_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -300,11 +302,11 @@ mod tests {
 
         assert_eq!(first.get("title"), second.get("title"));
 
-        let count: i32 = sqlx::query_scalar(
+        let count = sqlx::query_scalar!(
             "SELECT observation_count FROM metadata_versions \
              WHERE manifestation_id = $1 AND field_name = 'title'",
+            manifestation_id,
         )
-        .bind(manifestation_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -322,10 +324,10 @@ mod tests {
             .unwrap();
         tx.rollback().await.unwrap();
 
-        let n: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM metadata_versions WHERE manifestation_id = $1",
+        let n = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM metadata_versions WHERE manifestation_id = $1",
+            manifestation_id,
         )
-        .bind(manifestation_id)
         .fetch_one(&pool)
         .await
         .unwrap();

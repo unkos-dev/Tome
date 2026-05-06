@@ -54,15 +54,18 @@ pub async fn get_or_create(
         .await
         .map_err(|e| CoverError::Db(format!("covers: {e}")))?;
 
-    let row: Option<(String, String)> =
-        sqlx::query_as("SELECT file_path, current_file_hash FROM manifestations WHERE id = $1")
-            .bind(manifestation_id)
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(|e| CoverError::Db(format!("covers: {e}")))?;
+    let row = sqlx::query!(
+        "SELECT file_path, current_file_hash FROM manifestations WHERE id = $1",
+        manifestation_id,
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(|e| CoverError::Db(format!("covers: {e}")))?;
     drop(tx);
 
-    let (file_path, current_file_hash) = row.ok_or(CoverError::NoCover)?;
+    let (file_path, current_file_hash) = row
+        .map(|r| (r.file_path, r.current_file_hash))
+        .ok_or(CoverError::NoCover)?;
 
     let cache = CoverCache::new(cache_root(state));
     cache.ensure_dir()?;
