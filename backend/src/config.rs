@@ -2,12 +2,10 @@ use std::env;
 
 use crate::models::manifestation_format::ManifestationFormat;
 
-/// Env-var lookup function. `Config::from_env` reads from process env; tests
-/// inject a `HashMap`-backed closure via `Config::from_source` so test setup
-/// never mutates global state.
-///
-/// (UNK-100, lifts `debt/2026-05-05-env-lock-config-tests.md` — see also
-/// memory `feedback_workarounds_arent_decisions.md`.)
+// Env-var lookup function. `Config::from_env` reads from process env; tests
+// inject a `HashMap`-backed closure via `Config::from_source` so test setup
+// never mutates global state. UNK-100; lifts
+// `debt/2026-05-05-env-lock-config-tests.md`.
 type EnvGet<'a> = dyn Fn(&str) -> Option<String> + 'a;
 
 #[derive(Debug, Clone)]
@@ -133,12 +131,19 @@ pub enum ConfigError {
     Invalid { var: String, reason: String },
 }
 
+/// Process-env adapter for `Config::from_env`. Extracted from a closure so it
+/// is callable from a test (no `unsafe { env::set_var }` needed — tests read
+/// vars cargo always sets, like `CARGO_PKG_NAME`).
+fn process_env_get(k: &str) -> Option<String> {
+    env::var(k).ok()
+}
+
 impl Config {
     /// Public entry point for production: loads `.env` (best-effort) then
     /// reads from process env via `std::env::var`.
     pub fn from_env() -> Result<Self, ConfigError> {
         dotenvy::dotenv().ok();
-        Self::from_source(&|k| env::var(k).ok())
+        Self::from_source(&process_env_get)
     }
 
     /// Inject env via a closure. Tests pass a `HashMap`-backed `&EnvGet` so
@@ -268,10 +273,6 @@ impl Config {
 }
 
 impl EnrichmentConfig {
-    pub fn from_env() -> Result<Self, ConfigError> {
-        Self::from_source(&|k| env::var(k).ok())
-    }
-
     fn from_source(get: &EnvGet<'_>) -> Result<Self, ConfigError> {
         let enabled = parse_bool(get, "REVERIE_ENRICHMENT_ENABLED", true)?;
         let concurrency = parse_u32(get, "REVERIE_ENRICHMENT_CONCURRENCY", 2)?;
@@ -304,10 +305,6 @@ impl EnrichmentConfig {
 }
 
 impl WritebackConfig {
-    pub fn from_env() -> Result<Self, ConfigError> {
-        Self::from_source(&|k| env::var(k).ok())
-    }
-
     fn from_source(get: &EnvGet<'_>) -> Result<Self, ConfigError> {
         let enabled = parse_bool(get, "REVERIE_WRITEBACK_ENABLED", true)?;
         let concurrency = parse_u32(get, "REVERIE_WRITEBACK_CONCURRENCY", 2)?;
@@ -329,10 +326,6 @@ impl WritebackConfig {
 }
 
 impl CoverConfig {
-    pub fn from_env() -> Result<Self, ConfigError> {
-        Self::from_source(&|k| env::var(k).ok())
-    }
-
     fn from_source(get: &EnvGet<'_>) -> Result<Self, ConfigError> {
         let max_bytes = parse_u64(get, "REVERIE_COVER_MAX_BYTES", 10_485_760)?;
         let download_timeout_secs = parse_u64(get, "REVERIE_COVER_DOWNLOAD_TIMEOUT_SECS", 30)?;
@@ -349,10 +342,6 @@ impl CoverConfig {
 }
 
 impl OpdsConfig {
-    pub fn from_env() -> Result<Self, ConfigError> {
-        Self::from_source(&|k| env::var(k).ok())
-    }
-
     fn from_source(get: &EnvGet<'_>) -> Result<Self, ConfigError> {
         let enabled = parse_bool(get, "REVERIE_OPDS_ENABLED", true)?;
         let page_size = parse_u32(get, "REVERIE_OPDS_PAGE_SIZE", 50)?;
@@ -393,10 +382,10 @@ impl OpdsConfig {
 
 impl SecurityConfig {
     pub fn from_env() -> Result<Self, ConfigError> {
-        Self::from_source(&|k| env::var(k).ok())
+        Self::from_source(&process_env_get)
     }
 
-    pub fn from_source(get: &EnvGet<'_>) -> Result<Self, ConfigError> {
+    fn from_source(get: &EnvGet<'_>) -> Result<Self, ConfigError> {
         let behind_https = parse_bool(get, "REVERIE_BEHIND_HTTPS", false)?;
         let hsts_include_subdomains = parse_bool(get, "REVERIE_HSTS_INCLUDE_SUBDOMAINS", false)?;
         let hsts_preload = parse_bool(get, "REVERIE_HSTS_PRELOAD", false)?;
@@ -576,7 +565,8 @@ mod tests {
             .collect()
     }
 
-    /// Wrap `env_for` for `Vec<(String, String)>` shapes.
+    /// `env_for` variant taking owned-string slices — for callers that build
+    /// the var list via `with_overrides` / `without_keys`.
     fn env_for_owned(vars: &[(String, String)]) -> impl Fn(&str) -> Option<String> + use<'_> {
         let map: HashMap<&str, &str> = vars.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
         move |k| map.get(k).map(|s| (*s).to_string())
@@ -887,5 +877,52 @@ mod tests {
         let vars = with_overrides(&[("REVERIE_PORT", "not_a_number")]);
         let err = Config::from_source(&env_for_owned(&vars)).unwrap_err();
         assert!(err.to_string().contains("REVERIE_PORT"));
+    }
+
+    #[test]
+    fn from_env_invalid_cleanup_mode() {
+        let vars = with_overrides(&[("REVERIE_CLEANUP_MODE", "archive")]);
+        let err = Config::from_source(&env_for_owned(&vars)).unwrap_err();
+        assert!(
+            err.to_string().contains("REVERIE_CLEANUP_MODE"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn opds_page_size_boundary_values_accepted() {
+        for boundary in ["1", "500"] {
+            let vars = with_overrides(&[("REVERIE_OPDS_PAGE_SIZE", boundary)]);
+            let cfg = Config::from_source(&env_for_owned(&vars))
+                .unwrap_or_else(|e| panic!("page_size={boundary} should be accepted: {e}"));
+            assert_eq!(cfg.opds.page_size, boundary.parse::<u32>().unwrap());
+        }
+    }
+
+    #[test]
+    fn from_env_rejects_zero_enrichment_concurrency() {
+        let vars = with_overrides(&[("REVERIE_ENRICHMENT_CONCURRENCY", "0")]);
+        let err = Config::from_source(&env_for_owned(&vars)).unwrap_err();
+        assert!(err.to_string().contains("REVERIE_ENRICHMENT_CONCURRENCY"));
+    }
+
+    #[test]
+    fn from_env_rejects_zero_writeback_concurrency() {
+        let vars = with_overrides(&[("REVERIE_WRITEBACK_CONCURRENCY", "0")]);
+        let err = Config::from_source(&env_for_owned(&vars)).unwrap_err();
+        assert!(err.to_string().contains("REVERIE_WRITEBACK_CONCURRENCY"));
+    }
+
+    // Cover the production wiring `&process_env_get`. CARGO_PKG_NAME is set by
+    // cargo for every test run; UNSET_REVERIE_TEST_VAR is reserved nowhere.
+    #[test]
+    fn process_env_get_reads_process_env_for_set_var() {
+        let v = super::process_env_get("CARGO_PKG_NAME");
+        assert_eq!(v.as_deref(), Some("reverie-api"));
+    }
+
+    #[test]
+    fn process_env_get_returns_none_for_unset_var() {
+        assert!(super::process_env_get("UNSET_REVERIE_TEST_VAR").is_none());
     }
 }

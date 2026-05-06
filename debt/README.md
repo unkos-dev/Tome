@@ -132,4 +132,4 @@ translation pass when it joins.
 <!-- empty at first land; entries move here on lift, never deleted -->
 
 - [Runtime sqlx queries instead of compile-time macros](2026-05-05-runtime-sqlx-queries.md) — lifted 2026-05-06; superseded by PR series #157–#163
-- [ENV_LOCK + unsafe env mutation in config tests](2026-05-05-env-lock-config-tests.md) — lifted 2026-05-06; superseded by feat/unk-100-config-env-source (PR pending)
+- [ENV_LOCK + unsafe env mutation in config tests](2026-05-05-env-lock-config-tests.md) — lifted 2026-05-06; superseded by PR #168

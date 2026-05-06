@@ -7,7 +7,7 @@ adopted-because: Config::from_env reads process-global env vars; tests had no cl
 lift-when-class: internal-refactor
 lift-when: UNK-100 (Config::from_env takes env source as parameter) merged to main
 lifted: 2026-05-06
-superseded-by: feat/unk-100-config-env-source (PR pending)
+superseded-by: PR #168
 ---
 
 # ENV_LOCK + unsafe env mutation in config tests
