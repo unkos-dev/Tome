@@ -1,11 +1,11 @@
 {
   "db_name": "PostgreSQL",
-  "query": "SELECT count(*) FROM writeback_jobs WHERE manifestation_id = $1 AND status = 'in_progress'",
+  "query": "SELECT count(*) AS \"count!\" FROM writeback_jobs\n             WHERE manifestation_id = $1 AND status = 'in_progress'",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "count",
+        "name": "count!",
         "type_info": "Int8"
       }
     ],
@@ -18,5 +18,5 @@
       null
     ]
   },
-  "hash": "c51f024cecdd6c8b9ce8136d606f5c720792784cfe5c1186786b05449379a793"
+  "hash": "b89e5b2efc167b2fc93a5cea644549653f612237c9b60d256c40407c9c8d5e06"
 }

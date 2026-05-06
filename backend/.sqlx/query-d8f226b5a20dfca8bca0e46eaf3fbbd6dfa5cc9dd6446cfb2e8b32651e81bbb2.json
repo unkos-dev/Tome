@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"count!\" FROM writeback_jobs wj\n             WHERE wj.manifestation_id = $1\n               AND wj.status = 'pending'\n               AND NOT EXISTS (\n                 SELECT 1 FROM writeback_jobs other\n                 WHERE other.manifestation_id = wj.manifestation_id\n                   AND other.status = 'in_progress'\n               )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d8f226b5a20dfca8bca0e46eaf3fbbd6dfa5cc9dd6446cfb2e8b32651e81bbb2"
+}

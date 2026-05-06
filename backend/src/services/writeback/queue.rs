@@ -476,22 +476,21 @@ mod tests {
         .unwrap();
 
         let count_eligible_siblings = sqlx::query_scalar!(
-            "SELECT count(*) FROM writeback_jobs wj \
-             WHERE wj.manifestation_id = $1 \
-               AND wj.status = 'pending' \
-               AND NOT EXISTS ( \
-                 SELECT 1 FROM writeback_jobs other \
-                 WHERE other.manifestation_id = wj.manifestation_id \
-                   AND other.status = 'in_progress' \
-               )",
+            r#"SELECT count(*) AS "count!" FROM writeback_jobs wj
+             WHERE wj.manifestation_id = $1
+               AND wj.status = 'pending'
+               AND NOT EXISTS (
+                 SELECT 1 FROM writeback_jobs other
+                 WHERE other.manifestation_id = wj.manifestation_id
+                   AND other.status = 'in_progress'
+               )"#,
             m_id,
         )
         .fetch_one(&app_pool)
         .await
         .unwrap();
         assert_eq!(
-            count_eligible_siblings,
-            Some(0),
+            count_eligible_siblings, 0_i64,
             "sibling pending jobs must not be eligible while one is in_progress"
         );
     }
@@ -603,14 +602,14 @@ mod tests {
 
         // Final state: exactly one in_progress row for this manifestation.
         let in_progress_count = sqlx::query_scalar!(
-            "SELECT count(*) FROM writeback_jobs \
-             WHERE manifestation_id = $1 AND status = 'in_progress'",
+            r#"SELECT count(*) AS "count!" FROM writeback_jobs
+             WHERE manifestation_id = $1 AND status = 'in_progress'"#,
             m_id,
         )
         .fetch_one(&ing_pool)
         .await
         .unwrap();
-        assert_eq!(in_progress_count, Some(1));
+        assert_eq!(in_progress_count, 1_i64);
     }
 
     /// Jobs on distinct manifestations can run in parallel — i.e. the
