@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT COUNT(*) AS \"count!\" FROM metadata_versions mv JOIN manifestations m ON m.id = mv.manifestation_id WHERE m.file_path = $1 AND mv.source = 'opf' AND mv.status::text = 'pending'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "82d941d1cb1580e74865da1999fbdd816350b2f16334f766e8ee03368bf2c8f9"
+}
