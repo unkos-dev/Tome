@@ -12,33 +12,16 @@ use sqlx::PgPool;
 use time::OffsetDateTime;
 
 /// The kind of API response recorded in a cache row.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Mapped via `sqlx::Type` to the Postgres `api_cache_kind` ENUM so an
+/// unknown DB variant surfaces as a decode error rather than coercing
+/// into a silent fallback (UNK-173, extends UNK-107).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
+#[sqlx(type_name = "api_cache_kind", rename_all = "lowercase")]
 pub enum ApiCacheKind {
     Hit,
     Miss,
     Error,
-}
-
-impl ApiCacheKind {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Hit => "hit",
-            Self::Miss => "miss",
-            Self::Error => "error",
-        }
-    }
-}
-
-#[allow(dead_code)] // only reached via `read`, which is covered by tests but not yet called from the binary.
-fn kind_from_str(s: &str) -> Result<ApiCacheKind, sqlx::Error> {
-    match s {
-        "hit" => Ok(ApiCacheKind::Hit),
-        "miss" => Ok(ApiCacheKind::Miss),
-        "error" => Ok(ApiCacheKind::Error),
-        other => Err(sqlx::Error::Decode(
-            format!("unknown api_cache_kind value: {other}").into(),
-        )),
-    }
 }
 
 /// A live (non-expired) cache row returned by [`read`].
@@ -67,11 +50,12 @@ pub async fn read(
     source: &str,
     lookup_key: &str,
 ) -> sqlx::Result<Option<CachedResponse>> {
-    // `response_kind` is `api_cache_kind NOT NULL`, but `::text` casts drop
-    // NOT NULL inference; `AS "response_kind!"` restores it so the field
-    // type stays `String` instead of `Option<String>`.
+    // `AS "response_kind!: ApiCacheKind"` decodes the `api_cache_kind`
+    // column via the `sqlx::Type` impl. `!` restores NOT NULL inference
+    // dropped by the column override; an unknown PG variant becomes a
+    // decode error rather than a silent fallback.
     let row = sqlx::query!(
-        "SELECT response, response_kind::text AS \"response_kind!\", http_status, fetched_at \
+        "SELECT response, response_kind AS \"response_kind!: ApiCacheKind\", http_status, fetched_at \
          FROM api_cache \
          WHERE source = $1 AND lookup_key = $2 AND expires_at > now()",
         source,
@@ -84,11 +68,9 @@ pub async fn read(
         return Ok(None);
     };
 
-    let kind = kind_from_str(&row.response_kind)?;
-
     Ok(Some(CachedResponse {
         response: row.response,
-        kind,
+        kind: row.response_kind,
         http_status: row.http_status,
         fetched_at: row.fetched_at,
     }))
@@ -119,7 +101,7 @@ pub async fn write(
     sqlx::query!(
         "INSERT INTO api_cache \
              (source, lookup_key, response, response_kind, http_status, fetched_at, expires_at) \
-         VALUES ($1, $2, $3, ($4::text)::api_cache_kind, $5, $6, $7) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7) \
          ON CONFLICT (source, lookup_key) DO UPDATE SET \
              response      = EXCLUDED.response, \
              response_kind = EXCLUDED.response_kind, \
@@ -129,7 +111,7 @@ pub async fn write(
         source,
         lookup_key,
         response,
-        kind.as_str(),
+        kind as ApiCacheKind,
         http_status,
         now,
         expires_at,

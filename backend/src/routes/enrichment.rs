@@ -17,6 +17,7 @@ use uuid::Uuid;
 use crate::auth::middleware::CurrentUser;
 use crate::db;
 use crate::error::AppError;
+use crate::models::enrichment_status::EnrichmentStatus;
 use crate::services;
 use crate::state::AppState;
 
@@ -111,7 +112,7 @@ async fn status(
         .map_err(|e| AppError::Internal(e.into()))?;
 
     let rows = sqlx::query!(
-        "SELECT enrichment_status::text AS \"status!\", COUNT(*)::bigint AS \"count!\" \
+        "SELECT enrichment_status AS \"status: EnrichmentStatus\", COUNT(*)::bigint AS \"count!\" \
          FROM manifestations \
          GROUP BY enrichment_status",
     )
@@ -127,13 +128,12 @@ async fn status(
         skipped: 0,
     };
     for r in rows {
-        match r.status.as_str() {
-            "pending" => summary.pending = r.count,
-            "in_progress" => summary.in_progress = r.count,
-            "complete" => summary.complete = r.count,
-            "failed" => summary.failed = r.count,
-            "skipped" => summary.skipped = r.count,
-            _ => {}
+        match r.status {
+            EnrichmentStatus::Pending => summary.pending = r.count,
+            EnrichmentStatus::InProgress => summary.in_progress = r.count,
+            EnrichmentStatus::Complete => summary.complete = r.count,
+            EnrichmentStatus::Failed => summary.failed = r.count,
+            EnrichmentStatus::Skipped => summary.skipped = r.count,
         }
     }
     Ok(axum::Json(summary))
@@ -214,7 +214,7 @@ mod tests {
         // Verify via ingestion_pool — `manifestations` is RLS-gated under
         // `reverie_app` and the verification SELECT carries no session context.
         let row = sqlx::query!(
-            "SELECT enrichment_status::text AS status, \
+            "SELECT enrichment_status AS \"status!: crate::models::enrichment_status::EnrichmentStatus\", \
                     enrichment_attempt_count, enrichment_error \
              FROM manifestations WHERE id = $1",
             m_id,
@@ -223,8 +223,8 @@ mod tests {
         .await
         .expect("fetch manifestation");
         assert_eq!(
-            row.status.as_deref(),
-            Some("pending"),
+            row.status,
+            crate::models::enrichment_status::EnrichmentStatus::Pending,
             "enrichment_status not reset"
         );
         assert_eq!(row.enrichment_attempt_count, 0, "attempt_count not reset");

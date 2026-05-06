@@ -1,6 +1,7 @@
 //! Domain models and database queries.
 
 pub mod device_token;
+pub mod enrichment_status;
 pub mod ingestion_job;
 pub mod ingestion_status;
 pub mod manifestation_format;

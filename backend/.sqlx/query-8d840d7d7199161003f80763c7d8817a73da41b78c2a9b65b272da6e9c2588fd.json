@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO api_cache (source, lookup_key, response, response_kind, http_status, fetched_at, expires_at) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT (source, lookup_key) DO UPDATE SET response      = EXCLUDED.response, response_kind = EXCLUDED.response_kind, http_status   = EXCLUDED.http_status, fetched_at    = EXCLUDED.fetched_at, expires_at    = EXCLUDED.expires_at",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Jsonb",
+        {
+          "Custom": {
+            "name": "api_cache_kind",
+            "kind": {
+              "Enum": [
+                "hit",
+                "miss",
+                "error"
+              ]
+            }
+          }
+        },
+        "Int4",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8d840d7d7199161003f80763c7d8817a73da41b78c2a9b65b272da6e9c2588fd"
+}
