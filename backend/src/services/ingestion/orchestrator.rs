@@ -1310,9 +1310,7 @@ mod tests {
         .unwrap();
         assert_eq!(row.source, "opf");
         assert_eq!(row.field_name, "title");
-        let score = row
-            .confidence_score
-            .expect("confidence_score must be set for heuristic row");
+        let score = row.confidence_score;
         assert!(
             (score - 0.2).abs() < 1e-4,
             "heuristic confidence should be ~0.2, got {score}"
