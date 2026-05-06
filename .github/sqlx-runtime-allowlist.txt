@@ -1,0 +1,41 @@
+# UNK-167 sqlx runtime-query allowlist
+#
+# This file is the canonical registry of `sqlx::query(...)` /
+# `sqlx::query_as(...)` / `sqlx::query_scalar(...)` invocations exempted
+# from the compile-time-macro requirement. CI greps for runtime sqlx in
+# `backend/src/` and rejects any line not containing a fixed string from
+# this file (`grep -v -F -f`).
+#
+# Adding an entry: include reviewer justification in the PR description
+# adding it. The carve-out class must be one of:
+#   1. DDL (CREATE/DROP/ALTER TYPE) — schema mutation; macros cannot
+#      validate against schema that doesn't exist yet at prepare time.
+#   2. Dynamic SQL built from runtime input (rare; flag in review).
+#   3. `SELECT set_config(...)` GUC mutation — Postgres session/transaction
+#      configuration, not data access; macros cannot validate GUC mutation
+#      against schema at prepare time.
+#   4. Enum-drift test probes — `ALTER TYPE ... ADD VALUE` + cast performed
+#      at runtime in tests to detect code-vs-schema enum drift.
+#
+# Each non-comment line is a substring; if it appears in an `rg` output
+# line `path:line:content`, that runtime invocation is allowed.
+
+# (3) db.rs — RLS context GUC plumbing (set_config + current_setting verification helper)
+backend/src/db.rs:
+
+# (1, 4) models/manifestation_format.rs — enum-drift detection test (ALTER TYPE + ::manifestation_format probe)
+backend/src/models/manifestation_format.rs:
+
+# (1, 4) models/user.rs — user_role enum-drift detection test + role-cast fixture
+backend/src/models/user.rs:
+
+# (3) test_support.rs after_connect callback — set_config('app.system_context', ...)
+SELECT set_config('app.system_context'
+
+# (4) test_support.rs role-cast drift fixtures (admin, child, adult); the
+# fixtures cast role text literals to ::user_role at runtime — same drift
+# probe class as models/user.rs.
+UPDATE users SET role =
+
+# (3) services/writeback/queue.rs RLS impostor test — set_config('app.current_user_id', ...)
+SELECT set_config('app.current_user_id'
