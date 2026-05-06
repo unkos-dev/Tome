@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT name FROM shelves WHERE id = $1 AND user_id = current_setting('app.current_user_id', true)::uuid LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a8589a2975bda285e32fdbc1a12bbf78aada4ac16732c5982819617eb3b6aeb0"
+}

@@ -38,17 +38,19 @@ async fn download_epub(
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-    let row: Option<(String, String)> = sqlx::query_as(
+    let row = sqlx::query!(
         "SELECT m.file_path, w.title FROM manifestations m \
          JOIN works w ON w.id = m.work_id \
          WHERE m.id = $1",
+        manifestation_id,
     )
-    .bind(manifestation_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
 
-    let (file_path, title) = row.ok_or(AppError::NotFound)?;
+    let row = row.ok_or(AppError::NotFound)?;
+    let file_path = row.file_path;
+    let title = row.title;
     drop(tx);
 
     let library_path = state.config.library_path.clone();

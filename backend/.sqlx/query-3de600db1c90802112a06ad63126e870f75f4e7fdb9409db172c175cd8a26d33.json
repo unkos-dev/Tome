@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT enrichment_status::text AS \"status!\", COUNT(*)::bigint AS \"count!\" FROM manifestations GROUP BY enrichment_status",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "3de600db1c90802112a06ad63126e870f75f4e7fdb9409db172c175cd8a26d33"
+}

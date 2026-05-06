@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT mv.id, mv.field_name, mv.source, mv.new_value AS \"new_value!\", mv.status::text AS \"status!\", mv.confidence_score AS \"confidence_score!\", mv.match_type, mv.observation_count FROM metadata_versions mv JOIN manifestations m ON m.id = mv.manifestation_id WHERE m.work_id = $1 ORDER BY mv.last_seen_at DESC",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "field_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "new_value!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "status!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "confidence_score!",
+        "type_info": "Float4"
+      },
+      {
+        "ordinal": 6,
+        "name": "match_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "observation_count",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cf7831d27db094b8bfd50e7619975cffc996211ff6184e7bde91fb10d2958a40"
+}

@@ -691,21 +691,19 @@ async fn load_creators(
     if work_ids.is_empty() {
         return Ok(out);
     }
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         "SELECT wa.work_id, a.name \
          FROM work_authors wa \
          JOIN authors a ON a.id = wa.author_id \
          WHERE wa.work_id = ANY($1::uuid[]) \
          ORDER BY wa.position ASC",
+        work_ids,
     )
-    .bind(work_ids)
     .fetch_all(&mut **tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
     for r in rows {
-        let wid: Uuid = r.get("work_id");
-        let name: String = r.get("name");
-        out.entry(wid).or_default().push(name);
+        out.entry(r.work_id).or_default().push(r.name);
     }
     Ok(out)
 }
@@ -718,20 +716,18 @@ async fn load_tags(
     if manifestation_ids.is_empty() {
         return Ok(out);
     }
-    let rows = sqlx::query(
+    let rows = sqlx::query!(
         "SELECT mt.manifestation_id, t.name \
          FROM manifestation_tags mt \
          JOIN tags t ON t.id = mt.tag_id \
          WHERE mt.manifestation_id = ANY($1::uuid[])",
+        manifestation_ids,
     )
-    .bind(manifestation_ids)
     .fetch_all(&mut **tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;
     for r in rows {
-        let mid: Uuid = r.get("manifestation_id");
-        let name: String = r.get("name");
-        out.entry(mid).or_default().push(name);
+        out.entry(r.manifestation_id).or_default().push(r.name);
     }
     Ok(out)
 }

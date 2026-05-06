@@ -27,11 +27,12 @@ landed `#[sqlx::test]` providing per-test isolated databases.
 ## Workaround
 
 All sqlx usage in `backend/src/` except `routes/health.rs`
-(PR #157, 2026-05-05) and `models/` (PR #158, 2026-05-05) uses the
-runtime function form (`sqlx::query(...)`, `sqlx::query_as(...)`,
-`sqlx::query_scalar(...)`) instead of the macro form. The runtime
-functions do not validate against a live DB at compile time. Type
-binding is done by-hand at the call site.
+(PR #157, 2026-05-05), `models/` (PR #158, 2026-05-05), the
+enrichment service (PR #159, 2026-05-06), and `routes/` (PR #161,
+2026-05-06) uses the runtime function form (`sqlx::query(...)`,
+`sqlx::query_as(...)`, `sqlx::query_scalar(...)`) instead of the
+macro form. The runtime functions do not validate against a live DB
+at compile time. Type binding is done by-hand at the call site.
 
 Initial inventory: 28 files, ~294 invocations (heaviest hitters:
 `services/enrichment/orchestrator.rs` 41, `services/writeback/queue.rs`

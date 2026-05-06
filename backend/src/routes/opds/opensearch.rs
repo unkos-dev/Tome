@@ -65,13 +65,13 @@ async fn shelf_opensearch(
     let mut tx = db::acquire_with_rls(&state.pool, user.user_id)
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
-    let owned: Option<(Uuid,)> = sqlx::query_as(
+    let owned = sqlx::query_scalar!(
         "SELECT id FROM shelves \
          WHERE id = $1 \
            AND user_id = current_setting('app.current_user_id', true)::uuid \
          LIMIT 1",
+        shelf_id,
     )
-    .bind(shelf_id)
     .fetch_optional(&mut *tx)
     .await
     .map_err(|e| AppError::Internal(e.into()))?;

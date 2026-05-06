@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT m.work_id FROM manifestations m JOIN works w ON w.id = m.work_id WHERE m.id = $1 FOR UPDATE OF m, w",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "work_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "fd6b7425626408dff2c3a40eedbf71f21ef71b1349acba64cc08c345655f24fc"
+}

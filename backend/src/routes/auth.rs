@@ -209,12 +209,14 @@ async fn update_theme(
     jar: CookieJar,
     Json(body): Json<UpdateThemeRequest>,
 ) -> Result<(CookieJar, Json<serde_json::Value>), AppError> {
-    sqlx::query("UPDATE users SET theme_preference = $1, updated_at = now() WHERE id = $2")
-        .bind(body.theme_preference)
-        .bind(current_user.user_id)
-        .execute(&state.pool)
-        .await
-        .map_err(|e| AppError::Internal(e.into()))?;
+    sqlx::query!(
+        "UPDATE users SET theme_preference = $1, updated_at = now() WHERE id = $2",
+        body.theme_preference as ThemePreference,
+        current_user.user_id,
+    )
+    .execute(&state.pool)
+    .await
+    .map_err(|e| AppError::Internal(e.into()))?;
     let jar = set_theme_cookie(jar, body.theme_preference);
     Ok((
         jar,
@@ -371,12 +373,14 @@ mod tests {
                 "expected reverie_theme={wire} prefix; got: {set_cookie}"
             );
 
-            let stored: ThemePreference =
-                sqlx::query_scalar("SELECT theme_preference FROM users WHERE id = $1")
-                    .bind(user_id)
-                    .fetch_one(&app_pool)
-                    .await
-                    .expect("read back theme_preference");
+            let stored = sqlx::query_scalar!(
+                "SELECT theme_preference AS \"theme_preference: ThemePreference\" \
+                 FROM users WHERE id = $1",
+                user_id,
+            )
+            .fetch_one(&app_pool)
+            .await
+            .expect("read back theme_preference");
             assert_eq!(stored, expected, "theme_preference={wire}");
         }
     }
@@ -399,12 +403,14 @@ mod tests {
         // AppError::Validation maps to 422 (NOT 400) — see backend/src/error.rs.
         assert_eq!(resp.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
 
-        let stored: ThemePreference =
-            sqlx::query_scalar("SELECT theme_preference FROM users WHERE id = $1")
-                .bind(user_id)
-                .fetch_one(&app_pool)
-                .await
-                .expect("read back theme_preference");
+        let stored = sqlx::query_scalar!(
+            "SELECT theme_preference AS \"theme_preference: ThemePreference\" \
+             FROM users WHERE id = $1",
+            user_id,
+        )
+        .fetch_one(&app_pool)
+        .await
+        .expect("read back theme_preference");
         assert_eq!(
             stored,
             ThemePreference::System,
@@ -546,14 +552,20 @@ mod tests {
         );
 
         // Step 6: user row exists and was promoted to admin (first user).
-        let (db_role, db_email): (Role, Option<String>) =
-            sqlx::query_as("SELECT role, email FROM users WHERE oidc_subject = $1")
-                .bind("test-subject-123")
-                .fetch_one(&app_pool)
-                .await
-                .expect("user row inserted by callback");
-        assert_eq!(db_role, Role::Admin, "first user must be promoted to admin");
-        assert_eq!(db_email.as_deref(), Some("alice@example.com"));
+        let row = sqlx::query!(
+            "SELECT role AS \"role: Role\", email \
+             FROM users WHERE oidc_subject = $1",
+            "test-subject-123",
+        )
+        .fetch_one(&app_pool)
+        .await
+        .expect("user row inserted by callback");
+        assert_eq!(
+            row.role,
+            Role::Admin,
+            "first user must be promoted to admin"
+        );
+        assert_eq!(row.email.as_deref(), Some("alice@example.com"));
 
         // Step 7: the cycled session cookie authenticates /auth/me.
         // axum-login's login() rotates the session id; axum-test's

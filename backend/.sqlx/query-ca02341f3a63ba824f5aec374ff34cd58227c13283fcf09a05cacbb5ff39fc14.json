@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT new_value AS \"new_value!\" FROM metadata_versions WHERE id = $1 AND manifestation_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "new_value!",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ca02341f3a63ba824f5aec374ff34cd58227c13283fcf09a05cacbb5ff39fc14"
+}
