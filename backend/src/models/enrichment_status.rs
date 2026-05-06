@@ -27,9 +27,46 @@ pub enum EnrichmentStatus {
     Skipped,
 }
 
+impl EnrichmentStatus {
+    /// Canonical wire string. Matches the `#[serde(rename_all)]` and
+    /// `#[sqlx(rename_all)]` mappings — `Debug` formatting yields the Rust
+    /// variant name (`"InProgress"`), which does not match the Postgres /
+    /// JSON form. Use this for log lines and error messages so the three
+    /// surfaces stay consistent.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::InProgress => "in_progress",
+            Self::Complete => "complete",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+impl std::fmt::Display for EnrichmentStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn as_str_matches_serde_snake_case() {
+        for (variant, wire) in [
+            (EnrichmentStatus::Pending, "pending"),
+            (EnrichmentStatus::InProgress, "in_progress"),
+            (EnrichmentStatus::Complete, "complete"),
+            (EnrichmentStatus::Failed, "failed"),
+            (EnrichmentStatus::Skipped, "skipped"),
+        ] {
+            assert_eq!(variant.as_str(), wire);
+            assert_eq!(format!("{variant}"), wire);
+        }
+    }
 
     #[test]
     fn json_roundtrip_uses_snake_case_string() {

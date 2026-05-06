@@ -112,7 +112,7 @@ async fn status(
         .map_err(|e| AppError::Internal(e.into()))?;
 
     let rows = sqlx::query!(
-        "SELECT enrichment_status AS \"status: EnrichmentStatus\", COUNT(*)::bigint AS \"count!\" \
+        "SELECT enrichment_status AS \"status!: EnrichmentStatus\", COUNT(*)::bigint AS \"count!\" \
          FROM manifestations \
          GROUP BY enrichment_status",
     )
