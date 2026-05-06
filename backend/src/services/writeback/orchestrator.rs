@@ -493,6 +493,10 @@ async fn load_snapshot(pool: &PgPool, job_id: Uuid) -> Result<JobSnapshot, Write
         description: row.description,
         language: row.language,
         publisher: row.publisher,
+        // `query!` validates pub_date as Option<Date> at compile time; a
+        // decode error here is an infrastructure fault, so propagate it
+        // rather than masking it with a `None` fallback that would let the
+        // writeback report success with `<dc:date>` left stale.
         pub_date: row.pub_date.map(|d| d.to_string()),
         isbn_10: row.isbn_10,
         isbn_13: row.isbn_13,
