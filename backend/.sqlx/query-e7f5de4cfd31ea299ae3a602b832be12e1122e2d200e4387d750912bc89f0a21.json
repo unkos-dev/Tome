@@ -1,0 +1,108 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT wj.manifestation_id, wj.reason,\n                  m.work_id, m.file_path,\n                  m.format AS \"format: ManifestationFormat\",\n                  m.cover_path,\n                  m.publisher, m.pub_date, m.isbn_10, m.isbn_13,\n                  w.title, w.description, w.language\n             FROM writeback_jobs wj\n             JOIN manifestations m ON m.id = wj.manifestation_id\n             JOIN works w          ON w.id = m.work_id\n            WHERE wj.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "manifestation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "work_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "file_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "format: ManifestationFormat",
+        "type_info": {
+          "Custom": {
+            "name": "manifestation_format",
+            "kind": {
+              "Enum": [
+                "epub",
+                "pdf",
+                "mobi",
+                "azw3",
+                "cbz",
+                "cbr"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "cover_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "publisher",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "pub_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 8,
+        "name": "isbn_10",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "isbn_13",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "language",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "e7f5de4cfd31ea299ae3a602b832be12e1122e2d200e4387d750912bc89f0a21"
+}

@@ -17,7 +17,6 @@ use quick_xml::Reader;
 use quick_xml::events::Event;
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
-use sqlx::Row;
 use tempfile::NamedTempFile;
 use uuid::Uuid;
 use zip::ZipArchive;
@@ -264,11 +263,13 @@ pub async fn run_once(
     // specifics at `error!` so an operator doesn't have to wait for the
     // sweep to notice.
     let new_hash = compute_hex_sha256(&final_path)?;
-    if let Err(e) = sqlx::query("UPDATE manifestations SET current_file_hash = $1 WHERE id = $2")
-        .bind(&new_hash)
-        .bind(manifestation_id)
-        .execute(pool)
-        .await
+    if let Err(e) = sqlx::query!(
+        "UPDATE manifestations SET current_file_hash = $1 WHERE id = $2",
+        new_hash,
+        manifestation_id,
+    )
+    .execute(pool)
+    .await
     {
         tracing::error!(
             error = %e,
@@ -374,11 +375,13 @@ async fn path_rename_step(
     // points at `src_path` (missing on disk), and the next run_once would
     // skip as `file_missing` — permanently removing the book from the
     // library index. Compensate with a best-effort move-back.
-    let update_result = sqlx::query("UPDATE manifestations SET file_path = $1 WHERE id = $2")
-        .bind(&new_path_str)
-        .bind(snap.manifestation_id)
-        .execute(pool)
-        .await;
+    let update_result = sqlx::query!(
+        "UPDATE manifestations SET file_path = $1 WHERE id = $2",
+        new_path_str,
+        snap.manifestation_id,
+    )
+    .execute(pool)
+    .await;
 
     if let Err(e) = update_result {
         if let Err(re) = path_rename::move_existing(&new_path, &src_path) {
@@ -451,62 +454,52 @@ fn rollback_atomic(
 // ── Snapshot load ─────────────────────────────────────────────────────────
 
 async fn load_snapshot(pool: &PgPool, job_id: Uuid) -> Result<JobSnapshot, WritebackError> {
-    let row = sqlx::query(
-        "SELECT wj.manifestation_id, wj.reason, \
-                m.work_id, m.file_path, m.format, m.cover_path, \
-                m.publisher, m.pub_date, m.isbn_10, m.isbn_13, \
-                w.title, w.description, w.language \
-           FROM writeback_jobs wj \
-           JOIN manifestations m ON m.id = wj.manifestation_id \
-           JOIN works w          ON w.id = m.work_id \
-          WHERE wj.id = $1",
+    let row = sqlx::query!(
+        r#"SELECT wj.manifestation_id, wj.reason,
+                  m.work_id, m.file_path,
+                  m.format AS "format: ManifestationFormat",
+                  m.cover_path,
+                  m.publisher, m.pub_date, m.isbn_10, m.isbn_13,
+                  w.title, w.description, w.language
+             FROM writeback_jobs wj
+             JOIN manifestations m ON m.id = wj.manifestation_id
+             JOIN works w          ON w.id = m.work_id
+            WHERE wj.id = $1"#,
+        job_id,
     )
-    .bind(job_id)
     .fetch_optional(pool)
     .await?
     .ok_or(WritebackError::JobNotFound(job_id))?;
 
-    let work_id: Uuid = row.try_get("work_id")?;
-    let primary_author: Option<String> = sqlx::query_scalar(
+    let primary_author: Option<String> = sqlx::query_scalar!(
         "SELECT a.sort_name \
            FROM work_authors wa \
            JOIN authors a ON a.id = wa.author_id \
           WHERE wa.work_id = $1 AND wa.role = 'author' \
           ORDER BY wa.position \
           LIMIT 1",
+        row.work_id,
     )
-    .bind(work_id)
     .fetch_optional(pool)
     .await?;
 
-    // `try_get` returns `Ok(None)` for NULL columns; any `Err` here is a
-    // real decode problem (type mismatch, bad bytes) — log it instead of
-    // silently falling back to `None`, otherwise the writeback reports
-    // success with `<dc:date>` left stale.
-    let pub_date: Option<time::Date> = match row.try_get("pub_date") {
-        Ok(v) => v,
-        Err(e) => {
-            tracing::warn!(
-                error = %e,
-                %job_id,
-                "writeback: pub_date decode failed; proceeding with no date"
-            );
-            None
-        }
-    };
     Ok(JobSnapshot {
-        manifestation_id: row.try_get("manifestation_id")?,
-        reason: row.try_get::<String, _>("reason")?,
-        file_path: row.try_get("file_path")?,
-        format: row.try_get("format")?,
-        cover_path: row.try_get("cover_path")?,
-        title: row.try_get("title")?,
-        description: row.try_get("description")?,
-        language: row.try_get("language")?,
-        publisher: row.try_get("publisher")?,
-        pub_date: pub_date.map(|d| d.to_string()),
-        isbn_10: row.try_get("isbn_10")?,
-        isbn_13: row.try_get("isbn_13")?,
+        manifestation_id: row.manifestation_id,
+        reason: row.reason,
+        file_path: row.file_path,
+        format: row.format,
+        cover_path: row.cover_path,
+        title: Some(row.title),
+        description: row.description,
+        language: row.language,
+        publisher: row.publisher,
+        // `query!` validates pub_date as Option<Date> at compile time; a
+        // decode error here is an infrastructure fault, so propagate it
+        // rather than masking it with a `None` fallback that would let the
+        // writeback report success with `<dc:date>` left stale.
+        pub_date: row.pub_date.map(|d| d.to_string()),
+        isbn_10: row.isbn_10,
+        isbn_13: row.isbn_13,
         primary_author,
     })
 }
@@ -786,14 +779,15 @@ mod tests {
         file_path: &str,
         ingestion_hash: &str,
     ) -> (Uuid, Uuid) {
-        let work_id: Uuid = sqlx::query_scalar(
+        let title = format!("WbFixture-{marker}");
+        let work_id = sqlx::query_scalar!(
             "INSERT INTO works (title, sort_title) VALUES ($1, $1) RETURNING id",
+            title,
         )
-        .bind(format!("WbFixture-{marker}"))
         .fetch_one(ing_pool)
         .await
         .unwrap();
-        let m_id: Uuid = sqlx::query_scalar(
+        let m_id = sqlx::query_scalar!(
             // Set enrichment_status = 'complete' so these fixtures don't
             // leak into the enrichment queue's claim_next under parallel
             // test execution (the column defaults to 'pending').
@@ -804,10 +798,10 @@ mod tests {
                      'complete'::ingestion_status, 'valid'::validation_status, \
                      'complete'::enrichment_status) \
              RETURNING id",
+            work_id,
+            file_path,
+            ingestion_hash,
         )
-        .bind(work_id)
-        .bind(file_path)
-        .bind(ingestion_hash)
         .fetch_one(ing_pool)
         .await
         .unwrap();
@@ -837,18 +831,20 @@ mod tests {
         // moved the pointer — our job represents the writeback that
         // follows.
         let new_title = format!("New Title {marker}");
-        sqlx::query("UPDATE works SET title = $1 WHERE id = $2")
-            .bind(&new_title)
-            .bind(work_id)
-            .execute(&ing_pool)
-            .await
-            .unwrap();
+        sqlx::query!(
+            "UPDATE works SET title = $1 WHERE id = $2",
+            new_title,
+            work_id
+        )
+        .execute(&ing_pool)
+        .await
+        .unwrap();
 
-        let job_id: Uuid = sqlx::query_scalar(
+        let job_id = sqlx::query_scalar!(
             "INSERT INTO writeback_jobs (manifestation_id, reason) \
              VALUES ($1, 'metadata') RETURNING id",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&ing_pool)
         .await
         .unwrap();
@@ -869,16 +865,20 @@ mod tests {
         );
 
         // Hash columns: current changed, ingestion unchanged.
-        let (current, ingestion): (String, String) = sqlx::query_as(
-            "SELECT current_file_hash, ingestion_file_hash FROM manifestations WHERE id = $1",
+        let row = sqlx::query!(
+            "SELECT current_file_hash, ingestion_file_hash \
+             FROM manifestations WHERE id = $1",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&app_pool)
         .await
         .unwrap();
-        assert_ne!(current, original_hash, "current_file_hash must change");
+        assert_ne!(
+            row.current_file_hash, original_hash,
+            "current_file_hash must change"
+        );
         assert_eq!(
-            ingestion, original_hash,
+            row.ingestion_file_hash, original_hash,
             "ingestion_file_hash must NOT change"
         );
     }
@@ -900,58 +900,65 @@ mod tests {
             insert_fixture(&ing_pool, &marker, path.to_str().unwrap(), &original_hash).await;
 
         // First writeback: set title to A.
-        sqlx::query("UPDATE works SET title = $1 WHERE id = $2")
-            .bind(format!("First {marker}"))
-            .bind(work_id)
-            .execute(&ing_pool)
-            .await
-            .unwrap();
-        let j1: Uuid = sqlx::query_scalar(
-            "INSERT INTO writeback_jobs (manifestation_id, reason) VALUES ($1, 'metadata') RETURNING id",
+        let title_a = format!("First {marker}");
+        sqlx::query!(
+            "UPDATE works SET title = $1 WHERE id = $2",
+            title_a,
+            work_id
         )
-        .bind(m_id)
+        .execute(&ing_pool)
+        .await
+        .unwrap();
+        let j1 = sqlx::query_scalar!(
+            "INSERT INTO writeback_jobs (manifestation_id, reason) VALUES ($1, 'metadata') RETURNING id",
+            m_id,
+        )
         .fetch_one(&ing_pool)
         .await
         .unwrap();
         run_once(&app_pool, &test_config(), j1).await.unwrap();
 
-        let hash_after_first: String =
-            sqlx::query_scalar("SELECT current_file_hash FROM manifestations WHERE id = $1")
-                .bind(m_id)
-                .fetch_one(&app_pool)
-                .await
-                .unwrap();
+        let hash_after_first = sqlx::query_scalar!(
+            "SELECT current_file_hash FROM manifestations WHERE id = $1",
+            m_id
+        )
+        .fetch_one(&app_pool)
+        .await
+        .unwrap();
         assert_ne!(hash_after_first, original_hash);
 
         // Second writeback: set title to B.
-        sqlx::query("UPDATE works SET title = $1 WHERE id = $2")
-            .bind(format!("Second {marker}"))
-            .bind(work_id)
-            .execute(&ing_pool)
-            .await
-            .unwrap();
-        let j2: Uuid = sqlx::query_scalar(
-            "INSERT INTO writeback_jobs (manifestation_id, reason) VALUES ($1, 'metadata') RETURNING id",
+        let title_b = format!("Second {marker}");
+        sqlx::query!(
+            "UPDATE works SET title = $1 WHERE id = $2",
+            title_b,
+            work_id
         )
-        .bind(m_id)
+        .execute(&ing_pool)
+        .await
+        .unwrap();
+        let j2 = sqlx::query_scalar!(
+            "INSERT INTO writeback_jobs (manifestation_id, reason) VALUES ($1, 'metadata') RETURNING id",
+            m_id,
+        )
         .fetch_one(&ing_pool)
         .await
         .unwrap();
         run_once(&app_pool, &test_config(), j2).await.unwrap();
 
-        let (current, ingestion): (String, String) = sqlx::query_as(
+        let row = sqlx::query!(
             "SELECT current_file_hash, ingestion_file_hash FROM manifestations WHERE id = $1",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&app_pool)
         .await
         .unwrap();
         assert_ne!(
-            current, hash_after_first,
+            row.current_file_hash, hash_after_first,
             "second writeback must change current_file_hash again"
         );
         assert_eq!(
-            ingestion, original_hash,
+            row.ingestion_file_hash, original_hash,
             "ingestion_file_hash must NEVER change"
         );
     }
@@ -981,19 +988,19 @@ mod tests {
 
         // Bind an author so the template renders {Author}/{Title}.epub.
         let author_sort = format!("Author{marker}");
-        let author_id: Uuid = sqlx::query_scalar(
+        let author_id = sqlx::query_scalar!(
             "INSERT INTO authors (name, sort_name) VALUES ($1, $1) RETURNING id",
+            author_sort,
         )
-        .bind(&author_sort)
         .fetch_one(&ing_pool)
         .await
         .unwrap();
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO work_authors (work_id, author_id, role, position) \
              VALUES ($1, $2, 'author', 0)",
+            work_id,
+            author_id,
         )
-        .bind(work_id)
-        .bind(author_id)
         .execute(&ing_pool)
         .await
         .unwrap();
@@ -1001,18 +1008,20 @@ mod tests {
         // Set works.title to a value that drives a rename (template
         // renders to a different path than the fixture's tempdir name).
         let new_title = format!("Renamed{marker}");
-        sqlx::query("UPDATE works SET title = $1 WHERE id = $2")
-            .bind(&new_title)
-            .bind(work_id)
-            .execute(&ing_pool)
-            .await
-            .unwrap();
+        sqlx::query!(
+            "UPDATE works SET title = $1 WHERE id = $2",
+            new_title,
+            work_id
+        )
+        .execute(&ing_pool)
+        .await
+        .unwrap();
 
-        let job_id: Uuid = sqlx::query_scalar(
+        let job_id = sqlx::query_scalar!(
             "INSERT INTO writeback_jobs (manifestation_id, reason) \
              VALUES ($1, 'metadata') RETURNING id",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&ing_pool)
         .await
         .unwrap();
@@ -1043,14 +1052,15 @@ mod tests {
         );
 
         // DB: file_path updated, current_file_hash matches new file.
-        let (db_path, current_hash): (String, String) =
-            sqlx::query_as("SELECT file_path, current_file_hash FROM manifestations WHERE id = $1")
-                .bind(m_id)
-                .fetch_one(&app_pool)
-                .await
-                .unwrap();
-        assert_eq!(db_path, expected_new.to_str().unwrap());
-        assert_ne!(current_hash, original_hash);
+        let row = sqlx::query!(
+            "SELECT file_path, current_file_hash FROM manifestations WHERE id = $1",
+            m_id,
+        )
+        .fetch_one(&app_pool)
+        .await
+        .unwrap();
+        assert_eq!(row.file_path, expected_new.to_str().unwrap());
+        assert_ne!(row.current_file_hash, original_hash);
     }
 
     /// Build a fixture EPUB that already carries an EPUB 3
@@ -1161,18 +1171,21 @@ mod tests {
             &original_hash,
         )
         .await;
-        sqlx::query("UPDATE manifestations SET cover_path = $1 WHERE id = $2")
-            .bind(pending_path.to_str().unwrap())
-            .bind(m_id)
-            .execute(&ing_pool)
-            .await
-            .unwrap();
+        let pending_str = pending_path.to_str().unwrap();
+        sqlx::query!(
+            "UPDATE manifestations SET cover_path = $1 WHERE id = $2",
+            pending_str,
+            m_id,
+        )
+        .execute(&ing_pool)
+        .await
+        .unwrap();
 
-        let job_id: Uuid = sqlx::query_scalar(
+        let job_id = sqlx::query_scalar!(
             "INSERT INTO writeback_jobs (manifestation_id, reason) \
              VALUES ($1, 'cover') RETURNING id",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&ing_pool)
         .await
         .unwrap();
@@ -1216,15 +1229,15 @@ mod tests {
         );
 
         // current_file_hash advanced; ingestion_file_hash unchanged.
-        let (current, ingestion): (String, String) = sqlx::query_as(
+        let row = sqlx::query!(
             "SELECT current_file_hash, ingestion_file_hash FROM manifestations WHERE id = $1",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&app_pool)
         .await
         .unwrap();
-        assert_ne!(current, original_hash);
-        assert_eq!(ingestion, original_hash);
+        assert_ne!(row.current_file_hash, original_hash);
+        assert_eq!(row.ingestion_file_hash, original_hash);
     }
 
     /// Collision branch of `resolve_collision`: if the rendered target
@@ -1251,30 +1264,32 @@ mod tests {
         .await;
 
         let author_sort = format!("Author{marker}");
-        let author_id: Uuid = sqlx::query_scalar(
+        let author_id = sqlx::query_scalar!(
             "INSERT INTO authors (name, sort_name) VALUES ($1, $1) RETURNING id",
+            author_sort,
         )
-        .bind(&author_sort)
         .fetch_one(&ing_pool)
         .await
         .unwrap();
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO work_authors (work_id, author_id, role, position) \
              VALUES ($1, $2, 'author', 0)",
+            work_id,
+            author_id,
         )
-        .bind(work_id)
-        .bind(author_id)
         .execute(&ing_pool)
         .await
         .unwrap();
 
         let new_title = format!("Renamed{marker}");
-        sqlx::query("UPDATE works SET title = $1 WHERE id = $2")
-            .bind(&new_title)
-            .bind(work_id)
-            .execute(&ing_pool)
-            .await
-            .unwrap();
+        sqlx::query!(
+            "UPDATE works SET title = $1 WHERE id = $2",
+            new_title,
+            work_id,
+        )
+        .execute(&ing_pool)
+        .await
+        .unwrap();
 
         // Pre-create the exact rendered target so `resolve_collision`
         // must add the " (2)" suffix.  Place it under the expected
@@ -1284,11 +1299,11 @@ mod tests {
         let pre_existing_path = pre_existing_dir.join(format!("{new_title}.epub"));
         std::fs::write(&pre_existing_path, b"pre-existing-sentinel").unwrap();
 
-        let job_id: Uuid = sqlx::query_scalar(
+        let job_id = sqlx::query_scalar!(
             "INSERT INTO writeback_jobs (manifestation_id, reason) \
              VALUES ($1, 'metadata') RETURNING id",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&ing_pool)
         .await
         .unwrap();
@@ -1320,9 +1335,8 @@ mod tests {
             expected_collision_path.display()
         );
 
-        let db_path: String =
-            sqlx::query_scalar("SELECT file_path FROM manifestations WHERE id = $1")
-                .bind(m_id)
+        let db_path =
+            sqlx::query_scalar!("SELECT file_path FROM manifestations WHERE id = $1", m_id,)
                 .fetch_one(&app_pool)
                 .await
                 .unwrap();

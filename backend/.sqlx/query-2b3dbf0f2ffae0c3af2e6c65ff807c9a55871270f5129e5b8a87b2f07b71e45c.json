@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT current_file_hash, ingestion_file_hash FROM manifestations WHERE id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "current_file_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "ingestion_file_hash",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "2b3dbf0f2ffae0c3af2e6c65ff807c9a55871270f5129e5b8a87b2f07b71e45c"
+}
