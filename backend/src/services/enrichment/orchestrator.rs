@@ -265,17 +265,20 @@ async fn apply_canonical_batch(
             // Pull the authoritative match_type back from the row we just
             // upserted — it may be 'isbn', 'title_author_fuzzy', or 'title'
             // depending on the source path.
-            let match_type: String =
-                sqlx::query_scalar("SELECT match_type FROM metadata_versions WHERE id = $1")
-                    .bind(incoming.id)
-                    .fetch_one(&mut **tx)
-                    .await?;
+            let match_type = sqlx::query_scalar!(
+                "SELECT match_type FROM metadata_versions WHERE id = $1",
+                incoming.id,
+            )
+            .fetch_one(&mut **tx)
+            .await?;
             let confidence_score = confidence::score(source_id, &match_type, quorum);
-            sqlx::query("UPDATE metadata_versions SET confidence_score = $1 WHERE id = $2")
-                .bind(confidence_score)
-                .bind(incoming.id)
-                .execute(&mut **tx)
-                .await?;
+            sqlx::query!(
+                "UPDATE metadata_versions SET confidence_score = $1 WHERE id = $2",
+                confidence_score,
+                incoming.id,
+            )
+            .execute(&mut **tx)
+            .await?;
             tracing::debug!(
                 %field, source_id, quorum, %match_type, confidence_score,
                 "confidence computed"
@@ -353,9 +356,7 @@ async fn apply_canonical_batch(
 
 /// Load the current canonical + lookup state for a manifestation.
 pub async fn load_snapshot(pool: &PgPool, manifestation_id: Uuid) -> anyhow::Result<Snapshot> {
-    use sqlx::Row;
-
-    let row = sqlx::query(
+    let row = sqlx::query!(
         "SELECT m.work_id, m.isbn_10, m.isbn_13, m.publisher, m.pub_date, \
                 w.title, w.description, w.language, \
                 (SELECT a.name FROM work_authors wa \
@@ -366,43 +367,45 @@ pub async fn load_snapshot(pool: &PgPool, manifestation_id: Uuid) -> anyhow::Res
          FROM manifestations m \
          JOIN works w ON w.id = m.work_id \
          WHERE m.id = $1",
+        manifestation_id,
     )
-    .bind(manifestation_id)
     .fetch_optional(pool)
     .await?;
 
     let row = row.ok_or_else(|| anyhow!("manifestation not found: {manifestation_id}"))?;
 
-    let work_id: Uuid = row.try_get("work_id")?;
-    let isbn_10: Option<String> = row.try_get("isbn_10")?;
-    let isbn_13: Option<String> = row.try_get("isbn_13")?;
-    let publisher: Option<String> = row.try_get("publisher")?;
-    let pub_date: Option<time::Date> = row.try_get("pub_date")?;
-    let title: Option<String> = row.try_get("title")?;
-    let description: Option<String> = row.try_get("description")?;
-    let language: Option<String> = row.try_get("language")?;
-    let first_author: Option<String> = row.try_get("first_author")?;
-
-    let canonical = CanonicalState {
-        title: title.clone(),
-        description,
-        language,
-        publisher,
-        pub_date: pub_date.map(|d| d.to_string()),
-        isbn_10: isbn_10.clone(),
-        isbn_13: isbn_13.clone(),
+    // `w.title` is `TEXT NOT NULL` but `models::work::create_stub` writes an
+    // empty string as a placeholder before metadata draft completes. Treat
+    // empty as "absent" so canonical comparison + lookup-key derivation skip
+    // the stub instead of matching against `""`.
+    let title_opt = if row.title.is_empty() {
+        None
+    } else {
+        Some(row.title)
     };
 
+    // Borrow-only view for `derive_lookup_key`; the move into `canonical`
+    // happens after so each field travels exactly once.
     let lookup_key = derive_lookup_key(
-        isbn_13.as_deref(),
-        isbn_10.as_deref(),
-        title.as_deref(),
-        first_author.as_deref(),
+        row.isbn_13.as_deref(),
+        row.isbn_10.as_deref(),
+        title_opt.as_deref(),
+        row.first_author.as_deref(),
     );
+
+    let canonical = CanonicalState {
+        title: title_opt,
+        description: row.description,
+        language: row.language,
+        publisher: row.publisher,
+        pub_date: row.pub_date.map(|d| d.to_string()),
+        isbn_10: row.isbn_10,
+        isbn_13: row.isbn_13,
+    };
 
     Ok(Snapshot {
         manifestation_id,
-        work_id,
+        work_id: row.work_id,
         lookup_key,
         canonical,
     })
@@ -572,7 +575,7 @@ async fn upsert_journal_row(
 ) -> sqlx::Result<Uuid> {
     let hash = value_hash::value_hash(&sr.field_name, &sr.raw_value);
     let score = confidence::score(source_id, &sr.match_type, 1);
-    let id: Uuid = sqlx::query_scalar(
+    let id = sqlx::query_scalar!(
         "INSERT INTO metadata_versions \
              (manifestation_id, source, field_name, new_value, value_hash, match_type, confidence_score) \
          VALUES ($1, $2, $3, $4, $5, $6, $7) \
@@ -580,14 +583,14 @@ async fn upsert_journal_row(
          DO UPDATE SET last_seen_at = now(), \
                        observation_count = metadata_versions.observation_count + 1 \
          RETURNING id",
+        manifestation_id,
+        source_id,
+        sr.field_name,
+        sr.raw_value,
+        hash,
+        sr.match_type,
+        score,
     )
-    .bind(manifestation_id)
-    .bind(source_id)
-    .bind(&sr.field_name)
-    .bind(&sr.raw_value)
-    .bind(&hash)
-    .bind(&sr.match_type)
-    .bind(score)
     .fetch_one(&mut **tx)
     .await?;
     Ok(id)
@@ -598,17 +601,20 @@ async fn load_existing_pending(
     manifestation_id: Uuid,
     field: &str,
 ) -> sqlx::Result<Vec<PolicyInputRow>> {
-    let rows: Vec<(Uuid, Vec<u8>)> = sqlx::query_as(
+    let rows = sqlx::query!(
         "SELECT id, value_hash FROM metadata_versions \
          WHERE manifestation_id = $1 AND field_name = $2 AND status = 'pending'",
+        manifestation_id,
+        field,
     )
-    .bind(manifestation_id)
-    .bind(field)
     .fetch_all(&mut **tx)
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, value_hash)| PolicyInputRow { id, value_hash })
+        .map(|r| PolicyInputRow {
+            id: r.id,
+            value_hash: r.value_hash,
+        })
         .collect())
 }
 
@@ -633,11 +639,13 @@ async fn enqueue_writeback(
     } else {
         "metadata"
     };
-    sqlx::query("INSERT INTO writeback_jobs (manifestation_id, reason) VALUES ($1, $2)")
-        .bind(manifestation_id)
-        .bind(reason)
-        .execute(&mut **tx)
-        .await?;
+    sqlx::query!(
+        "INSERT INTO writeback_jobs (manifestation_id, reason) VALUES ($1, $2)",
+        manifestation_id,
+        reason,
+    )
+    .execute(&mut **tx)
+    .await?;
     Ok(())
 }
 
@@ -660,11 +668,12 @@ async fn apply_field(
 ) -> sqlx::Result<bool> {
     // Pull canonical value from the journal row — serialised as JSON so we
     // have a single source of truth.
-    let value: serde_json::Value =
-        sqlx::query_scalar("SELECT new_value FROM metadata_versions WHERE id = $1")
-            .bind(version_id)
-            .fetch_one(&mut **tx)
-            .await?;
+    let value = sqlx::query_scalar!(
+        "SELECT new_value FROM metadata_versions WHERE id = $1",
+        version_id,
+    )
+    .fetch_one(&mut **tx)
+    .await?;
 
     match field {
         "title" => {
@@ -672,13 +681,13 @@ async fn apply_field(
                 tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
                 return Ok(false);
             };
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE works SET title = $1, sort_title = lower($1), title_version_id = $2 \
                  WHERE id = $3",
+                v,
+                version_id,
+                snapshot.work_id,
             )
-            .bind(&v)
-            .bind(version_id)
-            .bind(snapshot.work_id)
             .execute(&mut **tx)
             .await?;
             Ok(true)
@@ -688,12 +697,12 @@ async fn apply_field(
                 tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
                 return Ok(false);
             };
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE works SET description = $1, description_version_id = $2 WHERE id = $3",
+                v,
+                version_id,
+                snapshot.work_id,
             )
-            .bind(&v)
-            .bind(version_id)
-            .bind(snapshot.work_id)
             .execute(&mut **tx)
             .await?;
             Ok(true)
@@ -703,12 +712,14 @@ async fn apply_field(
                 tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
                 return Ok(false);
             };
-            sqlx::query("UPDATE works SET language = $1, language_version_id = $2 WHERE id = $3")
-                .bind(&v)
-                .bind(version_id)
-                .bind(snapshot.work_id)
-                .execute(&mut **tx)
-                .await?;
+            sqlx::query!(
+                "UPDATE works SET language = $1, language_version_id = $2 WHERE id = $3",
+                v,
+                version_id,
+                snapshot.work_id,
+            )
+            .execute(&mut **tx)
+            .await?;
             Ok(true)
         }
         "publisher" => {
@@ -716,12 +727,12 @@ async fn apply_field(
                 tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
                 return Ok(false);
             };
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE manifestations SET publisher = $1, publisher_version_id = $2 WHERE id = $3",
+                v,
+                version_id,
+                snapshot.manifestation_id,
             )
-            .bind(&v)
-            .bind(version_id)
-            .bind(snapshot.manifestation_id)
             .execute(&mut **tx)
             .await?;
             Ok(true)
@@ -740,12 +751,12 @@ async fn apply_field(
                 tracing::debug!(value = %v, "pub_date value not ISO; skipping canonical apply");
                 return Ok(false);
             };
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE manifestations SET pub_date = $1, pub_date_version_id = $2 WHERE id = $3",
+                date,
+                version_id,
+                snapshot.manifestation_id,
             )
-            .bind(date)
-            .bind(version_id)
-            .bind(snapshot.manifestation_id)
             .execute(&mut **tx)
             .await?;
             Ok(true)
@@ -755,12 +766,12 @@ async fn apply_field(
                 tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
                 return Ok(false);
             };
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE manifestations SET isbn_10 = $1, isbn_10_version_id = $2 WHERE id = $3",
+                v,
+                version_id,
+                snapshot.manifestation_id,
             )
-            .bind(&v)
-            .bind(version_id)
-            .bind(snapshot.manifestation_id)
             .execute(&mut **tx)
             .await?;
             Ok(true)
@@ -770,12 +781,12 @@ async fn apply_field(
                 tracing::warn!(field = %field, raw = %value, "non-string canonical value; skipping apply");
                 return Ok(false);
             };
-            sqlx::query(
+            sqlx::query!(
                 "UPDATE manifestations SET isbn_13 = $1, isbn_13_version_id = $2 WHERE id = $3",
+                v,
+                version_id,
+                snapshot.manifestation_id,
             )
-            .bind(&v)
-            .bind(version_id)
-            .bind(snapshot.manifestation_id)
             .execute(&mut **tx)
             .await?;
             Ok(true)
@@ -1035,24 +1046,26 @@ mod tests {
     /// Insert (work + manifestation) with the given ISBN-13 and return both IDs.
     /// Canonical fields start empty so `AutoFill` is exercised.
     async fn insert_enrich_fixture(pool: &PgPool, isbn_13: &str, marker: &str) -> (Uuid, Uuid) {
-        let work_id: Uuid = sqlx::query_scalar(
+        let work_id = sqlx::query_scalar!(
             "INSERT INTO works (title, sort_title) VALUES ('', '') RETURNING id",
         )
         .fetch_one(pool)
         .await
         .unwrap();
-        let manifestation_id: Uuid = sqlx::query_scalar(
+        let path = format!("/tmp/orch-{marker}.epub");
+        let hash = format!("orch-hash-{marker}");
+        let manifestation_id = sqlx::query_scalar!(
             "INSERT INTO manifestations \
                (work_id, isbn_13, format, file_path, ingestion_file_hash, current_file_hash, \
                 file_size_bytes, ingestion_status, validation_status) \
              VALUES ($1, $2, 'epub'::manifestation_format, $3, $4, $4, 1000, \
                      'complete'::ingestion_status, 'valid'::validation_status) \
              RETURNING id",
+            work_id,
+            isbn_13,
+            path,
+            hash,
         )
-        .bind(work_id)
-        .bind(isbn_13)
-        .bind(format!("/tmp/orch-{marker}.epub"))
-        .bind(format!("orch-hash-{marker}"))
         .fetch_one(pool)
         .await
         .unwrap();
@@ -1147,28 +1160,28 @@ mod tests {
             outcome.applied, 1,
             "agreement should Apply once, not once per agreeing source"
         );
-        let writeback_rows: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM writeback_jobs WHERE manifestation_id = $1")
-                .bind(m_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let writeback_rows = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM writeback_jobs WHERE manifestation_id = $1",
+            m_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
             writeback_rows, 1,
             "expected exactly one writeback row, got {writeback_rows}"
         );
 
-        let canon: Option<String> = sqlx::query_scalar(
+        let canon = sqlx::query_scalar!(
             "SELECT w.title FROM works w \
              JOIN manifestations m ON m.work_id = w.id WHERE m.id = $1",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&pool)
         .await
         .unwrap();
         assert_eq!(
-            canon.as_deref(),
-            Some(canon_title.as_str()),
+            canon, canon_title,
             "canonical title should match agreement value"
         );
 
@@ -1177,11 +1190,11 @@ mod tests {
         // ISBN-matched source is `hardcover` at 0.85; with the boost,
         // `openlibrary` reaches 0.96 — anything ≥ 0.90 proves the boost
         // landed in the row, not just the log.
-        let max_score: f32 = sqlx::query_scalar(
-            "SELECT MAX(confidence_score) FROM metadata_versions \
+        let max_score = sqlx::query_scalar!(
+            "SELECT MAX(confidence_score) AS \"max_score!\" FROM metadata_versions \
              WHERE manifestation_id = $1 AND field_name = 'title'",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -1222,11 +1235,11 @@ mod tests {
         let _ = run_once(&pool, &cfg, m_id).await.unwrap();
 
         // Title journal rows written (all pending), but canonical empty.
-        let title_rows: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM metadata_versions \
+        let title_rows = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM metadata_versions \
              WHERE manifestation_id = $1 AND field_name = 'title'",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -1235,11 +1248,11 @@ mod tests {
             "expected ≥3 title journal rows across sources, got {title_rows}"
         );
 
-        let canon_title: String = sqlx::query_scalar(
+        let canon_title = sqlx::query_scalar!(
             "SELECT w.title FROM works w \
              JOIN manifestations m ON m.work_id = w.id WHERE m.id = $1",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -1248,11 +1261,11 @@ mod tests {
             "canonical title should remain empty after disagreement, got '{canon_title}'"
         );
 
-        let title_version_id: Option<Uuid> = sqlx::query_scalar(
+        let title_version_id = sqlx::query_scalar!(
             "SELECT w.title_version_id FROM works w \
              JOIN manifestations m ON m.work_id = w.id WHERE m.id = $1",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -1287,30 +1300,31 @@ mod tests {
 
         let _ = run_once(&pool, &cfg, m_id).await.unwrap();
 
-        let (publisher, publisher_ptr): (Option<String>, Option<Uuid>) = sqlx::query_as(
+        let row = sqlx::query!(
             "SELECT publisher, publisher_version_id FROM manifestations WHERE id = $1",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&pool)
         .await
         .unwrap();
         assert_eq!(
-            publisher.as_deref(),
+            row.publisher.as_deref(),
             Some(publisher_name.as_str()),
             "AutoFill on empty canonical should apply publisher"
         );
         assert!(
-            publisher_ptr.is_some(),
+            row.publisher_version_id.is_some(),
             "publisher_version_id must be wired"
         );
 
         // Apply path must emit a writeback_jobs row in the same tx.
-        let job_count: i64 =
-            sqlx::query_scalar("SELECT count(*) FROM writeback_jobs WHERE manifestation_id = $1")
-                .bind(m_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let job_count = sqlx::query_scalar!(
+            "SELECT count(*) AS \"count!\" FROM writeback_jobs WHERE manifestation_id = $1",
+            m_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
             job_count, 1,
             "enrichment Apply must emit exactly one writeback_jobs row; got {job_count}"
@@ -1340,11 +1354,11 @@ mod tests {
         let (_work_id, m_id) = insert_enrich_fixture(&pool, isbn, &marker).await;
         // Lock the title field on the work side.  field_locks writes require
         // reverie_app (reverie_ingestion has SELECT only) — use a separate pool.
-        sqlx::query(
+        sqlx::query!(
             "INSERT INTO field_locks (manifestation_id, entity_type, field_name) \
              VALUES ($1, 'work', 'title')",
+            m_id,
         )
-        .bind(m_id)
         .execute(&app_pool)
         .await
         .unwrap();
@@ -1353,11 +1367,11 @@ mod tests {
         let _ = run_once(&pool, &cfg, m_id).await.unwrap();
 
         // Journal row for the proposed title WAS written.
-        let title_rows: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM metadata_versions \
+        let title_rows = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM metadata_versions \
              WHERE manifestation_id = $1 AND field_name = 'title'",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -1367,11 +1381,11 @@ mod tests {
         );
 
         // Canonical title_version_id stays NULL.
-        let title_ptr: Option<Uuid> = sqlx::query_scalar(
+        let title_ptr = sqlx::query_scalar!(
             "SELECT w.title_version_id FROM works w \
              JOIN manifestations m ON m.work_id = w.id WHERE m.id = $1",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -1379,11 +1393,11 @@ mod tests {
             title_ptr.is_none(),
             "locked field must NOT set canonical pointer"
         );
-        let canon_title: String = sqlx::query_scalar(
+        let canon_title = sqlx::query_scalar!(
             "SELECT w.title FROM works w \
              JOIN manifestations m ON m.work_id = w.id WHERE m.id = $1",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -1419,19 +1433,21 @@ mod tests {
 
         // Baseline counts — scoped by manifestation / lookup_key so other
         // tests' rows don't pollute.
-        let mv_before: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM metadata_versions WHERE manifestation_id = $1",
+        let mv_before = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM metadata_versions WHERE manifestation_id = $1",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&pool)
         .await
         .unwrap();
-        let cache_before: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM api_cache WHERE lookup_key = $1")
-                .bind(format!("isbn:{isbn}"))
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let isbn_lookup = format!("isbn:{isbn}");
+        let cache_before = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM api_cache WHERE lookup_key = $1",
+            isbn_lookup,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
         let diff = dry_run::preview(&pool, &cfg, m_id).await.unwrap();
         assert!(
@@ -1439,19 +1455,20 @@ mod tests {
             "dry_run should surface at least one proposed change"
         );
 
-        let mv_after: i64 = sqlx::query_scalar(
-            "SELECT COUNT(*) FROM metadata_versions WHERE manifestation_id = $1",
+        let mv_after = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM metadata_versions WHERE manifestation_id = $1",
+            m_id,
         )
-        .bind(m_id)
         .fetch_one(&pool)
         .await
         .unwrap();
-        let cache_after: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM api_cache WHERE lookup_key = $1")
-                .bind(format!("isbn:{isbn}"))
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let cache_after = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM api_cache WHERE lookup_key = $1",
+            isbn_lookup,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
         assert_eq!(
             mv_after,
@@ -1632,12 +1649,13 @@ mod tests {
         assert_eq!(outcome.staged, 0);
         assert_eq!(outcome.skipped_locked, 0);
 
-        let writeback_rows: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM writeback_jobs WHERE manifestation_id = $1")
-                .bind(m_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let writeback_rows = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM writeback_jobs WHERE manifestation_id = $1",
+            m_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
             writeback_rows, 1,
             "exactly one writeback row expected; got {writeback_rows}"
@@ -1708,9 +1726,8 @@ mod tests {
             "the new run's row should land in Stage when prior pending disagrees"
         );
 
-        let canon_publisher: Option<String> =
-            sqlx::query_scalar("SELECT publisher FROM manifestations WHERE id = $1")
-                .bind(m_id)
+        let canon_publisher =
+            sqlx::query_scalar!("SELECT publisher FROM manifestations WHERE id = $1", m_id,)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
@@ -1719,12 +1736,13 @@ mod tests {
             "canonical publisher must remain empty"
         );
 
-        let writeback_rows: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM writeback_jobs WHERE manifestation_id = $1")
-                .bind(m_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let writeback_rows = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM writeback_jobs WHERE manifestation_id = $1",
+            m_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
             writeback_rows, 0,
             "Stage decision must not enqueue a writeback"
@@ -1806,37 +1824,39 @@ mod tests {
         let shared_hash: Vec<u8> = vec![0u8; 32];
 
         // Bad row: array (non-string) → apply_field returns Ok(false).
-        let id_bad: Uuid = sqlx::query_scalar(
+        let bad_value = serde_json::json!(["Bad Publisher"]);
+        let id_bad = sqlx::query_scalar!(
             "INSERT INTO metadata_versions \
                 (manifestation_id, source, field_name, new_value, value_hash, match_type, confidence_score) \
              VALUES ($1, $2, $3, $4, $5, $6, $7) \
              RETURNING id",
+            m_id,
+            "openlibrary",
+            "publisher",
+            bad_value,
+            shared_hash,
+            "isbn",
+            0.85_f32,
         )
-        .bind(m_id)
-        .bind("openlibrary")
-        .bind("publisher")
-        .bind(serde_json::json!(["Bad Publisher"]))
-        .bind(&shared_hash)
-        .bind("isbn")
-        .bind(0.85_f32)
         .fetch_one(&pool)
         .await
         .unwrap();
 
         // Good row: string → apply_field returns Ok(true).
-        let id_good: Uuid = sqlx::query_scalar(
+        let good_json = serde_json::json!(good_value.clone());
+        let id_good = sqlx::query_scalar!(
             "INSERT INTO metadata_versions \
                 (manifestation_id, source, field_name, new_value, value_hash, match_type, confidence_score) \
              VALUES ($1, $2, $3, $4, $5, $6, $7) \
              RETURNING id",
+            m_id,
+            "googlebooks",
+            "publisher",
+            good_json,
+            shared_hash,
+            "isbn",
+            0.85_f32,
         )
-        .bind(m_id)
-        .bind("googlebooks")
-        .bind("publisher")
-        .bind(serde_json::json!(good_value.clone()))
-        .bind(&shared_hash)
-        .bind("isbn")
-        .bind(0.85_f32)
         .fetch_one(&pool)
         .await
         .unwrap();
@@ -1880,9 +1900,8 @@ mod tests {
             "bad-value source must be skipped; good source must apply"
         );
 
-        let canon: Option<String> =
-            sqlx::query_scalar("SELECT publisher FROM manifestations WHERE id = $1")
-                .bind(m_id)
+        let canon =
+            sqlx::query_scalar!("SELECT publisher FROM manifestations WHERE id = $1", m_id,)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
@@ -1892,12 +1911,13 @@ mod tests {
             "canonical publisher must come from the good source"
         );
 
-        let writeback_rows: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM writeback_jobs WHERE manifestation_id = $1")
-                .bind(m_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let writeback_rows = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM writeback_jobs WHERE manifestation_id = $1",
+            m_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
             writeback_rows, 1,
             "exactly one writeback row for the successful apply"
@@ -1958,20 +1978,20 @@ mod tests {
         assert_eq!(outcome.staged, 0);
         assert_eq!(outcome.skipped_locked, 0);
 
-        let pub_date: Option<time::Date> =
-            sqlx::query_scalar("SELECT pub_date FROM manifestations WHERE id = $1")
-                .bind(m_id)
+        let pub_date =
+            sqlx::query_scalar!("SELECT pub_date FROM manifestations WHERE id = $1", m_id,)
                 .fetch_one(&pool)
                 .await
                 .unwrap();
         assert!(pub_date.is_none(), "canonical pub_date must remain unset");
 
-        let writeback_rows: i64 =
-            sqlx::query_scalar("SELECT COUNT(*) FROM writeback_jobs WHERE manifestation_id = $1")
-                .bind(m_id)
-                .fetch_one(&pool)
-                .await
-                .unwrap();
+        let writeback_rows = sqlx::query_scalar!(
+            "SELECT COUNT(*) AS \"count!\" FROM writeback_jobs WHERE manifestation_id = $1",
+            m_id,
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
         assert_eq!(
             writeback_rows, 0,
             "no writeback should be enqueued for a skipped apply"

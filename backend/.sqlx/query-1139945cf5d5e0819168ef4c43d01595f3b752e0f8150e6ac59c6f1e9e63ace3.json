@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO field_locks (manifestation_id, entity_type, field_name, locked_by) VALUES ($1, $2, $3, $4) ON CONFLICT (manifestation_id, entity_type, field_name) DO NOTHING",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1139945cf5d5e0819168ef4c43d01595f3b752e0f8150e6ac59c6f1e9e63ace3"
+}

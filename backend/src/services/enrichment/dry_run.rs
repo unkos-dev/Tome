@@ -147,16 +147,19 @@ async fn load_existing_pending_readonly(
     manifestation_id: Uuid,
     field: &str,
 ) -> sqlx::Result<Vec<PolicyInputRow>> {
-    let rows: Vec<(Uuid, Vec<u8>)> = sqlx::query_as(
+    let rows = sqlx::query!(
         "SELECT id, value_hash FROM metadata_versions \
          WHERE manifestation_id = $1 AND field_name = $2 AND status = 'pending'",
+        manifestation_id,
+        field,
     )
-    .bind(manifestation_id)
-    .bind(field)
     .fetch_all(pool)
     .await?;
     Ok(rows
         .into_iter()
-        .map(|(id, value_hash)| PolicyInputRow { id, value_hash })
+        .map(|r| PolicyInputRow {
+            id: r.id,
+            value_hash: r.value_hash,
+        })
         .collect())
 }

@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT m.work_id, m.isbn_10, m.isbn_13, m.publisher, m.pub_date, w.title, w.description, w.language, (SELECT a.name FROM work_authors wa JOIN authors a ON a.id = wa.author_id WHERE wa.work_id = w.id ORDER BY wa.position LIMIT 1) AS first_author FROM manifestations m JOIN works w ON w.id = m.work_id WHERE m.id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "work_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "isbn_10",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "isbn_13",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "publisher",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "pub_date",
+        "type_info": "Date"
+      },
+      {
+        "ordinal": 5,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "description",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "language",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "first_author",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "95d59e6f913fa3fc9e45952df3aad0b00acbeb933a0652ec4414bb9876d38faf"
+}
