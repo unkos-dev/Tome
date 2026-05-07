@@ -186,6 +186,39 @@ Decision recorded as a follow-up ADR (`accepted` / `superseded`).
 
 ## Amendments
 
+### 2026-05-07 — CodeRabbit parallel trial added
+
+A separate AI reviewer (CodeRabbit) is being trialled alongside
+Greptile for 2 weeks (2026-05-07 → 2026-05-21). See
+[`adr/2026-05-07-coderabbit-parallel-trial.md`](2026-05-07-coderabbit-parallel-trial.md)
+for the parallel-trial framing, success metrics, and gate
+decision matrix.
+
+This does not change the Greptile trial framing, gate metric, or
+the Trial Configuration documented above. Greptile remains
+label-gated under the open PR #171 amendment (drawing zero
+auto-quota until a PR is explicitly labelled `greptile-review`)
+throughout the parallel trial. The maintainer can opt in
+per-PR if the graph-based context catches Greptile is
+differentiated on are relevant for that PR's diff.
+
+The two ADRs (Greptile + CodeRabbit) close together at their
+respective gates. At the parallel-trial gate (2026-05-21), four
+outcomes are possible:
+
+* Adopt CodeRabbit, retire Greptile — this ADR superseded
+* Adopt both — both ADRs flip to accepted, two reviewers in
+  steady state
+* Retire CodeRabbit, retain Greptile — CodeRabbit ADR rejected,
+  this ADR continues to its original 2026-06-01 gate
+* Retire both — both ADRs rejected
+
+`CONTRIBUTING.md` § "Third-party AI code review" was rewritten
+in the same PR that landed this parallel trial: product-agnostic
+framing, both Greptile and CodeRabbit named in passing with their
+security disclosures, AI-training opt-in/out clauses split
+per-reviewer.
+
 ### 2026-05-04 — `ignorePatterns` added for lockfiles (PR #148)
 
 The initial config in this ADR deferred `ignorePatterns` to the

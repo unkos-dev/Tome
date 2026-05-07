@@ -1,0 +1,105 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit configuration for unkos-dev/reverie.
+#
+# Trial framing: see adr/2026-05-07-coderabbit-parallel-trial.md.
+# Tally tracker: separate Linear ticket parallel to UNK-155.
+#
+# Configured chill-by-design for trial calibration: easier to dial
+# strictness up at the gate with evidence than to start tight and
+# miss patterns CodeRabbit only flags at verbose tier. Mirrors the
+# rationale documented in adr/2026-05-04-greptile-trial.md
+# § "Trial configuration" for Greptile's strictness:1.
+
+language: en-US
+tone_instructions: ""
+early_access: false
+
+reviews:
+  profile: chill
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - "!**/package-lock.json"
+    - "!**/Cargo.lock"
+  path_instructions:
+    - path: "backend/**/*.rs"
+      instructions: |
+        Backend uses the `time` crate, not `chrono`. Flag any new `chrono`
+        import. Errors flow through `thiserror`-derived `AppError`; never
+        return raw `anyhow::Error` from public APIs. SQL queries use sqlx
+        compile-time macros (`query!` / `query_as!` / `query_scalar!`); a
+        new runtime-form `sqlx::query(...)` outside the documented
+        carve-outs in `.github/sqlx-runtime-allowlist.txt` is a regression
+        — flag it.
+    - path: "frontend/src/**/*.{ts,tsx}"
+      instructions: |
+        No raw hex colour literals — every brand colour comes from the
+        canonical token system (--color-canvas, --color-fg, --color-accent,
+        etc.). `Lockup.tsx` is the documented exemption (philosophy §11C
+        invariant). No TypeScript `enum` — use `as const` objects + union
+        types. No `as` type assertions. No `!` non-null assertions.
+        `useEffect` always returns a cleanup function; async work uses
+        `AbortController`, never `async () => …` directly.
+    - path: "frontend/src/**/*.tsx"
+      instructions: |
+        No inline JSX `style={{...}}` object literals — use Tailwind
+        classes or design tokens. `Lockup.tsx` and `src/components/ui/**`
+        (shadcn-generated) are the documented exemptions.
+    - path: "frontend/src/components/ui/**"
+      instructions: |
+        shadcn/ui primitives are CLI-generated (`npx shadcn@latest add`).
+        Do not flag style or convention divergences in this directory
+        unless they affect runtime correctness.
+    - path: "**/*"
+      instructions: |
+        Reverie is open-source and self-hosted. Threat model is a multi-
+        user exposed instance, not a private homelab. Treat security
+        findings on user input, auth, sessions, secrets, file I/O, XML
+        parsing, outbound HTTP, and response headers as load-bearing —
+        not nice-to-have. Never surface decrypted secret values; describe
+        presence and shape only (source, length, format) — never the
+        value itself. TDD is mandatory. A code change without a
+        corresponding test (happy path, negative, edge case where
+        non-obvious) should be flagged as incomplete. Conventional
+        Commits are mandatory. Branch names follow GitHub Flow with
+        prefixes feat/, fix/, refactor/, docs/, chore/, test/, perf/.
+  abort_on_close: true
+  tools:
+    # Markdown lint already enforced via repo's .markdownlint-cli2.jsonc.
+    # Don't duplicate the diagnostics surface.
+    markdownlint:
+      enabled: false
+    # Lint and format already enforced as required CI checks
+    # (cargo clippy --deny warnings, eslint, prettier, stylelint).
+    # Don't duplicate.
+    biome:
+      enabled: false
+    eslint:
+      enabled: false
+    ruff:
+      enabled: false
+    shellcheck:
+      enabled: true
+    yamllint:
+      enabled: true
+    actionlint:
+      enabled: true
+chat:
+  auto_reply: true
+knowledge_base:
+  opt_out: false
+  learnings:
+    scope: auto
+  issues:
+    scope: auto
+  jira:
+    project_keys: []
+  linear:
+    team_keys: []
