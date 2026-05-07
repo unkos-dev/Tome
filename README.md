@@ -33,6 +33,11 @@ cd frontend && npm install && npm run dev
 docker compose up
 ```
 
+> **Upgrading from before postgres:18 mount-layout fix?** The dev volume
+> path changed from `pgdata:/var/lib/postgresql/data` to
+> `pgdata:/var/lib/postgresql`. Drop the old volume first:
+> `docker compose down && docker volume rm reverie_pgdata`.
+
 ## Security posture
 
 Reverie ships a strict hash-based `Content-Security-Policy`, opt-in HSTS, and

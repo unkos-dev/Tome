@@ -17,6 +17,35 @@ Port 5433 (5432 is taken by the host's shared-postgres).
 Run migrations as the schema owner:
 `DATABASE_URL=postgres://reverie:reverie@localhost:5433/reverie_dev sqlx migrate run`
 
+### Upgrade note: postgres:18 mount path
+
+The volume mount changed from `pgdata:/var/lib/postgresql/data` to
+`pgdata:/var/lib/postgresql` to match postgres:18's major-version
+subdirectory layout. Existing dev volumes from before the change must
+be dropped:
+
+```bash
+docker compose down
+docker volume rm reverie_pgdata
+docker compose up -d
+DATABASE_URL=postgres://reverie:reverie@localhost:5433/reverie_dev sqlx migrate run --source backend/migrations
+```
+
+### Coder workspace caveat
+
+Inside the Coder workspace (DooD), bind-mounts of files at workspace
+paths don't resolve on the host docker daemon — `init-roles.sql` gets
+mounted as a directory and the entrypoint init silently fails to seed
+the runtime roles. Seed manually after `docker compose up -d`:
+
+```bash
+docker cp docker/init-roles.sql reverie-postgres:/tmp/init-roles.sql
+docker exec reverie-postgres psql -U reverie -d reverie_dev -f /tmp/init-roles.sql
+```
+
+Real LXC hosts don't have this constraint — the staging deploy needs no
+workaround.
+
 ## Conventions
 
 - **Error handling:** Use `thiserror` for library errors, `anyhow` for application

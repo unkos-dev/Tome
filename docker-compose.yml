@@ -10,7 +10,11 @@ services:
     ports:
       - "5433:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # postgres:18+ stores data in a major-version subdirectory
+      # (`/var/lib/postgresql/<major>/<cluster>/`) for `pg_upgrade --link`
+      # mount-boundary safety. Mounting the legacy `…/data` child path
+      # errors out at first init — mount the parent.
+      - pgdata:/var/lib/postgresql
       - ./docker/init-roles.sql:/docker-entrypoint-initdb.d/01-init-roles.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U reverie -d reverie_dev"]
