@@ -117,12 +117,10 @@
   HMR websocket client reconnects to. Default (unset) = the dev server's
   own port (5173), which is correct for localhost / Coder port-forward
   access. Set to `443` when fronting the dev server with a reverse proxy
-  on a different external port (e.g. cloudflared sidecar exposing
-  `:5173` at `dev.reverie.unkos.net` over HTTPS) so the browser
-  reconnects via the edge instead of trying `wss://<host>:5173/`.
-  Parsing lives in `vite-plugins/hmr-config.ts`. Tunnel and Authentik
-  gate provisioning live in the homelab repo (out-of-tree); `vite.config.ts`
-  exposes only the env-var seam.
+  on a different external port (e.g. a Cloudflare tunnel terminating
+  TLS at `dev.reverie.unkos.net`) so the browser reconnects via the
+  edge instead of trying `wss://<host>:5173/`. Parsing lives in
+  `vite-plugins/hmr-config.ts`.
 
 ## Testing & tooling
 
