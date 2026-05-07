@@ -21,7 +21,8 @@ pub(crate) mod test_support;
 
 use axum::Router;
 use axum_login::AuthManagerLayerBuilder;
-use tower_sessions::{Expiry, MemoryStore, SessionManagerLayer};
+use tower_sessions::{Expiry, SessionManagerLayer};
+use tower_sessions_sqlx_store::PostgresStore;
 use tracing_subscriber::EnvFilter;
 
 use crate::auth::backend::AuthBackend;
@@ -29,19 +30,27 @@ use crate::config::Config;
 use crate::state::AppState;
 
 pub fn build_router(state: AppState, auth_backend: AuthBackend) -> Router {
-    // NOTE: MemoryStore does not evict expired sessions server-side — the cookie
-    // expires client-side but the HashMap entry stays until process restart.
-    // Acceptable for single-instance self-hosted deployments; replace with
-    // tower-sessions-sqlx-store if memory growth under sustained use becomes an issue.
-    build_router_with_session_store(state, auth_backend, MemoryStore::default())
+    // PostgresStore (UNK-163): sessions persist across container restarts.
+    // The backing schema is provisioned by the
+    // `20260507000001_tower_sessions_postgres_store` migration; defaults
+    // (`tower_sessions.session`) match `PostgresStore::new`'s built-ins so
+    // no `with_schema_name`/`with_table_name` overrides are needed.
+    // Expired-session cleanup is a manual sweep (`ExpiredDeletion::delete_expired`)
+    // — not currently scheduled; rows accumulate until reaped manually.
+    // For a single-instance self-hosted deployment this is acceptable; if
+    // session growth becomes a footprint concern, wire a tokio-cron-style
+    // sweep in main.
+    let session_store = PostgresStore::new(state.pool.clone());
+    build_router_with_session_store(state, auth_backend, session_store)
 }
 
 /// Same as [`build_router`] but with a caller-provided session store.
 ///
-/// Used by integration tests to share a `MemoryStore` between the test
-/// harness and the running server, so the test can read server-written
-/// session state — e.g. the OIDC `nonce` set by `/auth/login` that the
-/// callback test needs to embed in a matching mock-issued ID token.
+/// Used by integration tests to inject a `MemoryStore` so the test
+/// harness can read server-written session state — e.g. the OIDC
+/// `nonce` set by `/auth/login` that the callback test needs to embed
+/// in a matching mock-issued ID token. Production builds use
+/// `PostgresStore` via [`build_router`].
 pub(crate) fn build_router_with_session_store<S>(
     state: AppState,
     auth_backend: AuthBackend,
@@ -312,6 +321,52 @@ mod tests {
         assert!(
             err.contains(bad),
             "error message should name the bad value, got: {err}"
+        );
+    }
+
+    // PostgresStore replaces MemoryStore in production specifically so a
+    // backend restart does not nuke every active session (LXC redeploy =
+    // forced re-login is the staging-friction this swap avoids). The test
+    // simulates that restart by saving a record through one PostgresStore
+    // instance, dropping it, building a fresh PostgresStore against the
+    // same DB pool, and asserting the record loads with identical
+    // contents.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn session_record_survives_store_restart(pool: sqlx::PgPool) {
+        use std::collections::HashMap;
+        use time::OffsetDateTime;
+        use tower_sessions::SessionStore;
+        use tower_sessions::session::{Id, Record};
+        use tower_sessions_sqlx_store::PostgresStore;
+
+        let app_pool = test_support::db::app_pool_for(&pool).await;
+
+        let mut data: HashMap<String, serde_json::Value> = HashMap::new();
+        data.insert("user_id".into(), serde_json::json!("user-42"));
+        data.insert("nonce".into(), serde_json::json!("abc-123-nonce"));
+
+        let record_id = {
+            let store = PostgresStore::new(app_pool.clone());
+            let mut record = Record {
+                id: Id::default(),
+                data: data.clone(),
+                expiry_date: OffsetDateTime::now_utc() + time::Duration::hours(1),
+            };
+            store.create(&mut record).await.expect("create session");
+            record.id
+        };
+
+        // First store dropped — the bytes live only in tower_sessions.session.
+        let store2 = PostgresStore::new(app_pool.clone());
+        let loaded = store2
+            .load(&record_id)
+            .await
+            .expect("load session record")
+            .expect("session record persists across store recreation");
+
+        assert_eq!(
+            loaded.data, data,
+            "session payload (incl. csrf nonce shape) survives intact"
         );
     }
 }

@@ -120,12 +120,23 @@ pub fn test_state() -> AppState {
 }
 
 /// Build the full application router with auth layer (for route integration tests).
+///
+/// Uses `MemoryStore` for sessions even though production uses
+/// `PostgresStore` (UNK-163) — `test_state` deliberately wires a no-DB
+/// pool (`postgres://invalid` via `connect_lazy`), so a session backend
+/// that touches the pool would 500 every request that issues a session.
+/// Tests that need the live `PostgresStore` wiring use `#[sqlx::test]` and
+/// `build_router_with_session_store` with a real pool.
 pub fn test_server() -> TestServer {
     let state = test_state();
     let auth_backend = AuthBackend {
         pool: state.pool.clone(),
     };
-    let app: Router = crate::build_router(state, auth_backend);
+    let app: Router = crate::build_router_with_session_store(
+        state,
+        auth_backend,
+        tower_sessions::MemoryStore::default(),
+    );
     TestServer::new(app)
 }
 

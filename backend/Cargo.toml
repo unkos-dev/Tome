@@ -36,6 +36,13 @@ tokio = { version = "1.52.2", features = ["full"] }
 tokio-util = "0.7.18"
 tower-http = { version = "0.6.8", features = ["cors", "fs", "trace"] }
 tower-sessions = "0.14"
+# Despite the version-number divergence, tower-sessions-sqlx-store 0.15
+# pairs with tower-sessions 0.14 (both depend on tower-sessions-core
+# 0.14). The 0.14.x line of tower-sessions-sqlx-store actually pins
+# tower-sessions-core 0.13 — compile-incompatible with tower-sessions
+# 0.14. UNK-101 will bump tower-sessions to 0.15 (blocked on axum-login
+# peer pin); when that lands, tower-sessions-sqlx-store stays on 0.15.
+tower-sessions-sqlx-store = { version = "0.15.0", features = ["postgres"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2.5.8"
