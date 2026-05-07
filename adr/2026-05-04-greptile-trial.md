@@ -186,7 +186,123 @@ Decision recorded as a follow-up ADR (`accepted` / `superseded`).
 
 ## Amendments
 
-### 2026-05-07 — CodeRabbit parallel trial added
+### 2026-05-07 — Label-gated trigger + manual confidence-update flow (PR #171)
+
+The original Trigger Model section in this ADR specified "Auto on
+every PR. No label gate." That decision burned through the trial
+account's 50-review cap inside the first 4 days. Empirical
+quota-burn rate at the cap, computed from the per-PR review counts
+shown in the Greptile dashboard:
+
+| PR class | PRs | Reviews | Avg/PR |
+|---|---|---|---|
+| `feat/unk-167-sqlx-macros-*` series (push-iteration heavy) | 5 | 17 | 3.4 |
+| Other reverie PRs (#168, #170, #169, #166, #165) | 5 | 9 | 1.8 |
+| **All listed reverie PRs** | **10** | **26** | **2.6** |
+
+50-review cap ÷ 2.6 avg ≈ ~19 PRs runway. Burned through in 9 PRs
+because the UNK-167 series clustered three to five reviews per PR.
+Renovate and Dependabot are already excluded via per-author Greptile
+config (separate per-bot quota; bot-PR reviews do not deplete the
+maintainer's `junkovich` author quota — confirmed empirically when
+the cap-hit notice referenced `junkovich`-author reviews only).
+
+The dominant burn driver is `triggerOnUpdates: true`: every push to
+an open PR triggers a fresh review. For PRs that go through several
+fix-iteration rounds, the per-push burn dwarfs the per-PR-open
+burn. A secondary driver is auto-review on doc-only / chore /
+config PRs that never carried logic-level signal worth Greptile's
+attention.
+
+This amendment switches the trigger model to **label-gated** — the
+fix-now lever. A possible later layer (path-based auto-label via
+GitHub Actions, or `/greptile` slash-command label add) is not
+adopted here; the manual-label flow is simpler and aligns with the
+maintainer's intent to internal-review first, then ask Greptile.
+
+#### `greptile.json` changes
+
+```json
+{
+  "triggerOnUpdates": false,
+  "labels": ["greptile-review"]
+}
+```
+
+* `triggerOnUpdates: false` — pushes to an open PR do not trigger a
+  fresh review. Eliminates the per-push-burst burn.
+* `labels: ["greptile-review"]` — Greptile only reviews PRs that
+  carry the `greptile-review` label. Doc-only / chore / config PRs
+  that never get the label never burn a review.
+
+#### Workflow
+
+1. **Open PR** — no label, Greptile silent.
+2. **Internal review** — adversarial-review skill or
+   `prp-core:prp-review-agents` runs against the diff. Findings
+   addressed in follow-up commits on the same branch. Greptile is
+   still silent because the label is not yet applied.
+3. **Internal review passes** — maintainer manually applies the
+   `greptile-review` label. Greptile reviews once, against the
+   post-internal-review state.
+4. **Greptile findings addressed** — fix commits pushed. **Greptile
+   does not auto-update its review** because `triggerOnUpdates` is
+   false. The original Greptile review remains visible on the PR
+   but its confidence score reflects the pre-fix state.
+5. **(Optional) request a confidence-score update** — comment
+   `@greptileai` on the PR. This burns a second review-credit but
+   produces an updated confidence score that reflects the post-fix
+   state. Use sparingly — high-confidence Greptile reviews where the
+   fixes are clearly responsive to the comments do not need a
+   re-review pass.
+
+#### Quota math under the new model
+
+Same 10 reverie PRs replayed under the label-gate model, conservative
+(no confidence-score update) and generous (confidence-score update
+on every PR) variants:
+
+| Variant | Reviews | vs old (26) |
+|---|---|---|
+| Conservative (label once, no `@greptileai` re-review) | 10 | -62% |
+| Generous (label once + `@greptileai` re-review on every PR) | 20 | -23% |
+| Skip-doc-only (label not applied to PR #169 doc archive, etc.) | 8 | -69% |
+
+The label-not-applied case dominates the savings on PR classes that
+do not carry logic-level signal — exactly the class where the prior
+"auto on every PR" trigger model spent quota for negligible return.
+
+#### Trade-offs accepted
+
+* **No automatic confidence-score update on fix commits.** The
+  Greptile inline-comment "edit" behaviour described in the
+  original Trigger Model section still happens, but only after
+  `@greptileai` mention; without the mention, the original review
+  remains visible at the pre-fix confidence. If the maintainer
+  wants a closing "addressed/not-addressed" Greptile assessment on
+  every PR, that is one mention per PR.
+* **Manual labelling is one extra click per PR** that does need
+  Greptile review. Acceptable cost for ~62% quota reduction on
+  conservative use and full skip on doc-only PRs.
+* **Drafts already skipped** by Greptile default. Combining with
+  the label gate keeps the gate consistent: Greptile reviews when
+  *both* the PR is non-draft *and* the label is present.
+
+#### What stays unchanged
+
+* Strictness, commentTypes, customContext, ignorePatterns, all
+  customRules — unchanged.
+* Author exclusion for `renovate(bot)` and `dependabot[bot]` —
+  unchanged. Their per-bot review counters are separate from
+  the maintainer's author quota.
+* Trial gate metric (≥30% actionable) and gate decision matrix —
+  unchanged. The label gate adjusts the volume of Greptile
+  invocations, not the per-finding signal-to-noise ratio.
+
+Tally tracking these decisions: UNK-155 (early-success consideration
+section).
+
+### 2026-05-07 — CodeRabbit parallel trial added (PR #172)
 
 A separate AI reviewer (CodeRabbit) is being trialled alongside
 Greptile for 2 weeks (2026-05-07 → 2026-05-21). See
@@ -196,11 +312,11 @@ decision matrix.
 
 This does not change the Greptile trial framing, gate metric, or
 the Trial Configuration documented above. Greptile remains
-label-gated under the open PR #171 amendment (drawing zero
-auto-quota until a PR is explicitly labelled `greptile-review`)
-throughout the parallel trial. The maintainer can opt in
-per-PR if the graph-based context catches Greptile is
-differentiated on are relevant for that PR's diff.
+label-gated per the amendment above (drawing zero auto-quota
+until a PR is explicitly labelled `greptile-review`) throughout
+the parallel trial. The maintainer can opt in per-PR if the
+graph-based context catches Greptile is differentiated on are
+relevant for that PR's diff.
 
 The two ADRs (Greptile + CodeRabbit) close together at their
 respective gates. At the parallel-trial gate (2026-05-21), four
