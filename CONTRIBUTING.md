@@ -67,16 +67,25 @@ PRs without tests will not be approved. See [CLAUDE.md](CLAUDE.md) Hard Rule 5 f
 
 ## Third-party AI code review
 
-This repository uses [Greptile](https://www.greptile.com), a third-party AI code reviewer that auto-comments on pull requests. By opening a PR you accept that the diff and surrounding repository context will be sent to Greptile for analysis.
+This repository uses third-party AI code reviewers that auto-comment on pull requests. By opening a PR you accept that the diff and surrounding repository context will be sent to the active reviewers for analysis.
 
-Data handling, per [Greptile's security disclosures](https://www.greptile.com/security):
+Active reviewers:
 
-- Greptile is a managed SaaS hosted on AWS and Microsoft Azure. Inference runs through OpenAI and Anthropic API platforms
-- Repository code is cached on Greptile's infrastructure while the GitHub App has access. If the App is uninstalled (revoking access) the cached code is deleted from production systems within 24 hours; backup copies may persist up to 30 days
-- **AI-training opt-in.** Reverie uses Greptile under their "free for open-source" tier, and as a token form of reciprocity, this repository has training-data use enabled at the account level. Per Greptile's policy this means de-identified, aggregated repository data may be used to monitor, improve, or expand Greptile's services. PII and customer-specific references are stripped per their disclosure. Reverie is AGPL-3.0 and the code Greptile receives is already public, so the marginal exposure is near-zero — this disclosure exists for transparency, not because anything sensitive is being shared
-- If active external contributions start arriving, the training opt-in is reconsidered with those contributors in the loop. Reverie remains AGPL-3.0
+- [Greptile](https://www.greptile.com) — graph-based codebase context. See [security disclosures](https://www.greptile.com/security)
+- [CodeRabbit](https://www.coderabbit.ai) — line-level inline review with formal GitHub PR Review status. See [security and trust](https://www.coderabbit.ai/trust-center)
 
-Greptile's findings are advisory: address actionable ones in follow-up commits, dismiss the rest with a brief note. Maintainer review remains the only merge gate.
+General data handling (both reviewers):
+
+- Both are managed SaaS providers; inference runs through third-party LLM platforms (OpenAI, Anthropic, Google). Repository code is cached on their infrastructure while their GitHub Apps have access; cache is deleted on App uninstall per each provider's retention policy
+- Reverie is AGPL-3.0 and the code these reviewers receive is already public, so the marginal exposure is near-zero — these disclosures exist for transparency, not because anything sensitive is being shared
+
+Reviewer-specific notes:
+
+- **Greptile AI-training opt-in.** Reverie uses Greptile under their "free for open-source" arrangement, and as a token form of reciprocity, this repository has training-data use enabled at the account level. Per Greptile's policy this means de-identified, aggregated repository data may be used to monitor, improve, or expand their services. PII and customer-specific references are stripped per their disclosure
+- **CodeRabbit AI-training default.** CodeRabbit's OSS terms do not enable training on repository data by default. Reverie does not change that default
+- **External contributions.** If active external contributions start arriving, the Greptile training opt-in is reconsidered with those contributors in the loop. Reverie remains AGPL-3.0
+
+Reviewer findings are advisory: address actionable ones in follow-up commits, dismiss the rest with a brief note. Maintainer review remains the only merge gate.
 
 ## Dependencies
 
