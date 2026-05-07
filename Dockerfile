@@ -18,7 +18,10 @@ RUN npm run build
 
 # Stage 3: Runtime
 FROM debian:bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+# UNK-165: curl is the HTTP client used by the HEALTHCHECK below; readiness
+# probe needs a working HTTP client baked in so docker / compose / Incus can
+# detect a successful migration window before flipping traffic.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 RUN useradd -r -s /bin/false reverie
 
@@ -31,4 +34,11 @@ ENV REVERIE_FRONTEND_DIST_PATH=/srv/frontend
 
 USER reverie
 EXPOSE 3000
+
+# UNK-165: probe the readiness endpoint (DB-dependent) so the container is
+# only reported healthy once migrations are applied and the pool is live.
+# 60s start-period covers the migration window for first boot.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
+    CMD curl --fail --silent --show-error --output /dev/null http://127.0.0.1:3000/health/ready
+
 ENTRYPOINT ["reverie-api"]
