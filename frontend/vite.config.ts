@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import { parseAllowedHosts } from "./vite-plugins/allowed-hosts";
 import { cspHashPlugin } from "./vite-plugins/csp-hash";
+import { parseHmrConfig } from "./vite-plugins/hmr-config";
 
 // Dev-only CSP — intentionally relaxed with 'unsafe-inline' / 'unsafe-eval' so
 // Vite HMR, esbuild error overlays, and Tailwind JIT work. The production CSP
@@ -56,6 +57,14 @@ export default defineConfig({
     // can reach the dev server. Without this, Vite binds only to
     // localhost and an IPv4-side proxy hits ECONNREFUSED.
     host: true,
+    // HMR websocket port the browser reconnects to. Default (unset) =
+    // same port as the dev server. When the dev server is fronted by a
+    // reverse proxy on a different port (e.g. cloudflared sidecar
+    // terminating at 443 for dev.reverie.unkos.net), set
+    // REVERIE_DEV_HMR_CLIENT_PORT=443 so the client reconnects via the
+    // edge instead of trying `wss://<host>:5173/`. Localhost dev leaves
+    // it unset.
+    ...parseHmrConfig(process.env.REVERIE_DEV_HMR_CLIENT_PORT),
     // DNS-rebinding guard active against an env-driven allowlist
     // (REVERIE_DEV_HOSTS, comma-separated). The guard rejects
     // non-loopback hostnames that are not in the allowlist; loopback
