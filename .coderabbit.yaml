@@ -5,23 +5,25 @@
 # Trial framing: see adr/2026-05-07-coderabbit-parallel-trial.md.
 # Tally tracker: separate Linear ticket parallel to UNK-155.
 #
-# Configured chill-by-design for trial calibration: easier to dial
-# strictness up at the gate with evidence than to start tight and
-# miss patterns CodeRabbit only flags at verbose tier. Mirrors the
-# rationale documented in adr/2026-05-04-greptile-trial.md
-# § "Trial configuration" for Greptile's strictness:1.
+# Profile picked `assertive` (not the published default `chill`) so the
+# trial baseline matches the verbose-by-design Greptile equivalent
+# documented in adr/2026-05-04-greptile-trial.md § "Trial configuration".
+# Easier to dial down at the gate with evidence than to start filtered
+# and miss patterns CodeRabbit only flags at the louder tier.
 
 language: en-US
 tone_instructions: ""
 early_access: false
 
 reviews:
-  profile: chill
+  profile: assertive
   request_changes_workflow: false
   high_level_summary: true
-  poem: false
+  poem: true
   review_status: true
   collapse_walkthrough: false
+  suggested_reviewers: false
+  suggested_labels: false
   auto_review:
     enabled: true
     drafts: false
@@ -71,25 +73,72 @@ reviews:
         Commits are mandatory. Branch names follow GitHub Flow with
         prefixes feat/, fix/, refactor/, docs/, chore/, test/, perf/.
   abort_on_close: true
+  finishing_touches:
+    docstrings:
+      enabled: true
+    unit_tests:
+      enabled: true
+    simplify:
+      enabled: true
   tools:
-    # Markdown lint already enforced via repo's .markdownlint-cli2.jsonc.
-    # Don't duplicate the diagnostics surface.
+    # CI duplicates — explicitly disabled. CI is the authoritative lint
+    # surface (cargo clippy --deny warnings, eslint strictTypeChecked,
+    # prettier, stylelint, markdownlint-cli2 with the repo's config).
+    # CodeRabbit's bundled wrappers either duplicate the same diagnostics
+    # or run against a different (default / weaker) ruleset, both of
+    # which produce noise without signal.
     markdownlint:
       enabled: false
-    # Lint and format already enforced as required CI checks
-    # (cargo clippy --deny warnings, eslint, prettier, stylelint).
-    # Don't duplicate.
     biome:
       enabled: false
     eslint:
       enabled: false
     ruff:
       enabled: false
+    clippy:
+      enabled: false
+    stylelint:
+      enabled: false
+    # Net-new signal vs CI — explicitly enabled. (Default is also true;
+    # explicit declaration insulates the config from CodeRabbit default
+    # changes.)
     shellcheck:
       enabled: true
     yamllint:
       enabled: true
     actionlint:
+      enabled: true
+    hadolint:
+      enabled: true
+    # Secret scanning. Reverie has no secrets in tree, but Renovate and
+    # contributor PRs touch generated configs where leakage is plausible.
+    gitleaks:
+      enabled: true
+    trufflehog:
+      enabled: true
+    presidio:
+      enabled: true
+    # Security and SAST patterns. Reverie's threat model is multi-user
+    # exposed instance — security pattern matching across the diff is
+    # exactly the differentiator we want to preserve.
+    semgrep:
+      enabled: true
+    opengrep:
+      enabled: true
+    # Dep + IaC vulnerability scanning. Reverie has Dockerfile, GitHub
+    # Actions, and a Cargo / npm dep tree — three IaC/SCA surfaces CI
+    # does not yet exhaustively scan.
+    trivy:
+      enabled: true
+    checkov:
+      enabled: true
+    osvScanner:
+      enabled: true
+    # Markdown grammar and style — kept on for the trial. Markdown
+    # documentation surface (README, CONTRIBUTING, ADRs, docs/, debt/)
+    # is load-bearing for the open-source-self-hosting audience. Disable
+    # at the gate if the noise:signal ratio is bad.
+    languagetool:
       enabled: true
 chat:
   auto_reply: true
