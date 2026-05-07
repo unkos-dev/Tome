@@ -2,6 +2,7 @@ import path from "node:path";
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { parseAllowedHosts } from "./vite-plugins/allowed-hosts";
 import { cspHashPlugin } from "./vite-plugins/csp-hash";
 
 // Dev-only CSP — intentionally relaxed with 'unsafe-inline' / 'unsafe-eval' so
@@ -55,23 +56,17 @@ export default defineConfig({
     // can reach the dev server. Without this, Vite binds only to
     // localhost and an IPv4-side proxy hits ECONNREFUSED.
     host: true,
-    // DNS-rebinding guard disabled in dev so the same proxies can serve
-    // the dev bundle under their assigned hostname. This widens the
-    // attack surface: the proxy block below forwards `/api`, `/auth`,
-    // and `/opds` to the backend, including authenticated routes
-    // (OIDC callback, token CRUD, ingestion scan, OPDS feed). With
-    // allowedHosts:true, a malicious page that successfully DNS-rebinds
-    // to the dev workstation can reach those backend routes through
-    // the dev proxy. The risk is accepted because (a) Vite is dev-only
-    // and never ships to production, (b) the attack requires the
-    // developer to have a live session cookie scoped to the rebound
-    // hostname, which is unusual in dev workflows, and (c) cloud dev
-    // environments (Coder, Codespaces) generate workspace-specific
-    // hostnames that are impractical to enumerate in a static
-    // allowlist. If you tighten this later, narrow allowedHosts to
-    // an env-driven allowlist (e.g. REVERIE_DEV_HOSTS) rather than
-    // restricting the proxy.
-    allowedHosts: true,
+    // DNS-rebinding guard active against an env-driven allowlist
+    // (REVERIE_DEV_HOSTS, comma-separated). When unset, only loopback
+    // hosts (localhost, 127.0.0.1, ::1) are accepted — non-matching
+    // Host headers are rejected. The proxy block below forwards
+    // `/api`, `/auth`, and `/opds` to the backend, including
+    // authenticated routes; bounding the allowlist closes the
+    // DNS-rebind path that previously reached those routes when the
+    // guard was disabled. Cloud dev environments (Coder, Codespaces)
+    // must export REVERIE_DEV_HOSTS to match their assigned hostname
+    // (see frontend/CLAUDE.md and dev/README.md).
+    allowedHosts: parseAllowedHosts(process.env.REVERIE_DEV_HOSTS),
     proxy: {
       "/api": { target: "http://localhost:3000", changeOrigin: true },
       "/auth": { target: "http://localhost:3000", changeOrigin: true },

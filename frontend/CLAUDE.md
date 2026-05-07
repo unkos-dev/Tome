@@ -100,6 +100,17 @@
   `styles/themes/index.css`, so stock primitives render brand-aligned
   without per-file rewrites.
 
+## Dev environment variables
+
+- `REVERIE_DEV_HOSTS` (optional, comma-separated) — hosts that the Vite dev
+  server accepts in the request `Host` header. When unset, only loopback
+  hosts (`localhost`, `127.0.0.1`, `::1`) are accepted; non-matching hosts
+  are rejected by Vite's DNS-rebinding guard. Cloud dev environments (Coder,
+  Codespaces) must export this with the workspace-assigned hostname, e.g.
+  `REVERIE_DEV_HOSTS=dev.reverie.unkos.net npm run dev`. Parsing lives in
+  `vite-plugins/allowed-hosts.ts`; the value is a strict replacement, not a
+  merge with the loopback defaults.
+
 ## Testing & tooling
 
 - Vitest + React Testing Library. Test behaviour, not implementation.

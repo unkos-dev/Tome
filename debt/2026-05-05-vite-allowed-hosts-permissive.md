@@ -1,13 +1,13 @@
 ---
-status: active
+status: lifted
 severity: low
 surfaces: [developer, security]
 adopted: 2026-05-05
 adopted-because: cloud workspace hostnames unenumerable for static allowlist; OIDC dev flow needed proxy access; recognised as debt and recorded inline in vite.config.ts at adoption time
 lift-when-class: internal-refactor
 lift-when: UNK-168 (REVERIE_DEV_HOSTS env-driven allowlist) merged to main
-lifted: ~
-superseded-by: ~
+lifted: 2026-05-07
+superseded-by: PR <pending>
 ---
 
 # Vite allowedHosts permissive in dev
@@ -79,13 +79,17 @@ unset. Land this **before** [UNK-164](https://linear.app/unkos/issue/UNK-164)
 (cloudflared) so the tunnel's stable hostname can be allowlisted from
 day one of cloudflared deployment.
 
-When that PR merges:
+## Lifted 2026-05-07
 
-1. Flip this entry to `status: lifted`, set `lifted`, set
-   `superseded-by`.
-2. Update the inline security comment in `vite.config.ts` to reflect
-   the new posture (DNS-rebind guard active against bounded
-   allowlist).
+`frontend/vite-plugins/allowed-hosts.ts` parses
+`REVERIE_DEV_HOSTS` (comma-separated) into the `server.allowedHosts`
+list. When unset, the default is loopback-only (`localhost`,
+`127.0.0.1`, `::1`). The inline security comment in
+`vite.config.ts` was updated to reflect the new posture (DNS-rebind
+guard active against a bounded allowlist). The env var is documented
+in `frontend/CLAUDE.md` and `dev/README.md`. Cloud workspace
+template (homelab repo) must export the variable matching the
+workspace hostname; tracked separately.
 
 ## Related
 
