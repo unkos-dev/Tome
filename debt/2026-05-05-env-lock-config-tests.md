@@ -1,13 +1,13 @@
 ---
-status: active
+status: lifted
 severity: high
 surfaces: [developer, security, ci]
 adopted: 2026-05-05
 adopted-because: Config::from_env reads process-global env vars; tests had no clean way to vary input without mutating globals; recognised as debt 2026-05-05
 lift-when-class: internal-refactor
 lift-when: UNK-100 (Config::from_env takes env source as parameter) merged to main
-lifted: ~
-superseded-by: ~
+lifted: 2026-05-06
+superseded-by: PR #168
 ---
 
 # ENV_LOCK + unsafe env mutation in config tests

@@ -123,7 +123,6 @@ translation pass when it joins.
 <!-- listed most-stale first; new entries go to the top -->
 
 - [MemoryStore for production sessions](2026-05-05-memory-store-sessions.md) — adopted because PostgresStore not wired at scaffold; lifts on UNK-163
-- [ENV_LOCK + unsafe env mutation in config tests](2026-05-05-env-lock-config-tests.md) — adopted because Config::from_env reads process env globals; lifts on UNK-100
 - [Vite allowedHosts permissive in dev](2026-05-05-vite-allowed-hosts-permissive.md) — adopted because workspace hostnames unenumerable for static allowlist; lifts on UNK-168
 - [Dev postgres host port 5433](2026-05-05-dev-postgres-port-5433.md) — adopted because Coder workspace's shared-postgres on 5432; lifts on UNK-169
 - [chrono in OIDC test mock](2026-05-05-chrono-in-oidc-mock.md) — adopted because openidconnect v4 forces chrono types in test setup; lifts on dep-unblock or wrapper
@@ -133,3 +132,4 @@ translation pass when it joins.
 <!-- empty at first land; entries move here on lift, never deleted -->
 
 - [Runtime sqlx queries instead of compile-time macros](2026-05-05-runtime-sqlx-queries.md) — lifted 2026-05-06; superseded by PR series #157–#163
+- [ENV_LOCK + unsafe env mutation in config tests](2026-05-05-env-lock-config-tests.md) — lifted 2026-05-06; superseded by PR #168
