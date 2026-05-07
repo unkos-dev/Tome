@@ -57,15 +57,17 @@ export default defineConfig({
     // localhost and an IPv4-side proxy hits ECONNREFUSED.
     host: true,
     // DNS-rebinding guard active against an env-driven allowlist
-    // (REVERIE_DEV_HOSTS, comma-separated). When unset, only loopback
-    // hosts (localhost, 127.0.0.1, ::1) are accepted — non-matching
-    // Host headers are rejected. The proxy block below forwards
-    // `/api`, `/auth`, and `/opds` to the backend, including
-    // authenticated routes; bounding the allowlist closes the
-    // DNS-rebind path that previously reached those routes when the
-    // guard was disabled. Cloud dev environments (Coder, Codespaces)
-    // must export REVERIE_DEV_HOSTS to match their assigned hostname
-    // (see frontend/CLAUDE.md and dev/README.md).
+    // (REVERIE_DEV_HOSTS, comma-separated). The guard rejects
+    // non-loopback hostnames that are not in the allowlist; loopback
+    // hosts (localhost, *.localhost, any IPv4/IPv6 literal) are
+    // accepted unconditionally by Vite's hardcoded short-circuit (see
+    // the comment in vite-plugins/allowed-hosts.ts). The proxy block
+    // below forwards `/api`, `/auth`, and `/opds` to the backend,
+    // including authenticated routes; bounding the allowlist closes
+    // the DNS-rebind path that previously reached those routes when
+    // the guard was disabled. Cloud dev environments (Coder,
+    // Codespaces) must export REVERIE_DEV_HOSTS to match their
+    // assigned hostname (see frontend/CLAUDE.md and dev/README.md).
     allowedHosts: parseAllowedHosts(process.env.REVERIE_DEV_HOSTS),
     proxy: {
       "/api": { target: "http://localhost:3000", changeOrigin: true },

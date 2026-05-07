@@ -102,14 +102,16 @@
 
 ## Dev environment variables
 
-- `REVERIE_DEV_HOSTS` (optional, comma-separated) — hosts that the Vite dev
-  server accepts in the request `Host` header. When unset, only loopback
-  hosts (`localhost`, `127.0.0.1`, `::1`) are accepted; non-matching hosts
-  are rejected by Vite's DNS-rebinding guard. Cloud dev environments (Coder,
-  Codespaces) must export this with the workspace-assigned hostname, e.g.
+- `REVERIE_DEV_HOSTS` (optional, comma-separated) — non-loopback hostnames
+  that the Vite dev server accepts in the request `Host` header. Vite's
+  DNS-rebinding guard rejects unknown non-loopback hostnames; loopback hosts
+  (`localhost`, `*.localhost`, any IPv4 / IPv6 literal) are accepted
+  unconditionally by a hardcoded short-circuit in Vite's host-validation
+  middleware regardless of the allowlist. Cloud dev environments (Coder,
+  Codespaces) must export the workspace-assigned hostname, e.g.
   `REVERIE_DEV_HOSTS=dev.reverie.unkos.net npm run dev`. Parsing lives in
-  `vite-plugins/allowed-hosts.ts`; the value is a strict replacement, not a
-  merge with the loopback defaults.
+  `vite-plugins/allowed-hosts.ts`; the value is a strict replacement of the
+  declarative defaults, not a merge.
 
 ## Testing & tooling
 

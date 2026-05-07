@@ -54,7 +54,14 @@ describe("parseAllowedHosts", () => {
     expect(result).not.toContain("127.0.0.1");
   });
 
-  it("DEFAULT_LOOPBACK_HOSTS is exactly the loopback set", () => {
-    expect(DEFAULT_LOOPBACK_HOSTS).toEqual(["localhost", "127.0.0.1", "::1"]);
+  it("DEFAULT_LOOPBACK_HOSTS is the loopback set with bracketed IPv6", () => {
+    // The IPv6 literal is bracket-enclosed so it would match Vite's
+    // bracket-stripped Host comparison if Vite's hardcoded ipv6 short-circuit
+    // is ever removed. See the comment in allowed-hosts.ts for details.
+    expect(DEFAULT_LOOPBACK_HOSTS).toEqual([
+      "localhost",
+      "127.0.0.1",
+      "[::1]",
+    ]);
   });
 });
