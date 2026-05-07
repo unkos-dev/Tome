@@ -1,0 +1,9 @@
+## Clippy configuration for backend.
+##
+## Project-wide deny on `clippy::unwrap_used` and `clippy::expect_used` lives
+## in `Cargo.toml` (`[lints.clippy]`). These options pin the test-code
+## exemption explicitly so the carve-out is independent of any heuristic
+## drift across clippy versions: tests may use `unwrap()` / `expect()`
+## freely, production code may not.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

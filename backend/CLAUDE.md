@@ -108,7 +108,9 @@ trait design, pattern matching, lifetime minimization) live in the
 - **No `unwrap()` or `expect()` in non-test code** — compiler-enforced via
   `clippy::unwrap_used = "deny"` / `expect_used = "deny"` in `Cargo.toml`.
   Propagate with `?` or handle explicitly. Tests may use them freely
-  (clippy ignores `#[cfg(test)]` modules).
+  because `backend/clippy.toml` sets `allow-unwrap-in-tests = true` and
+  `allow-expect-in-tests = true`; the exemption covers `#[test]` functions,
+  `#[cfg(test)]` modules, and integration tests under `tests/`.
 - **No `let _ = <Result>`.** Either log and continue via
   `if let Err(e) = ... { tracing::warn!(…); }`, or propagate with `?`.
   Silently discarding errors is forbidden.
