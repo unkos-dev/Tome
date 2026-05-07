@@ -7,7 +7,7 @@ adopted-because: cloud workspace hostnames unenumerable for static allowlist; OI
 lift-when-class: internal-refactor
 lift-when: UNK-168 (REVERIE_DEV_HOSTS env-driven allowlist) merged to main
 lifted: 2026-05-07
-superseded-by: PR <pending>
+superseded-by: https://github.com/unkos-dev/reverie/pull/170
 ---
 
 # Vite allowedHosts permissive in dev
