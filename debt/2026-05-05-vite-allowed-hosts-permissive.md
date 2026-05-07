@@ -84,7 +84,7 @@ day one of cloudflared deployment.
 `frontend/vite-plugins/allowed-hosts.ts` parses
 `REVERIE_DEV_HOSTS` (comma-separated) into the `server.allowedHosts`
 list. When unset, the default is loopback-only (`localhost`,
-`127.0.0.1`, `::1`). The inline security comment in
+`127.0.0.1`, `[::1]`). The inline security comment in
 `vite.config.ts` was updated to reflect the new posture (DNS-rebind
 guard active against a bounded allowlist). The env var is documented
 in `frontend/CLAUDE.md` and `dev/README.md`. Cloud workspace
