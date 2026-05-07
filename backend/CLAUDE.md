@@ -105,8 +105,10 @@ Project-specific hard rules. Broader Rust idioms (ownership, iterators,
 trait design, pattern matching, lifetime minimization) live in the
 `rust-patterns` skill — invoke it for deep patterns.
 
-- **No `unwrap()` or `expect()` in non-test code.** Propagate with `?` or
-  handle explicitly. Tests may use them freely.
+- **No `unwrap()` or `expect()` in non-test code** — compiler-enforced via
+  `clippy::unwrap_used = "deny"` / `expect_used = "deny"` in `Cargo.toml`.
+  Propagate with `?` or handle explicitly. Tests may use them freely
+  (clippy ignores `#[cfg(test)]` modules).
 - **No `let _ = <Result>`.** Either log and continue via
   `if let Err(e) = ... { tracing::warn!(…); }`, or propagate with `?`.
   Silently discarding errors is forbidden.
