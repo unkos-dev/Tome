@@ -207,6 +207,75 @@ ADR's status) to the matching outcome.
   Dependabot, real PR variety) that the comparison needs to be
   honest
 
+## Amendments
+
+### 2026-05-08 — CLI wire-up for pre-push review (UNK-187)
+
+The original ADR scoped the trial to the **PR-side surface** (GitHub
+App, auto-on-every-non-draft-PR). CodeRabbit also ships a CLI
+(`~/.local/bin/coderabbit`, alias `cr`) that reviews uncommitted /
+committed local changes against a base branch and emits structured
+JSON via `--agent`, suitable for Claude Code ingestion.
+
+Wire-up done in the coder workspace 2026-05-08:
+
+* `curl -fsSL https://cli.coderabbit.ai/install.sh | sh` →
+  `~/.local/bin/coderabbit` v0.4.5 (Linux ARM64)
+* `coderabbit auth login` (browser OAuth)
+* Claude Code plugin: `/plugin install coderabbit` →
+  `/coderabbit:review` slash command available
+
+#### Why add CLI to scope mid-trial
+
+Two operational wins, both observed during the Greptile trial as
+gaps that no PR-side reviewer can close:
+
+* **Pre-push elimination**: findings raised and resolved in the
+  local diff never produce review-comment churn on the PR. Reduces
+  the PR-history noise the parallel trial otherwise widens (two AI
+  reviewers per PR was already an explicit `Bad` consequence)
+* **No round-trip**: addressing a finding pre-push removes the
+  push → wait-for-review → re-push cycle. Direct token-cost saving
+  for any agent-driven workflow that would otherwise paste PR
+  comments back into a session
+
+#### Rate-limit interaction
+
+CLI reviews count against the OSS-tier hourly cap of 3 CLI
+reviews/hour/dev (per <https://docs.coderabbit.ai/management/plans>).
+This is shared with the same OSS quota the PR-side trial runs
+against. A push-heavy iteration day could plausibly hit the cap.
+If observed, document in UNK-187 § "CLI observations" and consider
+amending again with a session-level pacing discipline.
+
+#### What stays unchanged
+
+* PR-side trial framing, gate (2026-05-21), and decision matrix —
+  unchanged
+* `actionable-rate ≥ 30%` metric — measured on PR-side findings only.
+  CLI findings are *not* counted into the metric (they reduce the
+  PR-side surface rather than add to it; they are tracked
+  separately under UNK-187 § "CLI observations")
+* `.coderabbit.yaml` config — unchanged. CLI inherits the same
+  `path_instructions`, `path_filters`, `profile`, etc. from the
+  in-repo config
+* CONTRIBUTING.md § "Third-party AI code review" — unchanged.
+  Contributors do not invoke the CLI; only the maintainer does
+
+#### What to watch
+
+* CLI rate-limit hits during iteration-heavy days. If observed,
+  this ADR is amended further (or trial gate brought forward)
+* Whether CLI surface diverts review-quality findings away from
+  the PR-side metric. If actionable-rate on PR-side falls because
+  CLI catches the easy wins pre-push, the trial verdict needs
+  to weight that explicitly — the PR-side metric is no longer
+  measuring the full reviewer signal
+* Plugin / Claude Code integration friction. The CLI is rated for
+  `cr --agent` JSON output; mismatches between what the slash
+  command surfaces and the underlying `cr` output are integration
+  signal, not reviewer signal
+
 ## More Information
 
 * [`adr/2026-05-04-greptile-trial.md`](2026-05-04-greptile-trial.md)
@@ -217,6 +286,8 @@ ADR's status) to the matching outcome.
 * CodeRabbit docs: <https://docs.coderabbit.ai>
 * CodeRabbit pricing: <https://www.coderabbit.ai/pricing>
 * CodeRabbit security and trust: <https://www.coderabbit.ai/trust-center>
+* CodeRabbit CLI docs: <https://docs.coderabbit.ai/cli>
+* CodeRabbit CLI + Claude Code integration: <https://docs.coderabbit.ai/cli/claude-code-integration>
 * `CONTRIBUTING.md` § "Third-party AI code review" — contributor
   disclosure (updated to product-agnostic framing in the same PR
   that lands this ADR)
