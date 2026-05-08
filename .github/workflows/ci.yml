@@ -106,6 +106,17 @@ jobs:
       - name: Lint
         run: cargo clippy -- -D warnings
 
+      # Phase 1 of the tiered comment policy rollout
+      # (adr/2026-05-08-tiered-comment-policy.md). No missing-docs
+      # requirement yet — just kills broken intra-doc cross-refs in the
+      # docstrings that already exist. `cargo doc` over the workspace
+      # without `--document-private-items` is the conservative scope:
+      # pub items only, matching Tier 1 surface.
+      - name: Doc lint (broken intra-doc links)
+        env:
+          RUSTDOCFLAGS: "-D rustdoc::broken_intra_doc_links"
+        run: cargo doc --no-deps --workspace
+
       # UNK-167: drift guard on the committed .sqlx/ query cache. Every
       # `cargo sqlx prepare` regeneration must be checked in; CI fails if
       # cache is stale relative to query macros + live schema.
