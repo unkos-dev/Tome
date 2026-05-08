@@ -19,15 +19,24 @@
 /// responses (SPA fallback + `/assets/*`).
 ///
 /// Allowed surfaces:
+/// - `default-src 'self'` — baseline for any directive not set explicitly
+///   below.
 /// - `script-src 'self'` plus the inline-script hashes the Vite
-///   `reverie-csp-hash` plugin extracts at build time (currently one — the
-///   FOUC theme bootstrap in `frontend/src/fouc/fouc.js`).
+///   `reverie-csp-hash` plugin extracts at build time (the current source
+///   is the FOUC theme bootstrap in `frontend/src/fouc/fouc.js`).
 /// - `style-src 'self' 'unsafe-inline'` — pragmatic concession for Tailwind
 ///   CSS JIT + Radix UI portals that emit style attributes at runtime. The
 ///   risk surface is XSS-style-attribute injection; mitigations are
 ///   covered in `docs/security/content-security-policy.md`.
 /// - `img-src 'self' data:` — `data:` permits the inline blur-up
 ///   placeholders on cover images.
+/// - `font-src 'self'` — self-hosted variable woff2 files under
+///   `frontend/public/fonts/`. Operators wanting CDN fonts must edit
+///   this builder (no runtime knob — see `docs/security/content-security-policy.md`
+///   § Fonts).
+/// - `connect-src 'self'` — `fetch` / `XMLHttpRequest` / WebSocket
+///   targets restricted to same-origin (the SPA's own `/api`, `/auth`,
+///   `/opds` calls).
 /// - `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'self'`,
 ///   `object-src 'none'` — clickjacking, base-tag-injection, and plugin
 ///   embedding all denied.
@@ -72,10 +81,13 @@ pub fn build_html_csp(script_src_hashes: &[String], report_endpoint: Option<&url
 /// `application/json` / `application/xml` responses on `/api`, `/auth`,
 /// `/health`, `/opds`.
 ///
-/// Locks every directive to `'none'`. API responses never render in a
-/// document context; any script execution, image fetch, or frame embedding
-/// against them is anomalous and the policy reports it via `report-to` /
-/// `report-uri` when configured.
+/// Sets `default-src 'none'` (which covers all inheriting fetch
+/// directives — `script-src`, `img-src`, `connect-src`, etc.) plus
+/// explicit `frame-ancestors 'none'` and `base-uri 'none'` for the two
+/// directives that do not inherit from `default-src`. API responses
+/// never render in a document context; any script execution, image
+/// fetch, or frame embedding against them is anomalous and the policy
+/// reports it via `report-to` / `report-uri` when configured.
 ///
 /// Threat: a single shared CSP across HTML and API responses would force
 /// the laxer HTML policy onto API responses, broadening the implicit attack
