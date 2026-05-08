@@ -1,19 +1,49 @@
-//! Pure Content-Security-Policy builders.
+//! Pure Content-Security-Policy builders for Reverie.
 //!
-//! Called once at startup from `main()` to precompute the `csp_html_header`
-//! and `csp_api_header` strings stored on [`crate::config::SecurityConfig`].
+//! Called once at startup from `reverie_api::run` to precompute the
+//! `csp_html_header` and `csp_api_header` `HeaderValue`s stored on
+//! [`crate::config::SecurityConfig`]. Kept pure (no I/O, no state) so the
+//! shape of the policy is auditable in one file.
+//!
+//! # Tier 2 — security-critical
+//!
+//! These builders define what scripts the browser will execute on a Reverie
+//! instance. Drift between the HTML CSP and the inline-script hashes shipped
+//! by the Vite plugin (`frontend/vite-plugins/csp-hash.ts`) silently breaks
+//! script execution; drift between the API CSP and the response classes that
+//! attach it weakens the route-class differentiation that motivates having
+//! two policies. The startup `dist_validation` step closes the first drift
+//! channel; reviewer discipline is the only check on the second.
 
-/// HTML CSP (per-response value for `text/html` responses). Must allow the
-/// Vite-built ES module (`/assets/*.js`) and one known inline FOUC script
-/// (pinned by `script_src_hashes`). `style-src 'unsafe-inline'` is a
-/// pragmatic concession for Tailwind CSS JIT + Radix portals — documented
-/// in `docs/security/content-security-policy.md`.
+/// Build the HTML CSP — the per-response policy attached to `text/html`
+/// responses (SPA fallback + `/assets/*`).
 ///
-/// Invariant: `script_src_hashes` must be non-empty for production; the
-/// dist-validation step rejects an empty sidecar before this builder runs.
-/// Each element must be pre-formatted as `sha256-...` / `sha384-...` /
-/// `sha512-...` with standard (not base64url) base64 — dist validation
-/// enforces the shape.
+/// Allowed surfaces:
+/// - `script-src 'self'` plus the inline-script hashes the Vite
+///   `reverie-csp-hash` plugin extracts at build time (currently one — the
+///   FOUC theme bootstrap in `frontend/src/fouc/fouc.js`).
+/// - `style-src 'self' 'unsafe-inline'` — pragmatic concession for Tailwind
+///   CSS JIT + Radix UI portals that emit style attributes at runtime. The
+///   risk surface is XSS-style-attribute injection; mitigations are
+///   covered in `docs/security/content-security-policy.md`.
+/// - `img-src 'self' data:` — `data:` permits the inline blur-up
+///   placeholders on cover images.
+/// - `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'self'`,
+///   `object-src 'none'` — clickjacking, base-tag-injection, and plugin
+///   embedding all denied.
+/// - `upgrade-insecure-requests` — promotes mixed-content to HTTPS where
+///   possible.
+///
+/// Threat: `'unsafe-inline'` on `style-src` is the one explicit attack
+/// surface this builder accepts. Any future move to nonce-based or
+/// hash-based style-src would be a strict improvement.
+///
+/// # Invariants
+///
+/// `script_src_hashes` must be non-empty for production; the dist-validation
+/// step rejects an empty sidecar before this builder runs. Each element must
+/// be pre-formatted as `sha256-...` / `sha384-...` / `sha512-...` with
+/// standard (RFC 4648 §4) base64 — dist validation enforces the shape.
 pub fn build_html_csp(script_src_hashes: &[String], report_endpoint: Option<&url::Url>) -> String {
     let mut script_src = String::from("script-src 'self'");
     for h in script_src_hashes {
@@ -38,10 +68,19 @@ pub fn build_html_csp(script_src_hashes: &[String], report_endpoint: Option<&url
     out
 }
 
-/// API CSP (per-response value for `application/json` / `application/xml`
-/// responses from `/api`, `/auth`, `/health`, `/opds`). Locks every directive
-/// to `'none'` — API responses never render; any script / image / frame
-/// execution against them is anomalous.
+/// Build the API CSP — the per-response policy attached to
+/// `application/json` / `application/xml` responses on `/api`, `/auth`,
+/// `/health`, `/opds`.
+///
+/// Locks every directive to `'none'`. API responses never render in a
+/// document context; any script execution, image fetch, or frame embedding
+/// against them is anomalous and the policy reports it via `report-to` /
+/// `report-uri` when configured.
+///
+/// Threat: a single shared CSP across HTML and API responses would force
+/// the laxer HTML policy onto API responses, broadening the implicit attack
+/// surface to data-only endpoints. Route-class differentiation prevents
+/// that.
 pub fn build_api_csp(report_endpoint: Option<&url::Url>) -> String {
     let mut out = String::from("default-src 'none'; frame-ancestors 'none'; base-uri 'none'");
     append_reporting(&mut out, report_endpoint);

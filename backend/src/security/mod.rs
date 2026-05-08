@@ -1,13 +1,26 @@
-//! Response-header security surface (UNK-106).
+//! Response-header security surface (UNK-106) for Reverie.
 //!
 //! - [`csp`]: pure builders for the HTML and API CSP header values.
 //! - [`dist_validation`]: startup validation of the frontend dist directory
 //!   and its `csp-hashes.json` sidecar.
 //! - [`headers`]: the uniform-headers middleware plus the composite
 //!   fallback handler that manually attaches per-class CSP headers.
+//!
+//! # Tier 2 — security-critical
+//!
+//! All modules in this directory are Tier 2 under the comment policy
+//! (`adr/2026-05-08-tiered-comment-policy.md`). Threat annotations are
+//! expressed inline (`// THREAT:`) and as one-line statements at the top
+//! of Tier 1 docstrings. The documented response-header policy lives in
+//! `docs/security/content-security-policy.md`; that document and these
+//! docstrings must agree, since they are the two surfaces a security
+//! auditor will read.
 
-#![allow(missing_docs)]
-
+/// Pure CSP header-value builders. Called once at startup.
 pub mod csp;
+
+/// Frontend dist + CSP-hash sidecar validation. Called once at startup.
 pub mod dist_validation;
+
+/// Response-header middleware + composite fallback handler.
 pub mod headers;
