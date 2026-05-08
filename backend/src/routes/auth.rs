@@ -1,3 +1,6 @@
+//! Authentication routes — OIDC login / callback, session logout, and the
+//! cookie-authenticated `/auth/me` profile + theme-preference endpoints.
+
 use axum::extract::State;
 use axum::response::{IntoResponse, Redirect};
 use axum::routing::{get, patch, post};
@@ -18,6 +21,7 @@ use crate::models::theme_preference::ThemePreference;
 use crate::models::user;
 use crate::state::AppState;
 
+/// Build the `/auth/*` router (login / callback / logout / me / theme).
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/login", get(login))
@@ -27,6 +31,8 @@ pub fn router() -> Router<AppState> {
         .route("/auth/me/theme", patch(update_theme))
 }
 
+/// `/auth/callback` query-string parameters returned by the OIDC issuer
+/// after the user authenticates.
 #[derive(serde::Deserialize)]
 pub struct CallbackParams {
     code: String,

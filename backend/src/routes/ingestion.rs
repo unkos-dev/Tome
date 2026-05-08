@@ -1,3 +1,5 @@
+//! Library-scan trigger (`POST /api/ingestion/scan`); admin-only.
+
 use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::routing::post;
@@ -8,6 +10,7 @@ use crate::error::AppError;
 use crate::services;
 use crate::state::AppState;
 
+/// Build the ingestion-control router.
 pub fn router() -> Router<AppState> {
     Router::new().route("/api/ingestion/scan", post(scan))
 }

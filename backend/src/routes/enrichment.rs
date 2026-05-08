@@ -21,6 +21,7 @@ use crate::models::enrichment_status::EnrichmentStatus;
 use crate::services;
 use crate::state::AppState;
 
+/// Build the enrichment-control router.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/manifestations/{id}/enrichment/trigger", post(trigger))

@@ -15,27 +15,39 @@ use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
 use uuid::Uuid;
 
+/// `(created_at, id)` tuple identifying the boundary row of a feed page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Cursor {
+    /// Boundary row's `manifestations.created_at`.
     pub created_at: OffsetDateTime,
+    /// Boundary row's `manifestations.id` (tie-breaker for identical
+    /// `created_at`).
     pub id: Uuid,
 }
 
+/// Parse failures from [`Cursor::parse`].
 #[derive(Debug, thiserror::Error)]
 pub enum CursorError {
+    /// Input was not valid base64url.
     #[error("invalid base64url")]
     InvalidBase64,
+    /// Decoded payload had no `|` between the timestamp and uuid halves.
     #[error("missing delimiter")]
     MissingDelimiter,
+    /// Timestamp half failed `Rfc3339` parse.
     #[error("invalid timestamp")]
     InvalidTimestamp,
+    /// Uuid half failed parse.
     #[error("invalid uuid")]
     InvalidUuid,
+    /// Decoded bytes were not valid UTF-8.
     #[error("invalid utf-8")]
     InvalidUtf8,
 }
 
 impl Cursor {
+    /// Encode this cursor as a base64url-encoded `<rfc3339>|<uuid>`
+    /// string suitable for use in a feed `?cursor=` query parameter.
     pub fn encode(&self) -> String {
         #[allow(
             clippy::expect_used,
@@ -49,6 +61,13 @@ impl Cursor {
         Base64UrlUnpadded::encode_string(payload.as_bytes())
     }
 
+    /// Parse a base64url-encoded cursor string back into `(created_at, id)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the matching [`CursorError`] variant for invalid base64,
+    /// missing delimiter, malformed timestamp, malformed uuid, or
+    /// non-UTF-8 decoded bytes.
     pub fn parse(s: &str) -> Result<Self, CursorError> {
         let mut buf = vec![0u8; s.len()];
         let decoded = Base64UrlUnpadded::decode(s.as_bytes(), &mut buf)

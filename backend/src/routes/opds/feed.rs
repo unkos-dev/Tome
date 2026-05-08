@@ -35,35 +35,59 @@ use uuid::Uuid;
 
 use super::xml::sanitise_xml_text;
 
+/// Default Atom namespace URI (OPDS 1.2 leaves it unprefixed).
 pub const ATOM_NS: &str = "http://www.w3.org/2005/Atom";
+/// OPDS catalog namespace URI (`opds:` prefix).
 pub const OPDS_NS: &str = "http://opds-spec.org/2010/catalog";
+/// Dublin Core terms namespace URI (`dc:` prefix).
 pub const DC_NS: &str = "http://purl.org/dc/terms/";
+/// `OpenSearch` 1.1 namespace URI (`opensearch:` prefix).
 pub const OPENSEARCH_NS: &str = "http://a9.com/-/spec/opensearch/1.1/";
 
+/// `Content-Type` for navigation feeds (carries the `kind=navigation`
+/// profile parameter).
 pub const NAVIGATION_TYPE: &str = "application/atom+xml;profile=opds-catalog;kind=navigation";
+/// `Content-Type` for acquisition feeds (carries the `kind=acquisition`
+/// profile parameter).
 pub const ACQUISITION_TYPE: &str = "application/atom+xml;profile=opds-catalog;kind=acquisition";
 
+/// `rel` value for the EPUB acquisition link on each entry.
 pub const REL_ACQUISITION: &str = "http://opds-spec.org/acquisition";
+/// `rel` value for the full-size cover image link.
 pub const REL_IMAGE: &str = "http://opds-spec.org/image";
+/// `rel` value for the cover thumbnail link.
 pub const REL_IMAGE_THUMBNAIL: &str = "http://opds-spec.org/image/thumbnail";
+/// `rel` value for the `OpenSearch` descriptor link.
 pub const REL_SEARCH: &str = "search";
+/// `rel` value for the next-page link on acquisition feeds.
 pub const REL_NEXT: &str = "next";
+/// `rel` value for the self link on every feed.
 pub const REL_SELF: &str = "self";
+/// `rel` value for the start (root) link emitted on every feed.
 pub const REL_START: &str = "start";
+/// `rel` value reserved for parent-feed links on sub-feeds; not yet
+/// emitted (MVP doesn't carry `rel="up"`).
 #[allow(dead_code)] // reserved: OPDS allows `rel="up"` on sub-feeds; MVP doesn't emit.
 pub const REL_UP: &str = "up";
+/// `rel` value for navigation entries that point at a subcatalog.
 pub const REL_SUBSECTION: &str = "subsection";
 
+/// MIME type for the EPUB acquisition link's `type` attribute.
 pub const EPUB_MIME: &str = "application/epub+zip";
+/// MIME type for the `OpenSearch` descriptor link's `type` attribute.
 pub const OPENSEARCH_DESCRIPTION_MIME: &str = "application/opensearchdescription+xml";
 
+/// Discriminates the two OPDS 1.2 feed profiles.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FeedKind {
+    /// Navigation feed: links between subcatalogs (root, library, shelves).
     Navigation,
+    /// Acquisition feed: actual book entries with download / cover links.
     Acquisition,
 }
 
 impl FeedKind {
+    /// Profile-tagged `Content-Type` value for this feed kind.
     pub const fn content_type(self) -> &'static str {
         match self {
             Self::Navigation => NAVIGATION_TYPE,
@@ -72,19 +96,33 @@ impl FeedKind {
     }
 }
 
+/// One book row, ready for emission as an acquisition `<entry>`.
 #[derive(Debug, Clone)]
 pub struct AcquisitionEntry {
+    /// Manifestation id; embedded in entry id and acquisition / cover URLs.
     pub manifestation_id: Uuid,
+    /// Work title rendered as `<title>`.
     pub work_title: String,
+    /// One author name per `<author>` element.
     pub creators: Vec<String>,
+    /// Optional `<summary>` body.
     pub description: Option<String>,
+    /// Optional language tag rendered as `<dc:language>`.
     pub language: Option<String>,
+    /// Tag names rendered as `<category term="…" label="…"/>` elements.
     pub tags: Vec<String>,
     /// ISBN-13 preferred; ISBN-10 fallback. `None` emits a `urn:uuid:` id.
     pub isbn: Option<String>,
+    /// Entry `<updated>` timestamp (sourced from `manifestations.updated_at`).
     pub updated_at: OffsetDateTime,
 }
 
+/// Streaming OPDS feed builder.
+///
+/// Holds an in-memory `quick-xml` writer and the feed-level base URL +
+/// kind discriminator. Construct with [`FeedBuilder::new`], append
+/// entries / links via the `add_*` methods, then call
+/// [`FeedBuilder::finish`] to recover the serialised XML bytes.
 pub struct FeedBuilder {
     writer: Writer<Cursor<Vec<u8>>>,
     base_url: Url,
@@ -215,6 +253,11 @@ impl FeedBuilder {
             .expect("entry close");
     }
 
+    /// Append one acquisition `<entry>`. Emits id (manifestation URN or
+    /// ISBN URN), title, updated, authors, identifier, language,
+    /// summary, categories, and the three OPDS rel links (acquisition /
+    /// image / thumbnail). Every text field passes through
+    /// [`super::xml::sanitise_xml_text`] before reaching `quick-xml`.
     pub fn add_acquisition_entry(&mut self, entry: &AcquisitionEntry) {
         self.writer
             .write_event(Event::Start(BytesStart::new("entry")))
@@ -336,6 +379,7 @@ impl FeedBuilder {
         self.write_link(rel, path, mime, None);
     }
 
+    /// Close the `<feed>` element and return the serialised XML bytes.
     pub fn finish(mut self) -> Vec<u8> {
         self.writer
             .write_event(Event::End(BytesEnd::new("feed")))
@@ -361,14 +405,17 @@ pub fn feed_urn(self_path: &str) -> String {
     format!("urn:reverie:feed:{self_path}")
 }
 
+/// Stable `urn:reverie:author:<uuid>` id for an author navigation entry.
 pub fn author_urn(author_id: Uuid) -> String {
     format!("urn:reverie:author:{author_id}")
 }
 
+/// Stable `urn:reverie:series:<uuid>` id for a series navigation entry.
 pub fn series_urn(series_id: Uuid) -> String {
     format!("urn:reverie:series:{series_id}")
 }
 
+/// Stable `urn:reverie:shelf:<uuid>` id for a shelf navigation entry.
 pub fn shelf_urn(shelf_id: Uuid) -> String {
     format!("urn:reverie:shelf:{shelf_id}")
 }

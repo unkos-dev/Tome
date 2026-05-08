@@ -22,6 +22,9 @@ use super::library::{
 use super::root::{atom_response, base_url};
 use super::scope::Scope;
 
+/// Build the `/opds/shelves/:shelf_id/*` router. Every handler verifies
+/// shelf ownership under [`crate::db::acquire_with_rls`] and 404s on
+/// foreign shelves to avoid leaking shelf existence.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/opds/shelves/{shelf_id}", get(shelf_root))

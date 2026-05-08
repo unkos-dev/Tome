@@ -31,6 +31,9 @@ use crate::state::AppState;
 use super::feed::{ACQUISITION_TYPE, OPENSEARCH_NS};
 use super::root::base_url;
 
+/// Build the `OpenSearch` descriptor router (one per scope so a reader
+/// paired at `/opds/shelves/:id` gets a search URL scoped to that
+/// shelf).
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/opds/library/opensearch.xml", get(library_opensearch))

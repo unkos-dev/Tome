@@ -1,3 +1,9 @@
+//! Per-user device-token issue / list / revoke endpoints.
+//!
+//! Token plaintext is returned exactly once on `POST /api/tokens` — it
+//! is never persisted, only its SHA-256 hash. Subsequent `GET` and
+//! `DELETE` operate on the row id; the plaintext cannot be recovered.
+
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -11,6 +17,7 @@ use crate::error::AppError;
 use crate::models::device_token;
 use crate::state::AppState;
 
+/// Build the device-token management router.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/tokens", post(create_token))

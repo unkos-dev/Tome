@@ -15,6 +15,7 @@ use crate::state::AppState;
 
 use super::feed::{FeedBuilder, FeedKind, feed_urn, shelf_urn};
 
+/// Build the `/opds` root navigation router.
 pub fn router() -> Router<AppState> {
     Router::new().route("/opds", get(opds_root))
 }

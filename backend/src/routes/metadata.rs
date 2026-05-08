@@ -21,6 +21,7 @@ use crate::models::work;
 use crate::services::enrichment::field_lock::{self, EntityType};
 use crate::state::AppState;
 
+/// Build the metadata-review router.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
