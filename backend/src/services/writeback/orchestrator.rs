@@ -18,7 +18,7 @@
 //! `UPDATE manifestations` write produces zero rows affected and the
 //! `current_file_hash` update silently disappears.  The writeback pool is
 //! created by `crate::test_support::db::writeback_pool_for` in tests and by
-//! the `reverie_app` pool factory in `lib.rs::run` at runtime.
+//! `db::init_writeback_pool`, instantiated in `lib.rs::run` at runtime.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -139,6 +139,8 @@ struct JobSnapshot {
 /// - `WritebackError::Xml` — `OPF` parse or rewrite failed.
 /// - `WritebackError::Epub` — the pre-writeback `EPUB` validation call
 ///   returned an error.
+/// - `WritebackError::MissingOpf` — `META-INF/container.xml` was absent or
+///   contained no `OPF` root-file path.
 /// - `WritebackError::Persist` — the atomic commit, cross-FS copy, or
 ///   path-rename step failed.
 #[allow(

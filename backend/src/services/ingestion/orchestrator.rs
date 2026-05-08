@@ -34,9 +34,12 @@ pub struct ScanResult {
 ///
 /// # Errors
 ///
-/// Returns an error only if the initial channel setup or a `scan_once` call
-/// returns an unrecoverable `anyhow::Error`. Watcher task failures are logged
-/// and cause the loop to exit but do not propagate as an error from this function.
+/// This function does not return errors during normal operation: per-batch
+/// `scan_once` failures are logged via `tracing::error!` and the loop
+/// continues. The `Result` return type is preserved for parity with the
+/// `tokio::spawn` callsite. The function reaches `Ok(())` when `cancel`
+/// fires or when the watcher channel closes (the latter typically because
+/// the spawned watcher task itself errored and exited).
 pub async fn run_watcher(
     config: Config,
     pool: PgPool,

@@ -71,7 +71,7 @@ pub struct SeriesInfo {
 /// Applies the full sanitisation pipeline to every text field, resolves
 /// `ISBN` identifiers, generates sort keys, detects title-author inversion,
 /// and computes a completeness-based confidence score (base 0.3 + 0.1 per
-/// present field, capped at 1.0).
+/// present field, except `subjects` which contributes +0.05; capped at 1.0).
 pub fn extract(opf: &opf_layer::OpfData) -> ExtractedMetadata {
     let title = opf
         .title
