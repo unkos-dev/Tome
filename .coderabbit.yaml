@@ -3,7 +3,7 @@
 # CodeRabbit configuration for unkos-dev/reverie.
 #
 # Trial framing: see adr/2026-05-07-coderabbit-parallel-trial.md.
-# Tally tracker: separate Linear ticket parallel to UNK-155.
+# Tally tracker: UNK-187 (sister to UNK-155 for Greptile).
 #
 # Profile picked `assertive` (not the published default `chill`) so the
 # trial baseline matches the verbose-by-design Greptile equivalent
