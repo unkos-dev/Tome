@@ -17,14 +17,22 @@
 //!   `20260412150001_extensions_enums_and_roles.up.sql`).
 //! - JSON: lowercase string literal — "admin" | "adult" | "child".
 
+/// Authorization role assigned to a [`crate::models::user::User`].
+///
+/// Drives `auth::middleware::require_admin` and `require_not_child`;
+/// renaming a variant compile-errors at every consumer, eliminating the
+/// silent-lockout hazard documented in UNK-108.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, sqlx::Type,
 )]
 #[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "user_role", rename_all = "lowercase")]
 pub enum Role {
+    /// Full administrative access; bypass content age-gates.
     Admin,
+    /// Standard adult user; full library access, no admin actions.
     Adult,
+    /// Child profile; subject to age-restricted content filtering.
     Child,
 }
 

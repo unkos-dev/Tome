@@ -34,13 +34,32 @@ use crate::services::metadata::extractor::ExtractedMetadata;
 #[allow(dead_code)]
 #[derive(Debug, PartialEq, Eq)]
 pub enum RematchOutcome {
+    /// No matching ISBN row elsewhere; the manifestation is left untouched.
     NoOp,
-    AutoMerged { from: Uuid, to: Uuid },
-    Suspected { matched_work: Uuid },
+    /// The current work was a stub safe to retire; its sole manifestation
+    /// has been moved to the matched work and the stub deleted.
+    AutoMerged {
+        /// Stub work id that was deleted.
+        from: Uuid,
+        /// Surviving work id that absorbed the manifestation.
+        to: Uuid,
+    },
+    /// A potential duplicate exists but cannot be auto-merged safely
+    /// (other manifestations or manual-source drafts on the current
+    /// work). `manifestations.suspected_duplicate_work_id` has been set
+    /// for operator review.
+    Suspected {
+        /// Work id of the suspected duplicate.
+        matched_work: Uuid,
+    },
 }
 
 /// Try to match an existing work by ISBN-13 or title+author similarity (0.6).
 /// Pure read; never writes.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the candidate lookup queries.
 pub async fn match_existing(
     conn: &mut PgConnection,
     metadata: &ExtractedMetadata,
@@ -88,6 +107,10 @@ pub async fn match_existing(
 
 /// Insert an empty-placeholder work used to satisfy the manifestation FK
 /// before drafts are written. Upgrade via `upgrade_stub` after drafts exist.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the `INSERT … RETURNING id`.
 pub async fn create_stub(conn: &mut PgConnection) -> Result<Uuid, sqlx::Error> {
     sqlx::query_scalar!("INSERT INTO works (title, sort_title) VALUES ('', '') RETURNING id")
         .fetch_one(&mut *conn)
@@ -98,6 +121,12 @@ pub async fn create_stub(conn: &mut PgConnection) -> Result<Uuid, sqlx::Error> {
 /// set `title/sort_title/description/language` + canonical pointers,
 /// create authors + `work_authors` rows with `source_version_id` wired.
 /// Also creates the series row if present.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from any of the constituent statements
+/// (work `UPDATE`, author find-or-create, `work_authors INSERT`,
+/// series find-or-create, `series_works INSERT`).
 pub async fn upgrade_stub(
     conn: &mut PgConnection,
     work_id: Uuid,
@@ -238,6 +267,13 @@ async fn find_or_create_series(
 /// Must be called inside the caller's transaction; uses `FOR UPDATE` on
 /// candidate rows to avoid concurrent rematch races.
 /// Consumed by the enrichment orchestrator (Step 7 task 21).
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from any of: the manifestation lookup, the
+/// `FOR UPDATE` candidate scan, the safety-condition counts, the
+/// `manifestations.work_id` `UPDATE`, the stub `DELETE`, or the
+/// `suspected_duplicate_work_id` `UPDATE`.
 #[allow(dead_code)]
 pub async fn rematch_on_isbn_change(
     conn: &mut PgConnection,

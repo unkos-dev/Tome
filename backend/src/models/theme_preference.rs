@@ -8,14 +8,21 @@
 //!   `20260427000001_add_theme_preference.up.sql`).
 //! - JSON / Cookie: lowercase string literal — "system" | "light" | "dark".
 
+/// Per-user theme selection mirrored across DB, JSON, and the FOUC theme cookie.
+///
+/// Wire-format drift across these three surfaces is tracked under UNK-105;
+/// the variant strings declared here are authoritative.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, sqlx::Type,
 )]
 #[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "theme_preference", rename_all = "lowercase")]
 pub enum ThemePreference {
+    /// Follow the user-agent's `prefers-color-scheme` (default).
     System,
+    /// Force the light palette regardless of user-agent preference.
     Light,
+    /// Force the dark palette regardless of user-agent preference.
     Dark,
 }
 

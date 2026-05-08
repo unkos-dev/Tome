@@ -13,16 +13,26 @@
 //! - JSON: lowercase string —
 //!   "pending" | "processing" | "complete" | "failed" | "skipped".
 
+/// Lifecycle state of a single manifestation's ingestion pipeline run.
+///
+/// Wire-format invariant: variants serialise to the lowercase forms
+/// declared in the `#[serde]` and `#[sqlx]` attributes; unknown DB
+/// variants fail decode loudly instead of coercing into a string.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, sqlx::Type,
 )]
 #[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "ingestion_status", rename_all = "lowercase")]
 pub enum IngestionStatus {
+    /// File enqueued for ingestion.
     Pending,
+    /// Worker is parsing and inserting the manifestation row.
     Processing,
+    /// Ingestion finished successfully.
     Complete,
+    /// Ingestion failed; the job row records the cause.
     Failed,
+    /// File was skipped (e.g. duplicate hash, unsupported format under current policy).
     Skipped,
 }
 

@@ -1,3 +1,11 @@
+//! User accounts and OIDC-driven upsert / first-user promotion.
+//!
+//! Two row shapes coexist: a private `UserRow` decoded from the DB and
+//! the public [`crate::models::user::User`] returned to callers. The
+//! split keeps `axum-login`-required derived state
+//! (`session_version_bytes`) out of the serialised JSON shape and lets
+//! `User::from` compute it once at row-load time.
+
 use axum_login::AuthUser;
 use serde::Serialize;
 use sqlx::PgPool;
@@ -22,17 +30,38 @@ struct UserRow {
     theme_preference: ThemePreference,
 }
 
+/// Public user row exposed to handlers and serialised in API responses.
+///
+/// The [`AuthUser`] impl returns `session_version_bytes` (a cached
+/// little-endian encoding of `session_version`) from
+/// `session_auth_hash`; bumping `users.session_version` therefore
+/// invalidates every existing session for that user — see the comment
+/// in the impl for the rationale over hashing `updated_at`.
 #[derive(Debug, Clone, Serialize)]
 pub struct User {
+    /// Primary key.
     pub id: Uuid,
+    /// `sub` claim from the trusted OIDC issuer; the cross-`IdP`-stable
+    /// identity used for upsert lookup.
     pub oidc_subject: String,
+    /// User-facing display name; sourced from the OIDC `name` claim.
     pub display_name: String,
+    /// User's email if the `IdP` released the `email` claim, else `None`.
     pub email: Option<String>,
+    /// Authorization role; see [`Role`].
     pub role: Role,
+    /// `true` if this account is a child profile subject to age-gating.
+    /// Mirrors a column rather than being derived from `role` so the DB
+    /// remains the single source of truth across both axes.
     pub is_child: bool,
+    /// Row insert timestamp.
     pub created_at: OffsetDateTime,
+    /// `now()` of the most recent change to any user-facing field.
     pub updated_at: OffsetDateTime,
+    /// Monotonic counter incremented to force-invalidate every active
+    /// session for this user; consumed via [`AuthUser::session_auth_hash`].
     pub session_version: i32,
+    /// Selected UI theme; see [`ThemePreference`].
     pub theme_preference: ThemePreference,
     #[serde(skip)]
     session_version_bytes: Vec<u8>,
@@ -73,6 +102,11 @@ impl AuthUser for User {
     }
 }
 
+/// Fetch a user by primary key. Returns `Ok(None)` if no such row exists.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the underlying `SELECT`.
 pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<User>, sqlx::Error> {
     sqlx::query_as!(
         UserRow,
@@ -87,6 +121,11 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<User>, sqlx::E
     .map(|opt| opt.map(User::from))
 }
 
+/// Fetch a user by OIDC `sub` claim. Returns `Ok(None)` if no such row exists.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the underlying `SELECT`.
 #[allow(dead_code)] // Used by admin user management in future steps
 pub async fn find_by_oidc_subject(
     pool: &PgPool,
@@ -108,6 +147,12 @@ pub async fn find_by_oidc_subject(
 /// Insert or update a user from OIDC claims, then auto-promote to admin if first user.
 /// Runs upsert + promotion in a single transaction to prevent race conditions where
 /// concurrent first logins result in no admin.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from any step of the transaction (advisory
+/// lock, `INSERT … ON CONFLICT`, conditional promotion `UPDATE`,
+/// re-fetch, or commit).
 pub async fn upsert_from_oidc_and_maybe_promote(
     pool: &PgPool,
     subject: &str,
