@@ -31,11 +31,20 @@
 services:
   reverie-postgres:
     image: postgres:18-alpine
-    # `required: true` makes a missing .env an immediate hard fail rather
-    # than a silent "no env injected" path on Compose &lt; v2.24.
-    env_file:
-      - path: .env
-        required: true
+    # Scope explicitly: postgres only needs bootstrap credentials and the
+    # init-roles.sql password inputs. Loading the full app `.env` would
+    # leak unrelated secrets (DATABASE_URL, OIDC client secret, session
+    # secret, CSP endpoint) into the postgres container's environment,
+    # readable via `/proc/<pid>/environ` to anyone with exec on the
+    # container. The `:?` form makes a missing var an immediate hard fail
+    # rather than a silent empty-string substitution.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${POSTGRES_DB:?required}
+      REVERIE_APP_PASSWORD: ${REVERIE_APP_PASSWORD:?required}
+      REVERIE_INGESTION_PASSWORD: ${REVERIE_INGESTION_PASSWORD:?required}
+      REVERIE_READONLY_PASSWORD: ${REVERIE_READONLY_PASSWORD:?required}
     volumes:
       # Parent-dir mount required by postgres:18+ (image places data in a
       # major-version subdirectory `/var/lib/postgresql/<major>/<cluster>/`
