@@ -109,6 +109,34 @@ Release PR:
 
 ---
 
+## Comment Policy (Tiered)
+
+OSS audience (external contributors, security auditors, self-hosting
+operators) amends the global "default to no comments" rule. Full rationale,
+alternatives, enforcement plan, and authoring approach:
+[`adr/2026-05-08-tiered-comment-policy.md`](adr/2026-05-08-tiered-comment-policy.md).
+
+- **Tier 1** — `pub` items at module boundaries: `///` (Rust) / JSDoc (TS)
+  with purpose + invariants + non-obvious WHY. Include `# Errors` /
+  `# Panics` / `# Safety` sections where applicable. Module tops carry
+  `//!` / file-header docblock stating purpose + invariants.
+- **Tier 2** — `auth/`, `security/`, and any code handling credentials,
+  sessions, OIDC, RLS, secrets, or response headers: Tier 1 plus explicit
+  threat annotations (`// THREAT:` inline; one-line threat statement near
+  top of Tier 1 docstrings; cross-reference ADRs).
+- **Tier 3** — internal non-public items: original "default to no
+  comments" rule preserved. Comment only when WHY is non-obvious.
+- **Tier 4** — tests + `test_support`: no docstrings on test functions
+  (test name is the spec). `//!` on `test_support/` only when helper
+  purpose is non-obvious.
+
+Anti-patterns (skip the docstring rather than commit one of these):
+clipping or replacing existing leading comments (new docstring goes
+*above*, never in place of); pure signature restatement; generic
+boilerplate ("@param x The x parameter").
+
+---
+
 ## Project Structure
 
 - `backend/` — Rust + Axum API server. See `backend/CLAUDE.md` for Rust-specific rules.
