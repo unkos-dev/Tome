@@ -856,7 +856,7 @@ fn summarise_failure(source_id: &str, err: &SourceError) -> SourceFailure {
     }
 }
 
-/// Helper used by [`dry_run::preview`] — same fan-out + cache but no journal
+/// Helper used by [`super::dry_run::preview`] — same fan-out + cache but no journal
 /// writes and no canonical updates.
 pub async fn fan_out_for_dry_run(
     pool: &PgPool,
