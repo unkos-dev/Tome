@@ -75,11 +75,15 @@ pub fn build_router(state: AppState, auth_backend: AuthBackend) -> Router {
 
 /// Same as [`build_router`] but with a caller-provided session store.
 ///
-/// Used by integration tests to inject a `MemoryStore` so the test
-/// harness can read server-written session state — e.g. the OIDC
-/// `nonce` set by `/auth/login` that the callback test needs to embed
-/// in a matching mock-issued ID token. Production builds use
-/// `PostgresStore` via [`build_router`].
+/// Used by **in-crate integration tests** (under `src/**/tests` modules
+/// gated on `#[cfg(test)]`) to inject a `tower_sessions::MemoryStore` so
+/// the test harness can read server-written session state — e.g. the
+/// OIDC `nonce` set by `/auth/login` that the callback test needs to
+/// embed in a matching mock-issued ID token. External-crate tests under
+/// `backend/tests/` cannot reach this function; intentional, since the
+/// shared-store seam is only required by tests that exercise routing
+/// internals (which already need crate-private access for fixtures).
+/// Production builds use `PostgresStore` via [`build_router`].
 pub(crate) fn build_router_with_session_store<S>(
     state: AppState,
     auth_backend: AuthBackend,
