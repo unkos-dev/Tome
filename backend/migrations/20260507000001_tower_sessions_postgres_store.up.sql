@@ -14,7 +14,13 @@
 -- exists (the cookie's session id is the bootstrap that resolves the
 -- user), so RLS-gating the session lookup is chicken-and-egg. Access
 -- control is at the role-grant boundary below — reverie_app gets DML;
--- reverie_readonly gets SELECT only.
+-- reverie_readonly gets column-scoped SELECT on (id, expiry_date) only,
+-- *not* on the `data` column. The MessagePack-encoded session payload
+-- contains the authenticated user identifier and any OIDC `nonce`
+-- written by `/auth/login`; granting blanket SELECT to the diagnostic
+-- role would let any principal on that connection enumerate live
+-- sessions and decode their payloads. The diagnostic intent is session
+-- counts, which (id, expiry_date) satisfy without exposure.
 
 CREATE SCHEMA IF NOT EXISTS tower_sessions;
 
@@ -35,4 +41,4 @@ CREATE INDEX IF NOT EXISTS session_expiry_date_idx
 -- reverie_readonly can observe session counts for diagnostics.
 GRANT USAGE ON SCHEMA tower_sessions TO reverie_app, reverie_readonly;
 GRANT SELECT, INSERT, UPDATE, DELETE ON tower_sessions.session TO reverie_app;
-GRANT SELECT ON tower_sessions.session TO reverie_readonly;
+GRANT SELECT (id, expiry_date) ON tower_sessions.session TO reverie_readonly;

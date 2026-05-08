@@ -369,4 +369,41 @@ mod tests {
             "session payload (incl. csrf nonce shape) survives intact"
         );
     }
+
+    // PostgresStore must not return records whose expiry has passed.
+    // The contract `SessionStore::load -> Ok(None)` for an expired id is
+    // the load-bearing seam for stale-cookie auth: if it broke, a user
+    // holding an expired session cookie would still resolve to an
+    // authenticated identity. Asserting it explicitly closes the
+    // negative-case gap CR raised on PR #180.
+    #[sqlx::test(migrations = "./migrations")]
+    async fn expired_session_is_not_returned(pool: sqlx::PgPool) {
+        use std::collections::HashMap;
+        use time::OffsetDateTime;
+        use tower_sessions::SessionStore;
+        use tower_sessions::session::{Id, Record};
+        use tower_sessions_sqlx_store::PostgresStore;
+
+        let app_pool = test_support::db::app_pool_for(&pool).await;
+        let store = PostgresStore::new(app_pool.clone());
+
+        let mut record = Record {
+            id: Id::default(),
+            data: HashMap::new(),
+            expiry_date: OffsetDateTime::now_utc() - time::Duration::seconds(1),
+        };
+        store
+            .create(&mut record)
+            .await
+            .expect("create expired session");
+
+        let loaded = store
+            .load(&record.id)
+            .await
+            .expect("load should not error on an expired id");
+        assert!(
+            loaded.is_none(),
+            "expired session must not be returned by load"
+        );
+    }
 }
