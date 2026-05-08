@@ -1,3 +1,17 @@
+//! Reverie's HTTP API server crate (`reverie-api`).
+//!
+//! Binary crate hosting the Axum router that fronts the
+//! Reverie self-hosted ebook library. Owns: configuration loading,
+//! database connection setup, route mounting (`/api`, `/auth`,
+//! `/health`, `/opds`, SPA assets), session + authentication
+//! middleware, response-header policy (CSP / XCTO / Permissions-Policy),
+//! and the `tokio::main` runtime entry. Internals (`auth`, `config`,
+//! `db`, `error`, `models`, `routes`, `security`, `services`, `state`)
+//! are private to this crate; `missing_docs` therefore fires only on
+//! the binary's two `pub` items at the crate root, not on every
+//! internal `pub`. Per-module documentation lives behind the visibility
+//! boundary and is enforced separately as each module graduates under
+//! `adr/2026-05-08-tiered-comment-policy.md`.
 #![cfg_attr(
     test,
     allow(
@@ -7,6 +21,7 @@
         clippy::print_stderr,
     )
 )]
+#![warn(missing_docs)]
 mod auth;
 mod config;
 mod db;
@@ -28,11 +43,29 @@ use crate::auth::backend::AuthBackend;
 use crate::config::Config;
 use crate::state::AppState;
 
+/// Build the production Axum router for the Reverie API.
+///
+/// Wires routes, sessions, authentication, and response-header
+/// middleware around the supplied [`AppState`] and authentication
+/// [`AuthBackend`]. Production builds use an in-memory session store
+/// (see invariant note below); integration tests use
+/// [`build_router_with_session_store`] to inject a shared store.
+///
+/// # Invariants
+///
+/// * Sessions live in process memory: the cookie expires client-side
+///   on inactivity, but the underlying [`MemoryStore`] entry persists
+///   until the process restarts. Acceptable for single-instance
+///   self-hosted deployments; the upgrade path to a Postgres-backed
+///   store is tracked under
+///   [UNK-163](https://linear.app/unkos/issue/UNK-163) and the
+///   coordinated `tower-sessions` 0.14 → 0.15 bump under
+///   [UNK-101](https://linear.app/unkos/issue/UNK-101).
+/// * The composite fallback layered in
+///   [`build_router_with_session_store`] handles unmatched paths with
+///   route-class-aware CSP — see `backend/CLAUDE.md` § "Security
+///   headers (UNK-106)".
 pub fn build_router(state: AppState, auth_backend: AuthBackend) -> Router {
-    // NOTE: MemoryStore does not evict expired sessions server-side — the cookie
-    // expires client-side but the HashMap entry stays until process restart.
-    // Acceptable for single-instance self-hosted deployments; replace with
-    // tower-sessions-sqlx-store if memory growth under sustained use becomes an issue.
     build_router_with_session_store(state, auth_backend, MemoryStore::default())
 }
 
