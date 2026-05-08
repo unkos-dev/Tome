@@ -194,6 +194,9 @@ fn resolve_log_filter(configured_level: &str) -> (EnvFilter, Option<String>) {
 ///   the header on every response);
 /// - frontend dist validation fails when `frontend_dist_path` is set
 ///   (rebuild the frontend with `vite build`);
+/// - the global tracing subscriber cannot be installed (typically because
+///   the host process already installed one — embedders should install
+///   their subscriber before calling `run`);
 /// - any of the primary, ingestion, or writeback DB pools cannot connect;
 /// - OIDC discovery against the configured issuer fails;
 /// - the TCP listener cannot bind to the configured port;
@@ -230,7 +233,14 @@ pub async fn run() -> anyhow::Result<()> {
     }
 
     let (log_filter, log_level_parse_err) = resolve_log_filter(&config.log_level);
-    tracing_subscriber::fmt().with_env_filter(log_filter).init();
+    // try_init rather than init: now that run() is a public library entrypoint,
+    // a host process that has already installed a global tracing subscriber is a
+    // reachable path. init() would panic; try_init returns Err that we surface
+    // through run()'s error contract.
+    tracing_subscriber::fmt()
+        .with_env_filter(log_filter)
+        .try_init()
+        .map_err(|e| anyhow::anyhow!("failed to initialize tracing subscriber: {e}"))?;
     if let Some(err) = log_level_parse_err {
         tracing::warn!(
             error = %err,
