@@ -232,8 +232,9 @@ Open a superseding ADR if any of the following happen:
   the ticket commissioning this ADR
 * Code references:
   * `Dockerfile` — single multi-stage build
-  * `backend/src/main.rs:87` — `routes::spa::router_enabled` mount
-  * `backend/src/main.rs:145` — `frontend_dist_path` startup
+  * `backend/src/lib.rs::build_router_with_session_store` —
+    `routes::spa::router_enabled` mount
+  * `backend/src/lib.rs::run` — `frontend_dist_path` startup
     validation
   * `backend/src/security/headers.rs` — CSP enforcement, including
     `spa_fallback_response`

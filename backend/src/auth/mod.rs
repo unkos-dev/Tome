@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 pub mod backend;
 pub mod basic_only;
 pub mod middleware;

@@ -178,7 +178,7 @@ routes get `default-src 'none'`.
 - Implementation: `backend/src/security/` (`csp.rs` builders,
   `dist_validation.rs` startup check, `headers.rs` middleware + composite
   fallback).
-- Wiring: `backend/src/main.rs` precomputes the CSP strings on
+- Wiring: `backend/src/lib.rs::run` precomputes the CSP strings on
   `SecurityConfig` at startup; `build_router_with_session_store` applies
   per-router `.layer(api_csp_layer)` / `.layer(html_csp_layer)` plus an
   outermost `security_headers` uniform middleware; the single composite
@@ -217,10 +217,11 @@ the differentiation.
 
 ```text
 backend/
-├── Cargo.toml
+├── Cargo.toml           # [lib] reverie_api + [[bin]] reverie-api
 ├── migrations/          # sqlx migrations
 ├── src/
-│   ├── main.rs          # Entrypoint, router assembly, server setup
+│   ├── lib.rs           # Library crate root: modules, build_router, run()
+│   ├── main.rs          # Thin binary entry: #[tokio::main] reverie_api::run()
 │   ├── auth/            # Authentication subsystem
 │   │   ├── backend.rs   # axum-login AuthnBackend (OIDC credentials)
 │   │   ├── basic_only.rs # BasicOnly extractor (OPDS Basic-only auth)

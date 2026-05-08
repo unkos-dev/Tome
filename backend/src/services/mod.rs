@@ -1,5 +1,7 @@
 //! Business logic services.
 
+#![allow(missing_docs)]
+
 pub mod covers;
 pub mod enrichment;
 pub mod epub;

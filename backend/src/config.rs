@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use std::env;
 
 use crate::models::manifestation_format::ManifestationFormat;

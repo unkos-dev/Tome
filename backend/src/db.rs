@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
