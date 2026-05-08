@@ -126,8 +126,8 @@ const MAX_TOKENS_PER_USER: i64 = 10;
 /// # Errors
 ///
 /// - [`CreateError::LimitExceeded`] when the user is at the cap.
-/// - [`CreateError::Db`] for any underlying [`sqlx::Error`] from the
-///   advisory-lock acquire, count query, or insert.
+/// - [`CreateError::Db`] for any underlying [`sqlx::Error`] from transaction
+///   begin/commit, advisory-lock acquire, count query, or insert.
 pub async fn create_with_limit(
     pool: &PgPool,
     user_id: Uuid,

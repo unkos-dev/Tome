@@ -45,10 +45,13 @@ pub enum RematchOutcome {
         /// Surviving work id that absorbed the manifestation.
         to: Uuid,
     },
-    /// A potential duplicate exists but cannot be auto-merged safely
-    /// (other manifestations or manual-source drafts on the current
-    /// work). `manifestations.suspected_duplicate_work_id` has been set
-    /// for operator review.
+    /// A potential duplicate exists but cannot be auto-merged. Two
+    /// conditions produce this outcome: (1) multiple distinct works match
+    /// the ISBN (ambiguous merge target), or (2) exactly one match exists
+    /// but the current work has other manifestations or `manual`-source
+    /// drafts that block safe retirement.
+    /// `manifestations.suspected_duplicate_work_id` has been set for
+    /// operator review.
     Suspected {
         /// Work id of the suspected duplicate.
         matched_work: Uuid,
