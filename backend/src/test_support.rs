@@ -120,12 +120,23 @@ pub fn test_state() -> AppState {
 }
 
 /// Build the full application router with auth layer (for route integration tests).
+///
+/// Uses `MemoryStore` for sessions even though production uses
+/// `PostgresStore` — `test_state` deliberately wires a no-DB pool
+/// (`postgres://invalid` via `connect_lazy`), so a session backend that
+/// touches the pool would 500 every request that issues a session.
+/// Tests that need the live `PostgresStore` wiring use `#[sqlx::test]`
+/// and `build_router_with_session_store` with a real pool.
 pub fn test_server() -> TestServer {
     let state = test_state();
     let auth_backend = AuthBackend {
         pool: state.pool.clone(),
     };
-    let app: Router = crate::build_router(state, auth_backend);
+    let app: Router = crate::build_router_with_session_store(
+        state,
+        auth_backend,
+        tower_sessions::MemoryStore::default(),
+    );
     TestServer::new(app)
 }
 
@@ -245,6 +256,13 @@ pub mod db {
     /// AppState.pool comes from `app_pool` (`reverie_app` — for the route
     /// handlers' `acquire_with_rls`); `AppState.ingestion_pool` comes from
     /// `ingestion_pool` (`reverie_ingestion` — matches the queue + `dry_run`).
+    ///
+    /// This routes through `crate::build_router`, so sessions are backed by
+    /// `PostgresStore` against `app_pool`. The `tower_sessions.session` table
+    /// must therefore exist in the per-test DB — `#[sqlx::test(migrations =
+    /// "./migrations")]` ensures that. Callers needing in-process session
+    /// state (OIDC nonce readback) should build the router via
+    /// `crate::build_router_with_session_store(..., MemoryStore)` instead.
     pub fn server_with_real_pools(
         app_pool: &PgPool,
         ingestion_pool: &PgPool,

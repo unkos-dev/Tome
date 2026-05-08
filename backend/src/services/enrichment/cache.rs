@@ -34,7 +34,7 @@ pub struct CachedResponse {
     pub fetched_at: OffsetDateTime,
 }
 
-/// Per-kind TTL configuration passed to [`write`].
+/// Per-kind TTL configuration passed to [`write()`].
 pub struct CacheTtls {
     pub hit: time::Duration,
     pub miss: time::Duration,

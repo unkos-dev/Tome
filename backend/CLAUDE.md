@@ -14,6 +14,15 @@ Port 5433 (5432 is taken by the host's shared-postgres).
 | `reverie_ingestion` | `postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev` | Background pipeline. Scoped RLS. |
 | `reverie_readonly` | `postgres://reverie_readonly:reverie_readonly@localhost:5433/reverie_dev` | Debug/reporting. SELECT only. |
 
+The `tower_sessions` schema (created by migration
+`20260507000001_tower_sessions_postgres_store`) is RLS-exempt — sessions
+rows are not user-scoped in the same way as application data. The
+session id (a cryptographically random `tower_sessions::session::Id`)
+is the bootstrap that resolves the user, so RLS-gating the lookup is
+chicken-and-egg. Access is controlled at the role-grant boundary:
+`reverie_app` gets DML, `reverie_readonly` gets SELECT, `reverie_ingestion`
+gets nothing.
+
 Run migrations as the schema owner:
 `DATABASE_URL=postgres://reverie:reverie@localhost:5433/reverie_dev sqlx migrate run`
 
@@ -175,9 +184,9 @@ routes get `default-src 'none'`.
   outermost `security_headers` uniform middleware; the single composite
   `.fallback(composite_fallback)` manually attaches CSP to unmatched paths.
   `build_router` is a thin wrapper that calls
-  `build_router_with_session_store` with `MemoryStore::default()` for
-  production; tests pass their own store to share session state with the
-  harness (see Testing in `## Conventions`).
+  `build_router_with_session_store` with `PostgresStore` (backed by
+  `state.pool`) for production; tests pass their own `MemoryStore` to
+  share session state with the harness (see Testing in `## Conventions`).
 - Operator surface: `docs/security/content-security-policy.md`.
 - Tests: `backend/src/security/**/tests` are co-located; integration tests
   in `security::headers::tests` use `test_server_with_security()` to inject

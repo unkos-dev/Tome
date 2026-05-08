@@ -36,6 +36,14 @@ tokio = { version = "1.52.2", features = ["full"] }
 tokio-util = "0.7.18"
 tower-http = { version = "0.6.8", features = ["cors", "fs", "trace"] }
 tower-sessions = "0.14"
+# Despite the version-number divergence, tower-sessions-sqlx-store 0.15
+# is what pairs with tower-sessions 0.14 — both depend on
+# tower-sessions-core 0.14. The 0.14.x line of tower-sessions-sqlx-store
+# pins tower-sessions-core 0.13 and is compile-incompatible with
+# tower-sessions 0.14. Coordinated bump required when tower-sessions
+# advances to 0.15. ADR: adr/2026-05-08-tower-sessions-sqlx-store.md.
+# UNK-101 tracks the eventual coordinated bump (blocked on axum-login#320).
+tower-sessions-sqlx-store = { version = "0.15.0", features = ["postgres"] }
 tracing = "0.1.44"
 tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
 url = "2.5.8"

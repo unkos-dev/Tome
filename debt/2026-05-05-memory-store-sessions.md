@@ -1,13 +1,13 @@
 ---
-status: active
+status: lifted
 severity: medium
 surfaces: [server-operator, end-user, developer]
 adopted: 2026-05-05
 adopted-because: tower-sessions-sqlx-store not wired when scaffold first introduced session middleware; recognised as debt 2026-05-05
 lift-when-class: internal-refactor
 lift-when: UNK-163 (PostgresStore swap) merged to main
-lifted: ~
-superseded-by: ~
+lifted: 2026-05-07
+superseded-by: PR #180 (UNK-163)
 ---
 
 # MemoryStore for production sessions

@@ -24,7 +24,7 @@ fn normalise(raw: &str) -> String {
         .to_ascii_uppercase()
 }
 
-/// Validate ISBN-10 checksum: sum of digit[i] * (10 - i) for i=0..10, mod 11 == 0.
+/// Validate ISBN-10 checksum: sum of digit\[i\] * (10 - i) for i=0..10, mod 11 == 0.
 /// Check digit may be 'X' (value 10).
 pub fn validate_isbn10(isbn: &str) -> bool {
     let isbn = normalise(isbn);
