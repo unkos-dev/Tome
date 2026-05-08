@@ -141,3 +141,57 @@ pub async fn init_oidc_client(config: &Config) -> Result<OidcClient> {
 pub fn exchange_http_client() -> Result<openidconnect::reqwest::Client> {
     http_client()
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    fn config_with_overrides(overrides: &[(&str, &str)]) -> Config {
+        let base: &[(&str, &str)] = &[
+            ("DATABASE_URL", "postgres://test@localhost/reverie_dev"),
+            ("OIDC_ISSUER_URL", "https://auth.example.com"),
+            ("OIDC_CLIENT_ID", "test"),
+            ("OIDC_CLIENT_SECRET", "secret"),
+            ("OIDC_REDIRECT_URI", "http://localhost:3000/auth/callback"),
+            ("REVERIE_OPDS_ENABLED", "false"),
+        ];
+        let mut vars: HashMap<String, String> = base
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect();
+        for (k, v) in overrides {
+            vars.insert((*k).to_string(), (*v).to_string());
+        }
+        Config::from_source(&|k| vars.get(k).cloned()).expect("test Config must build")
+    }
+
+    /// Regression test for the fail-fast validation order: a malformed
+    /// `OIDC_REDIRECT_URI` must surface before any discovery network call is
+    /// attempted. The issuer URL is set to `http://127.0.0.1:1` (a closed
+    /// port) so a regression of the validation ordering would surface as
+    /// `OIDC discovery failed: ...` (connection refused) rather than the
+    /// `invalid OIDC_REDIRECT_URI` we expect.
+    #[tokio::test]
+    async fn init_oidc_client_fails_fast_on_invalid_redirect_uri() {
+        let config = config_with_overrides(&[
+            ("OIDC_ISSUER_URL", "http://127.0.0.1:1"),
+            ("OIDC_REDIRECT_URI", "not-a-valid-url"),
+        ]);
+
+        let err = init_oidc_client(&config)
+            .await
+            .expect_err("malformed redirect URI must produce an error");
+        let msg = err.to_string();
+
+        assert!(
+            msg.contains("OIDC_REDIRECT_URI"),
+            "expected fail-fast on redirect URI parse before discovery; got: {msg}"
+        );
+        assert!(
+            !msg.contains("OIDC discovery failed"),
+            "redirect URI must be validated before discovery network call; got: {msg}"
+        );
+    }
+}
