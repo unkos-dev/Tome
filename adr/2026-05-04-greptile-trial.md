@@ -186,6 +186,92 @@ Decision recorded as a follow-up ADR (`accepted` / `superseded`).
 
 ## Amendments
 
+### 2026-05-08 — Label gate dropped after cap-lift
+
+Greptile support (Muzz Khan) confirmed via email 2026-05-08 06:41
+AWST that the per-author 50-review cap has been lifted on the
+`junkovich` account. The dashboard "11 days left in your free
+trial!" countdown remains visible but is decorative — the OSS
+discount applied 2026-05-04 is the live entitlement; the trial
+countdown UI is residue, not state.
+
+The 2026-05-07 amendment adopted `labels: ["greptile-review"]` as
+the fix-now lever for the cap. With the cap lifted, the label
+gate becomes friction without a quota justification — every PR
+now needs a manual click before Greptile sees it, including the
+logic-heavy PRs that were the trial's actual signal target. The
+gate is dropped.
+
+`triggerOnUpdates: false` stays. The 2026-05-07 quota math
+(conservative variant: -62% vs. original auto-on-every-push)
+identified push-iteration as the dominant burn driver, not
+PR-open. Even on a lifted cap, re-review on every push still
+inflates the per-PR review count without per-push signal gain
+worth the inflation — the maintainer's iteration commits
+typically address known feedback rather than introduce new
+diff-shape that benefits from a fresh AI pass. The `@greptileai`
+manual-mention flow described in the 2026-05-07 amendment remains
+available for the rare case a confidence-score update is wanted
+mid-PR.
+
+#### `greptile.json` change
+
+Removed:
+
+```json
+"labels": ["greptile-review"]
+```
+
+Unchanged:
+
+```json
+"triggerOnUpdates": false
+```
+
+#### Quota math under the dropped-label model
+
+Replayed against the same 10 reverie PRs from the 2026-05-07
+table:
+
+| Variant | Reviews | vs original (26) | vs label-gate (10) |
+|---|---|---|---|
+| Auto-on-PR-open, no push re-review (now) | 10 | -62% | 0 |
+| Auto-on-PR-open + `@greptileai` re-review (per PR) | 20 | -23% | +100% |
+| Original auto-on-every-push (rejected) | 26 | 0 | +160% |
+
+Dropping the label gate alone does not change the conservative
+per-PR review count vs. the label-gate model — both are 10
+reviews / 10 PRs. What changes is *which* PRs Greptile sees: the
+label-gate model excluded the doc-only / chore class entirely
+(8/10 in the skip-doc-only variant); the new model includes them.
+On a lifted cap, including the doc-only class is the right call
+— Greptile silence on a doc PR is itself trial-relevant signal
+(does the AI reviewer correctly stay quiet on no-logic diffs?),
+which the label gate suppressed.
+
+#### What stays unchanged
+
+* Strictness, commentTypes, customContext, ignorePatterns, all
+  customRules — unchanged
+* Author exclusion for `renovate(bot)` and `dependabot[bot]` —
+  unchanged (separate per-bot quotas; never depleted maintainer
+  quota)
+* Trial gate metric (≥30% actionable) and gate decision matrix —
+  unchanged. The CodeRabbit parallel trial (2026-05-21 gate)
+  is also unchanged
+* `triggerOnUpdates: false` — retained as a noise control, not a
+  quota control
+
+#### What to watch
+
+* Per-author review counter on the Greptile dashboard. If a
+  cap-style notice reappears post-lift, the cap-lift was
+  scoped (e.g. one-time reset) rather than a permanent OSS
+  entitlement — escalate back to support
+* Actionable-rate metric. Including doc-only PRs in the trial
+  pool may dilute the rate if Greptile flags non-issues on them.
+  Tally each doc-PR review explicitly against the gate metric
+
 ### 2026-05-07 — Label-gated trigger + manual confidence-update flow (PR #171)
 
 The original Trigger Model section in this ADR specified "Auto on

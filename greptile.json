@@ -2,7 +2,6 @@
   "strictness": 1,
   "commentTypes": ["logic", "syntax", "style", "info"],
   "triggerOnUpdates": false,
-  "labels": ["greptile-review"],
   "ignorePatterns": [
     "**/package-lock.json",
     "**/Cargo.lock"
