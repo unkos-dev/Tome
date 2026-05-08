@@ -14,16 +14,27 @@
 //! - JSON: lowercase string —
 //!   `"pending"` | `"in_progress"` | `"complete"` | `"failed"` | `"skipped"`.
 
+/// Lifecycle state of metadata enrichment for a single manifestation.
+///
+/// Wire-format invariant: variants serialise to the `snake_case` forms
+/// declared in the `#[serde]` and `#[sqlx]` attributes. Drift from
+/// either side surfaces as a decode error at the boundary, never as a
+/// silently coerced unknown value.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, sqlx::Type,
 )]
 #[serde(rename_all = "snake_case")]
 #[sqlx(type_name = "enrichment_status", rename_all = "snake_case")]
 pub enum EnrichmentStatus {
+    /// Enqueued; no enrichment attempted yet.
     Pending,
+    /// Worker picked up the row and is running.
     InProgress,
+    /// Enrichment finished successfully.
     Complete,
+    /// Enrichment failed; the row records the failure but is not retried automatically.
     Failed,
+    /// Manifestation deliberately bypassed enrichment (e.g. operator override).
     Skipped,
 }
 

@@ -1,20 +1,48 @@
+//! Per-user device tokens used by OPDS / mobile-client Basic-auth flows.
+//!
+//! Token verification is implemented in [`crate::auth::token`]; this
+//! module owns the row shape, lifecycle queries (create/list/revoke),
+//! the per-user cap, and the SQL-side debounce on `last_used_at`.
+
 use serde::Serialize;
 use sqlx::PgPool;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+/// A single device-token row. The `token_hash` field is `#[serde(skip)]`
+/// so JSON responses never leak the stored hash; verification uses
+/// [`crate::auth::token::verify_device_token`] with the hash kept inside
+/// this struct.
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct DeviceToken {
+    /// Primary key.
     pub id: Uuid,
+    /// Owning [`crate::models::user::User`].
     pub user_id: Uuid,
+    /// User-supplied label (e.g. "My Kindle").
     pub name: String,
+    /// SHA-256 of the issued token. Never the plaintext.
     #[serde(skip)]
     pub token_hash: String,
+    /// `now()` of the last successful auth, written by
+    /// [`update_last_used`]; `None` if the token has never been used.
     pub last_used_at: Option<OffsetDateTime>,
+    /// Row insert timestamp.
     pub created_at: OffsetDateTime,
+    /// `now()` of revocation; `None` while the token is active.
+    /// [`list_for_user`] filters on `revoked_at IS NULL`.
     pub revoked_at: Option<OffsetDateTime>,
 }
 
+/// Test-only token insert without the per-user cap.
+///
+/// Production callers must use [`create_with_limit`]. This helper exists
+/// so individual lifecycle tests can pre-populate rows without paying
+/// the advisory-lock and count-query cost on every insert.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the underlying `INSERT … RETURNING`.
 #[cfg(test)]
 pub async fn create(
     pool: &PgPool,
@@ -36,6 +64,10 @@ pub async fn create(
 }
 
 /// List active (non-revoked) tokens for a user.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the underlying `SELECT`.
 pub async fn list_for_user(pool: &PgPool, user_id: Uuid) -> Result<Vec<DeviceToken>, sqlx::Error> {
     sqlx::query_as!(
         DeviceToken,
@@ -50,6 +82,14 @@ pub async fn list_for_user(pool: &PgPool, user_id: Uuid) -> Result<Vec<DeviceTok
 }
 
 /// Revoke a token. Scoped to `user_id` to prevent cross-user revocation.
+///
+/// Returns `true` when the row was newly revoked, `false` when no
+/// matching active row existed (already revoked, wrong owner, or
+/// unknown id).
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the underlying `UPDATE`.
 pub async fn revoke(pool: &PgPool, id: Uuid, user_id: Uuid) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
         "UPDATE device_tokens SET revoked_at = now() \
@@ -62,16 +102,32 @@ pub async fn revoke(pool: &PgPool, id: Uuid, user_id: Uuid) -> Result<bool, sqlx
     Ok(result.rows_affected() > 0)
 }
 
+/// Failure modes of [`create_with_limit`].
 #[derive(Debug)]
 pub enum CreateError {
+    /// User already holds `MAX_TOKENS_PER_USER` active (non-revoked)
+    /// tokens. Caller must instruct the user to revoke an existing
+    /// token before issuing a new one.
     LimitExceeded,
+    /// Underlying database error during the transaction.
     Db(sqlx::Error),
 }
 
-/// Atomically check the active token count and insert if under the limit.
-/// Uses a transaction with SELECT FOR UPDATE to prevent TOCTOU races.
 const MAX_TOKENS_PER_USER: i64 = 10;
 
+/// Atomically issue a new device token, refusing if the user is already
+/// at `MAX_TOKENS_PER_USER` active tokens.
+///
+/// A per-user `pg_advisory_xact_lock` serializes concurrent calls so the
+/// count-then-insert sequence cannot race past the cap; see the
+/// implementation comment for why `SELECT … FOR UPDATE` on the
+/// active-token rows is insufficient when the count is zero.
+///
+/// # Errors
+///
+/// - [`CreateError::LimitExceeded`] when the user is at the cap.
+/// - [`CreateError::Db`] for any underlying [`sqlx::Error`] from transaction
+///   begin/commit, advisory-lock acquire, count query, or insert.
 pub async fn create_with_limit(
     pool: &PgPool,
     user_id: Uuid,
@@ -129,6 +185,10 @@ pub async fn create_with_limit(
 /// per 5 minutes. The WHERE predicate turns every call into a no-op when a
 /// previous update landed within the window — single source of truth, atomic
 /// under concurrent requests, no Rust-side policy to unit-test.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the underlying `UPDATE`.
 pub async fn update_last_used(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query!(
         "UPDATE device_tokens SET last_used_at = now() \

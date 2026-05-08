@@ -20,17 +20,29 @@
 use std::fmt;
 use std::str::FromStr;
 
+/// Canonical file format of a manifestation.
+///
+/// Closed set shared by the Postgres `manifestation_format` `ENUM`, the
+/// `REVERIE_FORMAT_PRIORITY` env-var parser, and download-path content
+/// negotiation. Extending the set requires both a Rust variant and a
+/// matching `ALTER TYPE … ADD VALUE` migration.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, sqlx::Type,
 )]
 #[serde(rename_all = "lowercase")]
 #[sqlx(type_name = "manifestation_format", rename_all = "lowercase")]
 pub enum ManifestationFormat {
+    /// EPUB 2 / 3 reflowable e-book.
     Epub,
+    /// Portable Document Format.
     Pdf,
+    /// Mobipocket / older Kindle format.
     Mobi,
+    /// Amazon Kindle Format 8 (`.azw3`).
     Azw3,
+    /// Comic Book ZIP archive.
     Cbz,
+    /// Comic Book RAR archive.
     Cbr,
 }
 
@@ -56,6 +68,10 @@ impl fmt::Display for ManifestationFormat {
     }
 }
 
+/// Error returned by [`ManifestationFormat`]'s [`std::str::FromStr`] impl
+/// when the input does not match a known wire string. The wrapped value
+/// is the offending input, surfaced through the [`std::error::Error`]
+/// `Display` for user-facing diagnostics.
 #[derive(Debug, thiserror::Error)]
 #[error("unsupported manifestation_format '{0}'")]
 pub struct ParseManifestationFormatError(String);

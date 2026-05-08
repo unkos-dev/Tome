@@ -1,20 +1,46 @@
+//! Per-file ingestion jobs produced by the import pipeline.
+//!
+//! Each job is one file's path through the
+//! `queued → running → (complete | skipped | failed)` lifecycle. Jobs
+//! are grouped by `batch_id` so the operator-facing status surface
+//! ([`crate::models::ingestion_job::find_by_batch`]) can show progress
+//! for a whole import run.
+//!
+//! `status` is currently a free-form `TEXT` column; tightening it to a
+//! Postgres `ENUM` is tracked separately and would mirror the pattern
+//! used by [`crate::models::ingestion_status::IngestionStatus`].
+
 use serde::Serialize;
 use sqlx::PgPool;
 use time::OffsetDateTime;
 use uuid::Uuid;
 
+/// A single file's ingestion lifecycle row.
 #[derive(Debug, Clone, sqlx::FromRow, Serialize)]
 pub struct IngestionJob {
+    /// Primary key.
     pub id: Uuid,
+    /// Identifier shared by every job in the same import batch.
     pub batch_id: Uuid,
+    /// Filesystem path of the source file at ingestion time.
     pub source_path: String,
+    /// Lifecycle state; one of `queued | running | complete | skipped | failed`.
     pub status: String,
+    /// Human-readable failure cause set by [`mark_failed`]; `None` otherwise.
     pub error_message: Option<String>,
+    /// `now()` of the `queued → running` transition; `None` while still queued.
     pub started_at: Option<OffsetDateTime>,
+    /// `now()` of the terminal-state transition; `None` while not yet finished.
     pub completed_at: Option<OffsetDateTime>,
+    /// Row insert timestamp.
     pub created_at: OffsetDateTime,
 }
 
+/// Insert a fresh `queued` job for `source_path` under `batch_id`.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the underlying `INSERT`.
 pub async fn create(
     pool: &PgPool,
     batch_id: Uuid,
@@ -33,6 +59,11 @@ pub async fn create(
     .await
 }
 
+/// Transition a job to `running` and stamp `started_at = now()`.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the underlying `UPDATE`.
 pub async fn mark_running(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query!(
         "UPDATE ingestion_jobs SET status = 'running', started_at = now() \
@@ -44,6 +75,11 @@ pub async fn mark_running(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+/// Mark a job `complete` and stamp `completed_at = now()`.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the underlying `UPDATE`.
 pub async fn mark_complete(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query!(
         "UPDATE ingestion_jobs SET status = 'complete', completed_at = now() \
@@ -55,6 +91,12 @@ pub async fn mark_complete(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+/// Mark a job `skipped` (e.g. duplicate-hash, unsupported format) and
+/// stamp `completed_at = now()`. Skipped is a terminal non-failure state.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the underlying `UPDATE`.
 pub async fn mark_skipped(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     sqlx::query!(
         "UPDATE ingestion_jobs SET status = 'skipped', completed_at = now() \
@@ -66,6 +108,11 @@ pub async fn mark_skipped(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
+/// Mark a job `failed` with `error_message` and stamp `completed_at = now()`.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the underlying `UPDATE`.
 pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result<(), sqlx::Error> {
     sqlx::query!(
         "UPDATE ingestion_jobs SET status = 'failed', error_message = $2, \
@@ -78,6 +125,12 @@ pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result
     Ok(())
 }
 
+/// All jobs in a given batch, ordered by `created_at` so the surface
+/// renders deterministically.
+///
+/// # Errors
+///
+/// Returns [`sqlx::Error`] from the underlying `SELECT`.
 #[allow(dead_code)] // Used by ingestion status API in Step 10
 pub async fn find_by_batch(
     pool: &PgPool,
