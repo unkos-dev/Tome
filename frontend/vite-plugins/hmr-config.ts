@@ -3,7 +3,15 @@
 // the bundle Vite serves on 5173), the browser must reconnect HMR via
 // the proxy port — otherwise it tries `wss://<host>:5173/` and the
 // tunnel does not forward it. REVERIE_DEV_HMR_CLIENT_PORT carries that
-// override; unset = localhost-style same-port reconnect.
+/**
+ * Parse the REVERIE_DEV_HMR_CLIENT_PORT environment value into a Vite HMR client port configuration.
+ *
+ * If `envValue` is `undefined` or blank, the function treats the setting as unset and returns an empty object.
+ *
+ * @param envValue - The raw value of `REVERIE_DEV_HMR_CLIENT_PORT` (may be `undefined` or whitespace)
+ * @returns An object containing `hmr.clientPort` when `envValue` is a valid port; otherwise an empty object
+ * @throws Error if `envValue` cannot be parsed to an integer in the range 1..=65535. The error message includes the original value JSON-encoded.
+ */
 
 export function parseHmrConfig(
   envValue: string | undefined,
