@@ -27,11 +27,6 @@ use axum::response::{IntoResponse, Response};
 /// dedicated variants ([`Self::NotFound`], [`Self::Validation`]) so the
 /// HTTP mapping is explicit at the call site rather than buried inside an
 /// `anyhow` chain.
-///
-/// Marked `#[non_exhaustive]` is intentionally **not** applied — the type
-/// is crate-internal (the `reverie_api` library exposes it for embedders
-/// but downstream `match`-on-error is not a supported integration mode);
-/// adding a variant requires updating every handler regardless.
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
     /// Resource not found. Maps to HTTP 404 with body `{"error":"not found"}`.
@@ -58,8 +53,9 @@ pub enum AppError {
     #[error("forbidden")]
     Forbidden,
     /// Request validation failed (malformed input, business-rule
-    /// violation). Maps to HTTP 422; the inner string is included in the
-    /// response body verbatim, so callers should keep it free of
+    /// violation). Maps to HTTP 422; the inner string is emitted as
+    /// the `error` value in the JSON body
+    /// (`{"error":"<message>"}`), so callers should keep it free of
     /// sensitive context.
     #[error("validation error: {0}")]
     Validation(String),

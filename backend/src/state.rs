@@ -1,12 +1,14 @@
 //! Process-wide state shared across handlers, middleware, and background
 //! workers.
 //!
-//! [`AppState`] is `Clone` (each field is itself cheaply-cloneable: pools are
-//! `Arc`-backed; [`Config`] is owned data; [`OidcClient`] is an
-//! `Arc`-wrapped metadata bundle). It is built once during
-//! [`crate::run`] and threaded through Axum's `with_state`, the auth/session
-//! layers, the ingestion watcher, the enrichment queue, and (read-only) the
-//! writeback worker.
+//! [`AppState`] is `Clone`. Each field is cheaply cloneable: `PgPool`
+//! is `Arc`-backed internally; [`Config`] is owned data (`Clone`-derived,
+//! mostly `String` / `Vec` / nested config structs); [`OidcClient`] is
+//! the `openidconnect::Client` alias from [`crate::auth::oidc`] —
+//! a concrete type whose `Clone` is what `openidconnect` provides.
+//! It is built once during [`crate::run`] and threaded through Axum's
+//! `with_state`, the auth/session layers, the ingestion watcher, the
+//! enrichment queue, and (read-only) the writeback worker.
 
 use sqlx::PgPool;
 
@@ -31,7 +33,8 @@ pub struct AppState {
     /// state is constructed).
     pub config: Config,
     /// Pre-discovered OIDC client (issuer metadata + JWKS) for the
-    /// login and callback routes. Discovery happens once at startup;
-    /// reuse across requests is cheap.
+    /// login and callback routes. Discovery happens once at startup
+    /// in [`crate::auth::oidc::init_oidc_client`]; clones are cheap
+    /// (the underlying `openidconnect::Client` derives `Clone`).
     pub oidc_client: OidcClient,
 }

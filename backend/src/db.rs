@@ -52,9 +52,13 @@ pub async fn init_pool(database_url: &str, max_connections: u32) -> Result<PgPoo
 ///
 /// # Errors
 ///
-/// Returns the underlying `sqlx::Error` when the pool cannot be opened or
-/// when the per-connection `set_config` fails (typically a permissions or
-/// schema-mismatch error against the target database).
+/// Returns the underlying `sqlx::Error` when the pool cannot be opened
+/// (DSN parse, TLS handshake, authentication, connection refused) or
+/// when the per-connection
+/// `SELECT set_config('app.system_context', 'writeback', false)` call
+/// fails during the after-connect handshake — typically a transport-
+/// level error, since `set_config` is a Postgres builtin requiring
+/// no schema objects or elevated permissions.
 pub async fn init_writeback_pool(
     database_url: &str,
     max_connections: u32,

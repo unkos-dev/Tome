@@ -10,9 +10,11 @@
 //! [`SecurityConfig`] is a partial value after `from_env` — the
 //! `csp_html_header` / `csp_api_header` fields stay `None` until
 //! [`crate::run`] precomputes them from the FOUC-script hash and the
-//! configured report endpoint. Rendering a request before that
-//! finalisation pass would silently emit no `Content-Security-Policy`;
-//! `run` panics rather than letting that happen.
+//! configured report endpoint. Responses emit no
+//! `Content-Security-Policy` header while those fields remain `None`
+//! (see the `if let Some(v)` guards in [`crate::security::headers`]),
+//! so embedders bypassing `run` must perform the finalisation pass
+//! themselves via [`crate::security::csp`].
 
 use std::env;
 
@@ -47,17 +49,23 @@ pub struct Config {
     /// Failed-ingestion quarantine directory
     /// (`REVERIE_QUARANTINE_PATH`, default `./quarantine`).
     pub quarantine_path: String,
-    /// `RUST_LOG`-style filter directive used as the fallback when
-    /// `RUST_LOG` itself is unset or unparseable
-    /// (`RUST_LOG`, default `info`).
+    /// Fallback log-filter directive, used when `RUST_LOG` is unset
+    /// or unparseable; mirrors `RUST_LOG` when it is set
+    /// (`RUST_LOG`, default `info`). The actual subscriber filter
+    /// is resolved by [`tracing_subscriber::EnvFilter::try_from_default_env`]
+    /// inside [`crate::run`], which re-reads `RUST_LOG` and falls
+    /// back to this field on miss.
     pub log_level: String,
     /// Per-pool connection cap (`REVERIE_DB_MAX_CONNECTIONS`, default
     /// `10`); applied identically to the primary, ingestion, and
     /// writeback pools.
     pub db_max_connections: u32,
     /// OIDC issuer URL (`OIDC_ISSUER_URL`, required) — the trust seam
-    /// for the entire authentication subsystem; TLS validation against
-    /// system roots is the boundary control.
+    /// for the entire authentication subsystem. The boundary control
+    /// is `reqwest`'s TLS validation against the bundled
+    /// webpki/Mozilla root store (`reqwest` is built with the
+    /// `rustls` feature, which uses `webpki-roots`, not OS system
+    /// roots).
     pub oidc_issuer_url: String,
     /// OIDC client id (`OIDC_CLIENT_ID`, required).
     pub oidc_client_id: String,
