@@ -201,6 +201,10 @@ fn resolve_log_filter(configured_level: &str) -> (EnvFilter, Option<String>) {
 /// - OIDC discovery against the configured issuer fails;
 /// - the TCP listener cannot bind to the configured port;
 /// - `axum::serve` returns an error during the serving loop.
+#[allow(
+    clippy::too_many_lines,
+    reason = "Phase 0 of the comment-policy rollout (UNK-191) is structural-only: this body was verbatim moved from the pre-split `main.rs` and lightly extended (3 lines for try_init error propagation + the `# Errors` docstring section). UNK-193 (typed `StartupError`) will reshape startup error handling and is the natural place to extract phase helpers (`setup_tracing`, `init_csp_headers`, `spawn_workers`)."
+)]
 pub async fn run() -> anyhow::Result<()> {
     let mut config =
         Config::from_env().map_err(|e| anyhow::anyhow!("invalid configuration: {e}"))?;
