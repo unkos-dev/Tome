@@ -68,7 +68,7 @@ services:
     restart: unless-stopped
 
   reverie:
-    image: ghcr.io/unkos-dev/reverie:${REVERIE_VERSION}
+    image: ghcr.io/unkos-dev/reverie:${REVERIE_VERSION:?required}
     env_file:
       - path: .env
         required: true
