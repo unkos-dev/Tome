@@ -109,6 +109,111 @@ Release PR:
 
 ---
 
+## Comment Policy (Tiered)
+
+Reverie ships open-source under a self-hosting positioning. Code is read by
+external contributors, security auditors, and operators inspecting
+deployments — not just the maintainer. The comment policy explicitly tiers
+by audience. The global `~/.claude/CLAUDE.md` "default to no comments" rule
+was tuned for solo-dev / shared-team contexts; this section amends it for
+the OSS-product context. See [`adr/2026-05-08-tiered-comment-policy.md`](adr/2026-05-08-tiered-comment-policy.md)
+for full rationale and alternatives.
+
+### Tier 1 — Public API (`pub` items at module boundaries)
+
+Every `pub fn`, `pub struct`, `pub enum`, `pub trait`, and `pub const`
+exposed at a module boundary carries a `///` Rust doc comment (or JSDoc on
+TypeScript exports). Module tops carry `//!` (Rust) or a file-header
+docblock (TypeScript) stating purpose, invariants, and load-bearing
+constraints.
+
+Required content:
+
+- **Purpose** in one sentence.
+- **Invariants** — what callers must uphold; what this guarantees.
+- **Non-obvious WHY** — the constraint, decision, or context that motivated
+  the shape, where applicable.
+- **`# Errors`** section for `pub fn` returning `Result<…>`
+  (`clippy::missing_errors_doc` enforces).
+- **`# Panics`** section for `pub fn` that may panic
+  (`clippy::missing_panics_doc`).
+- **`# Safety`** section for `pub unsafe fn`
+  (`clippy::missing_safety_doc`); aligns with the project `// SAFETY:` rule.
+
+Anti-patterns (skip the docstring entirely if the only thing to say is one
+of these):
+
+- **Pure signature restatement.** "Returns the user by id" on
+  `pub fn user_by_id(id: UserId) -> Option<User>`.
+- **Clipping or replacing existing leading comments.** New docstring goes
+  *above* existing WHY-comment blocks, never in or below them. Existing
+  comments preserved verbatim.
+- **Generic boilerplate.** "@param x The x parameter" / "/// Constructor".
+
+### Tier 2 — Security-critical code
+
+Code under `backend/src/auth/`, `backend/src/security/`, and any function
+handling credentials, sessions, OIDC flow, role assertions, RLS context,
+secret material, or response-header policy carries explicit threat-model
+annotations beyond the standard Tier 1 docstring:
+
+- **`// THREAT:`** comments inline within function bodies for non-obvious
+  mitigations. Format: state the attack vector being closed, the
+  pre-existing protection (if any), and the additional invariant added.
+- **One-line threat statement near the top of Tier 1 docstrings** on
+  security boundary functions (e.g., "Constant-time comparison;
+  non-constant-time would expose token prefix via timing side-channel.").
+- **Reference relevant ADRs** by relative path when the decision providing
+  context lives in `adr/`.
+
+### Tier 3 — Internal non-public items
+
+Private fns, private structs, private modules: no docstring required. The
+original "default to no comments" rule applies in full to this tier — only
+add a comment when the WHY is non-obvious, when there's a hidden
+constraint, or when the code would surprise a future reader.
+
+### Tier 4 — Tests and test support
+
+`#[test]` / `#[sqlx::test]` / Vitest / Playwright test functions do not
+carry docstrings. The test name is the spec.
+
+`test_support/` modules carry `//!` module-top docs where the helper's
+purpose is non-obvious; helper functions stay bare unless they encode a
+WHY future readers would not infer.
+
+### Enforcement
+
+Phased — see Linear (TBD) for the phased rollout issue.
+
+1. `cargo doc -- -D rustdoc::broken_intra_doc_links` in CI (gate on
+   broken cross-refs; no comment-policy dependency).
+2. `#![warn(missing_docs)]` at backend crate root, with per-module
+   `#[allow(missing_docs)]` for not-yet-documented modules.
+3. Modules graduate to `#[deny(missing_docs)]` as documented; ordered
+   auth → security → models → routes → services.
+4. clippy pedantic lints `missing_errors_doc` / `missing_panics_doc` /
+   `missing_safety_doc` already active per
+   `adr/2026-05-03-strict-lint-policy.md`; Tier 1 docstrings include
+   these sections where applicable.
+5. Frontend mirror: `eslint-plugin-jsdoc` with `require-description` on
+   public exports.
+
+### Authoring
+
+Initial backfill: agent-driven authoring (haiku / sonnet subagents per
+module). Subagents read this section + the ADR, author docstrings under
+the tiered policy, return per-module diffs for maintainer review.
+
+CodeRabbit's `finishing_touches.docstrings` is **not** the primary
+mechanism for the initial backfill (PR #178 evidence: clipped an existing
+WHY-comment mid-sentence). May be used ad-hoc on individual PRs in the
+long run, configured via `.coderabbit.yaml` `path_instructions` to encode
+this policy; generated content is reviewed and edited by the maintainer
+before landing.
+
+---
+
 ## Project Structure
 
 - `backend/` — Rust + Axum API server. See `backend/CLAUDE.md` for Rust-specific rules.
