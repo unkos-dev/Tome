@@ -46,4 +46,16 @@ describe("parseHmrConfig", () => {
   it("rejects floats", () => {
     expect(() => parseHmrConfig("443.5")).toThrow(/integer/);
   });
+
+  it("rejects scientific notation", () => {
+    expect(() => parseHmrConfig("1e3")).toThrow(/integer/);
+  });
+
+  it("rejects hex notation", () => {
+    expect(() => parseHmrConfig("0x1bb")).toThrow(/integer/);
+  });
+
+  it("rejects signed values", () => {
+    expect(() => parseHmrConfig("+443")).toThrow(/integer/);
+  });
 });

@@ -17,11 +17,12 @@ export function parseHmrConfig(
   envValue: string | undefined,
 ): { hmr?: { clientPort: number } } {
   if (envValue === undefined || envValue.trim().length === 0) return {};
-  const port = Number(envValue);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    throw new Error(
-      `REVERIE_DEV_HMR_CLIENT_PORT must be an integer in 1..=65535, got ${JSON.stringify(envValue)}`,
-    );
-  }
+  const trimmed = envValue.trim();
+  const invalid = new Error(
+    `REVERIE_DEV_HMR_CLIENT_PORT must be an integer in 1..=65535, got ${JSON.stringify(envValue)}`,
+  );
+  if (!/^\d+$/.test(trimmed)) throw invalid;
+  const port = Number(trimmed);
+  if (port < 1 || port > 65535) throw invalid;
   return { hmr: { clientPort: port } };
 }
