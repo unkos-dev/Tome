@@ -63,10 +63,15 @@ pub enum DistValidationError {
         path: String,
     },
 
-    /// `csp-hashes.json` exists but cannot be read (permissions, I/O).
+    /// I/O failure reading either the dist directory metadata or the
+    /// `csp-hashes.json` sidecar (permissions, transient I/O). Returned
+    /// for any non-`NotFound` error from `fs::metadata` on the dist
+    /// directory and for any `fs::read` failure on the sidecar file.
     #[error("csp-hashes.json: unable to read {path}: {source}")]
     SidecarRead {
-        /// Display form of the sidecar path that failed to read.
+        /// Display form of the path that failed to read — the sidecar
+        /// path for sidecar I/O failures, or the dist directory path
+        /// when the directory itself was unreadable.
         path: String,
         /// Underlying I/O error.
         #[source]
@@ -88,9 +93,14 @@ pub enum DistValidationError {
     )]
     SidecarShape,
 
-    /// `csp-hashes.json` parses correctly but the `script-src-hashes` array
-    /// is empty. Empty hashes would silently allow `'unsafe-inline'`-only
-    /// scripts at runtime — refused.
+    /// `csp-hashes.json` parses correctly but the `script-src-hashes`
+    /// array is empty. With no hashes [`crate::security::csp::build_html_csp`]
+    /// emits `script-src 'self'` with no hash sources, which the browser
+    /// blocks the FOUC bootstrap (and any other validated inline script)
+    /// from executing — surfacing as a runtime JS error / blank screen
+    /// rather than a startup failure. Refused at startup so the operator
+    /// learns the Vite hash-extraction step produced an empty file
+    /// before deploy.
     #[error("csp-hashes.json: 'script-src-hashes' array is empty")]
     EmptyHashes,
 
@@ -137,10 +147,12 @@ fn hash_regex() -> &'static Regex {
 /// # Errors
 ///
 /// Returns [`DistValidationError::DirNotFound`] when the path does not
-/// exist; [`DistValidationError::NotADirectory`] when it is not a
-/// directory; [`DistValidationError::IndexHtmlMissing`] when
-/// `index.html` is missing; [`DistValidationError::SidecarRead`] on
-/// I/O errors reading `csp-hashes.json`;
+/// exist; [`DistValidationError::SidecarRead`] when `fs::metadata` on
+/// the dist directory fails with any non-`NotFound` error (e.g.
+/// permission denied) or when reading `csp-hashes.json` fails;
+/// [`DistValidationError::NotADirectory`] when the path resolves to a
+/// non-directory; [`DistValidationError::IndexHtmlMissing`] when
+/// `index.html` is missing;
 /// [`DistValidationError::SidecarParse`] when the sidecar is malformed
 /// JSON; [`DistValidationError::SidecarShape`] when the JSON is
 /// well-formed but the expected key is missing or not an array of
