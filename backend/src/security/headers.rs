@@ -233,7 +233,7 @@ mod tests {
     // `SecurityConfig`. No DB is required for any of these — they hit /health,
     // /api/__nope__, and SPA paths.
     use crate::auth::backend::AuthBackend;
-    use crate::build_router;
+    use crate::build_router_with_session_store;
     use crate::config::SecurityConfig;
     use crate::test_support;
     use axum_test::TestServer;
@@ -243,6 +243,12 @@ mod tests {
     /// Build a `TestServer` with `security` replacing the defaults in
     /// `test_config()`. The `csp_api_header` / `csp_html_header` strings are
     /// caller-responsibility — simulate what `main()` would compute.
+    ///
+    /// Wires `MemoryStore` for sessions: the production `build_router` would
+    /// construct a `PostgresStore` against the no-DB pool below, and any
+    /// session-touching path would 500. Header tests that exercise pre-session
+    /// surfaces don't trip that today, but the latent break is one new test
+    /// away.
     fn test_server_with_security(security: SecurityConfig) -> TestServer {
         let mut config = test_support::test_config();
         config.security = security;
@@ -255,7 +261,11 @@ mod tests {
         let auth_backend = AuthBackend {
             pool: state.pool.clone(),
         };
-        TestServer::new(build_router(state, auth_backend))
+        TestServer::new(build_router_with_session_store(
+            state,
+            auth_backend,
+            tower_sessions::MemoryStore::default(),
+        ))
     }
 
     /// Materialise a minimal dist/ tree in a `TempDir`: `index.html`,
