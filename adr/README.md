@@ -25,4 +25,4 @@ An Architecture Decision Record (ADR) captures an important architecture decisio
 - [Replace eslint-plugin-react with @eslint-react/eslint-plugin](2026-05-04-replace-eslint-plugin-react.md) (accepted, 2026-05-04)
 - [Single-image distribution with backend-served frontend and central CSP enforcement](2026-05-05-single-image-distribution-central-csp.md) (proposed, 2026-05-05)
 - [CodeRabbit AI code review: parallel trial alongside Greptile](2026-05-07-coderabbit-parallel-trial.md) (proposed, 2026-05-07)
-- [Tiered comment policy for an OSS-released codebase](2026-05-08-tiered-comment-policy.md) (proposed, 2026-05-08)
+- [Tiered comment policy for an OSS-released codebase](2026-05-08-tiered-comment-policy.md) (accepted, 2026-05-08)

@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-05-08
 decision-makers: john
 ---
@@ -28,7 +28,7 @@ needs are explicit:
   module is *for* before they can change it safely. Self-evident
   naming carries less weight when the reader has zero project
   context.
-* Security auditors lookup security-critical code without project
+* Security auditors look up security-critical code without project
   context. They need explicit threat-model statements at the
   boundary, not implicit ones reconstructed from naming.
 * `cargo doc` consumers (a class that includes some auditors and
@@ -149,22 +149,41 @@ unless they encode a WHY future readers would not infer.
 
 ### Enforcement layering
 
-Phased rollout — see Linear (TBD) for the issue tracking the
-phases:
+Phased rollout — UNK-190 tracks the phases:
 
+0. **Split `backend/` into `lib.rs` + thin `main.rs`** before any
+   doc-lint work. `missing_docs` (and clippy `missing_errors_doc`
+   etc.) only fire on items reachable from outside the crate. The
+   current shape is a bin-only crate — every `pub fn` inside
+   modules is crate-private to the lint, and the lint is silent.
+   Verified empirically: `cargo rustc --bin reverie-api -- -W
+   missing_docs` returns 2 warnings (both at `main.rs` root);
+   `cargo clippy -- -W clippy::missing_errors_doc` returns 0.
+   Without this prerequisite the entire enforcement floor in
+   Phases 2–4 is decorative.
 1. **`cargo doc -- -D rustdoc::broken_intra_doc_links`** in CI.
    No comment-policy dependency; just kills broken cross-refs in
    existing docs.
-2. **`#![warn(missing_docs)]` at backend crate root**, with
-   per-module `#[allow(missing_docs)]` for not-yet-documented
-   modules. Wave of warnings, no CI failure. Surfaces the gap.
-3. **Modules graduate to `#[deny(missing_docs)]`** as they're
-   documented; ordered by audience-criticality (auth → security →
-   models → routes → services).
-4. **clippy pedantic lints** `missing_errors_doc`,
-   `missing_panics_doc`, `missing_safety_doc` already active per
-   `adr/2026-05-03-strict-lint-policy.md`; Tier 1 docstrings
-   include these sections where applicable.
+2. **`#![deny(missing_docs)]` at the new `lib.rs` crate root**,
+   with `#![allow(missing_docs)]` on every not-yet-graduated
+   module. Build stays green (every module is shielded).
+   Graduating a module = removing its `#![allow(missing_docs)]`;
+   from that point any undocumented `pub` item in that module
+   fails CI. The ratchet is monotonic — once a module's allow is
+   removed, it cannot regress without a visible diff.
+3. **Modules graduate** in audience-criticality order: auth →
+   security → models → routes → services. Each graduation is its
+   own PR carrying both the docstring authoring and the
+   `#![allow]` removal. New modules created mid-rollout author
+   docstrings at creation rather than ship a fresh `#![allow]`.
+4. **Re-enable previously-allowed clippy pedantic lints**
+   (`missing_errors_doc`, currently `allow` in
+   `backend/Cargo.toml` with the comment "inappropriate for
+   application crates" — true while the crate was bin-only,
+   moot after Phase 0). `missing_panics_doc` and
+   `missing_safety_doc` are already at the pedantic-warn level
+   per `adr/2026-05-03-strict-lint-policy.md`; Tier 1
+   docstrings include these sections where applicable.
 5. **Frontend mirror** via `eslint-plugin-jsdoc` with
    `require-description` on public exports.
 
@@ -181,7 +200,7 @@ primary mechanism for the initial backfill — quality is
 inconsistent (PR #178 evidence: clipped an existing WHY-comment
 mid-sentence) and the per-PR generation surface inflates review
 noise during the parallel-trial window. CR docstring generation
-may be used ad-hoc on individual PRs in the long run, configured
+may be used ad-hoc on individual PRs long-term, configured
 via `.coderabbit.yaml` `path_instructions` to encode this
 policy; generated content is reviewed and edited by the
 maintainer before landing.
@@ -204,11 +223,14 @@ maintainer before landing.
 * Bad — initial backfill is a real cost. ~342 backend `pub`
   items + frontend equivalent. Even with subagent dispatch,
   authoring quality docstrings is non-trivial work.
-* Bad — clippy pedantic lints (`missing_errors_doc` etc.)
-  already firing on undocumented pub items will continue to
-  fire until each module is documented. Existing
-  `#[allow(clippy::missing_errors_doc)]` annotations need
-  retiring on a per-module basis as documentation lands.
+* Bad — Phase 0 (`lib.rs` split) is structural change, not just
+  attribute placement. Every internal call site referencing
+  `crate::*` from tests or `main.rs` is touched. Carries its own
+  review burden before any docstring authoring begins. The
+  alternative — accepting that doc lints are silent on the
+  binary — was rejected because it makes the entire enforcement
+  layering decorative, defeating the ratchet that the OSS
+  audience case justifies.
 * Bad — comment rot is now possible on Tier 1/2 surfaces. A
   function whose semantics drift from its docstring is worse
   than a function with no docstring. Review discipline must
