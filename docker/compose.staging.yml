@@ -1,0 +1,103 @@
+# Staging compose — OCI/LXC deploy target.
+#
+# This file is *not* used for local dev. Local devs run only postgres via the
+# repo-root `docker-compose.yml` (port 5433 exposed for `cargo run`); staging
+# bundles postgres + the published Reverie image into one network with no
+# host port exposure on postgres (LXC-internal only).
+#
+# Routing/TLS terminate at the host's reverse proxy via out-of-tree dynamic
+# config — no traefik labels here. The `.env` and `.env.runtime` files
+# alongside this file are populated by the host secret-management agent
+# (out-of-tree); compose only consumes them.
+#
+# Two env files keep the postgres-bootstrap blast radius out of the app
+# container:
+#
+#   `.env` — auto-loaded by compose for `${VAR}` interpolation. Holds
+#            postgres-bootstrap creds and runtime-role passwords (consumed
+#            only by `reverie-postgres` via the explicit `environment:`
+#            block below) plus REVERIE_VERSION (image tag).
+#            Spec: docker/staging.env.bootstrap.example.
+#
+#   `.env.runtime` — injected only into the `reverie` service. Holds
+#            DATABASE_URL, INGESTION_DATABASE_URL, REVERIE_FRONTEND_DIST_PATH,
+#            REVERIE_PORT, REVERIE_OPERATOR_CONTACT, REVERIE_LOG_LEVEL,
+#            OIDC config. Spec: docker/staging.env.runtime.example.
+#
+# Compromise of the reverie container exposes only the non-superuser
+# DATABASE_URL passwords via `/proc/<pid>/environ`, not POSTGRES_PASSWORD.
+#
+# Bring up:  docker compose -f docker/compose.staging.yml up -d
+# Validate:  docker compose -f docker/compose.staging.yml config
+
+services:
+  reverie-postgres:
+    image: postgres:18-alpine
+    # Scope explicitly: postgres only needs bootstrap credentials and the
+    # init-roles.sql password inputs. Loading the full app `.env` would
+    # leak unrelated secrets (DATABASE_URL, OIDC client secret, session
+    # secret, CSP endpoint) into the postgres container's environment,
+    # readable via `/proc/<pid>/environ` to anyone with exec on the
+    # container. The `:?` form makes a missing var an immediate hard fail
+    # rather than a silent empty-string substitution.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: ${POSTGRES_DB:?required}
+      REVERIE_APP_PASSWORD: ${REVERIE_APP_PASSWORD:?required}
+      REVERIE_INGESTION_PASSWORD: ${REVERIE_INGESTION_PASSWORD:?required}
+      REVERIE_READONLY_PASSWORD: ${REVERIE_READONLY_PASSWORD:?required}
+    volumes:
+      # Parent-dir mount required by postgres:18+ (image places data in a
+      # major-version subdirectory `/var/lib/postgresql/<major>/<cluster>/`
+      # to make `pg_upgrade --link` mount-boundary-safe). Mounting the
+      # legacy `…/data` child path errors out at first init.
+      - pg-data:/var/lib/postgresql
+      # init-roles.sql creates the runtime roles (reverie_app,
+      # reverie_ingestion, reverie_readonly) on first-boot DB init. The
+      # postgres entrypoint only runs /docker-entrypoint-initdb.d/* against
+      # an uninitialized data directory (no `PG_VERSION` file present); on
+      # subsequent restarts the script is skipped.
+      - ./init-roles.sql:/docker-entrypoint-initdb.d/01-init-roles.sql:ro
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  reverie:
+    image: ghcr.io/unkos-dev/reverie:${REVERIE_VERSION:?required}
+    # Scoped runtime env — `.env.runtime` excludes postgres-bootstrap
+    # superuser creds (POSTGRES_USER/PASSWORD/DB) so a compromised app
+    # container reading `/proc/<pid>/environ` can't escalate to a DB
+    # superuser. Spec: docker/staging.env.runtime.example.
+    env_file:
+      - path: .env.runtime
+        required: true
+    depends_on:
+      reverie-postgres:
+        condition: service_healthy
+    # Healthcheck baked into the runtime image (see Dockerfile) — compose
+    # inherits HEALTHCHECK from the image so no override here.
+    #
+    # No `ports:` mapping and no Traefik labels by design. Routing/TLS
+    # terminate at the host's reverse proxy (out-of-tree). The operator
+    # is expected to attach this service to a Traefik-reachable docker
+    # network out-of-band — typically:
+    #
+    #   docker network connect <traefik-net> docker-reverie-1
+    #
+    # or, if the operator's deploy automation already declares the
+    # Traefik network as `external`, an override compose file extends
+    # this service with the appropriate `networks:` entry. Keeping the
+    # in-tree compose minimal means the same file works regardless of
+    # the operator's reverse-proxy choice (Traefik file provider,
+    # Traefik docker provider, Caddy, nginx-proxy, etc.).
+    restart: unless-stopped
+
+volumes:
+  pg-data:
