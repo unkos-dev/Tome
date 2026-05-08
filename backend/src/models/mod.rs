@@ -1,5 +1,7 @@
 //! Domain models and database queries.
 
+#![allow(missing_docs)]
+
 pub mod device_token;
 pub mod enrichment_status;
 pub mod ingestion_job;

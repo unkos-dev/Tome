@@ -1,3 +1,5 @@
+#![allow(missing_docs)]
+
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 

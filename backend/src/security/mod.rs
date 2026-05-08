@@ -6,6 +6,8 @@
 //! - [`headers`]: the uniform-headers middleware plus the composite
 //!   fallback handler that manually attaches per-class CSP headers.
 
+#![allow(missing_docs)]
+
 pub mod csp;
 pub mod dist_validation;
 pub mod headers;
