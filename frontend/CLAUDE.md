@@ -109,9 +109,17 @@
   unconditionally by a hardcoded short-circuit in Vite's host-validation
   middleware regardless of the allowlist. Cloud dev environments (Coder,
   Codespaces) must export the workspace-assigned hostname, e.g.
-  `REVERIE_DEV_HOSTS=dev.reverie.unkos.net npm run dev`. Parsing lives in
+  `REVERIE_DEV_HOSTS=dev.example.com npm run dev`. Parsing lives in
   `vite-plugins/allowed-hosts.ts`; the value is a strict replacement of the
   declarative defaults, not a merge.
+
+- `REVERIE_DEV_HMR_CLIENT_PORT` (optional, integer 1..=65535) — port the
+  HMR websocket client reconnects to. Default (unset) = the dev server's
+  own port (5173), which is correct for localhost / Coder port-forward
+  access. Set to `443` when fronting the dev server with a reverse proxy
+  on a different external port (e.g. a Cloudflare tunnel terminating
+  TLS on 443) so the browser reconnects via the edge instead of trying
+  `wss://<host>:5173/`. Parsing lives in `vite-plugins/hmr-config.ts`.
 
 ## Testing & tooling
 

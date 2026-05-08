@@ -34,12 +34,36 @@ npm run dev
 
 # Cloud dev environment (Coder, Codespaces) — set to the workspace's
 # stable hostname so the dev bundle is reachable through it.
-REVERIE_DEV_HOSTS=dev.reverie.unkos.net npm run dev
+REVERIE_DEV_HOSTS=dev.example.com npm run dev
 
 # Multiple hostnames — comma-separated.
-REVERIE_DEV_HOSTS=dev.reverie.unkos.net,my-tunnel.ngrok.app npm run dev
+REVERIE_DEV_HOSTS=dev.example.com,my-tunnel.ngrok.app npm run dev
 ```
 
 Parsing lives in `frontend/vite-plugins/allowed-hosts.ts`; the inline
 security comment in `frontend/vite.config.ts` documents the threat
 model the allowlist closes.
+
+### `REVERIE_DEV_HMR_CLIENT_PORT`
+
+Optional integer (1..=65535). Overrides the port the browser uses for
+the HMR websocket reconnect. Default (unset) = the dev server's own
+port (5173) — correct for localhost / Coder port-forward access.
+
+Required when fronting the dev server with a reverse proxy on a
+different external port. Common case: a Cloudflare tunnel terminating
+TLS at `dev.example.com` and forwarding to `:5173` inside the
+workspace. Without the override the browser tries
+`wss://dev.example.com:5173/` and the tunnel does not forward
+that port.
+
+```bash
+# Cloudflare tunnel scenario — workspace serves on 5173, edge serves
+# the bundle on 443. Pair with REVERIE_DEV_HOSTS so Vite accepts the
+# external Host header.
+REVERIE_DEV_HOSTS=dev.example.com REVERIE_DEV_HMR_CLIENT_PORT=443 npm run dev
+```
+
+Parsing lives in `frontend/vite-plugins/hmr-config.ts`. Invalid values
+(non-integer, out of range) throw at startup with the bad value
+echoed.
