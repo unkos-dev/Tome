@@ -31,9 +31,12 @@ use crate::config::Config;
 ///
 /// The type alias spells out the endpoint state-machine parameters so that
 /// callers can use [`OidcClient`] without importing the full generic form.
-/// The `EndpointSet` final parameter confirms that `redirect_uri` has been
-/// bound, which is required before calling
-/// `authorize_url` to start the login flow.
+/// The 12th type parameter is `EndpointSet` (the auth-URL endpoint marker
+/// populated by `from_provider_metadata`); the trailing two `EndpointMaybeSet`
+/// markers reflect that introspection and revocation endpoints are optional in
+/// the discovery document. `redirect_uri` is stored as runtime state (not
+/// type-state) and is bound by `set_redirect_uri` before any call to
+/// `authorize_url`.
 pub type OidcClient = openidconnect::Client<
     openidconnect::EmptyAdditionalClaims,
     openidconnect::core::CoreAuthDisplay,
@@ -97,8 +100,13 @@ fn http_client() -> Result<openidconnect::reqwest::Client> {
 /// valid URL, if the HTTP client cannot be constructed, or if the provider
 /// discovery request fails or returns an unparseable response.
 pub async fn init_oidc_client(config: &Config) -> Result<OidcClient> {
+    // Validate both URLs syntactically before the network call so an operator
+    // configuration error fails fast at startup rather than after a discovery
+    // round-trip that would have succeeded.
     let issuer =
         IssuerUrl::new(config.oidc_issuer_url.clone()).context("invalid OIDC_ISSUER_URL")?;
+    let redirect =
+        RedirectUrl::new(config.oidc_redirect_uri.clone()).context("invalid OIDC_REDIRECT_URI")?;
 
     let http = http_client()?;
     let provider_metadata = CoreProviderMetadata::discover_async(issuer, &http)
@@ -110,9 +118,7 @@ pub async fn init_oidc_client(config: &Config) -> Result<OidcClient> {
         ClientId::new(config.oidc_client_id.clone()),
         Some(ClientSecret::new(config.oidc_client_secret.clone())),
     )
-    .set_redirect_uri(
-        RedirectUrl::new(config.oidc_redirect_uri.clone()).context("invalid OIDC_REDIRECT_URI")?,
-    );
+    .set_redirect_uri(redirect);
 
     Ok(client)
 }

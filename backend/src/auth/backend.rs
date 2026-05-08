@@ -52,15 +52,20 @@ pub struct OidcCredentials {
 /// the OIDC upsert path (`authenticate`) and session-based user reload
 /// (`get_user`). Route handlers must never receive or borrow this pool
 /// directly; they resolve identity through the `CurrentUser` extractor which
-/// operates under `reverie_app` credentials.
+/// operates under `reverie_app` credentials. The `pool` field is `pub(crate)`
+/// so that this restriction is enforced at the crate boundary by the type
+/// system in addition to convention.
 #[derive(Clone)]
 pub struct AuthBackend {
     /// Postgres pool with schema-owner credentials.
     ///
     /// Bypasses RLS — used for the OIDC user-upsert and session reload paths
     /// that intentionally run outside user context. Must not be used for
-    /// application data queries.
-    pub pool: PgPool,
+    /// application data queries. Visibility is intentionally `pub(crate)`
+    /// rather than `pub`: external callers (and any future consumer module)
+    /// must not be able to extract this pool from an `AuthBackend` and use it
+    /// for general queries.
+    pub(crate) pool: PgPool,
 }
 
 impl AuthnBackend for AuthBackend {

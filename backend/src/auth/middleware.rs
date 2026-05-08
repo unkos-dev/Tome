@@ -152,10 +152,16 @@ pub async fn verify_basic(
     // THREAT: early-exit on first match would leak the token's position in the
     // list via response timing, allowing an attacker to narrow guesses to
     // recently-issued tokens. Iterating all tokens in full — combined with
-    // `token::verify_device_token`'s constant-time SHA-256 comparison — closes
-    // this side-channel. `matched_token_id` is overwritten on each match so
-    // only the last matching token wins (duplicate hashes cannot exist in
-    // practice but this avoids conditional branching on match count).
+    // `token::verify_device_token`'s constant-time comparison of SHA-256 hex
+    // digests via `subtle::ConstantTimeEq` — closes this side-channel. (The
+    // SHA-256 computation itself is not a cryptographic constant-time
+    // primitive, but its inputs here are fixed-length so its wall-clock cost
+    // does not vary with attacker-controlled state.) `matched_token_id` is
+    // overwritten on each match so only the last matching token wins;
+    // duplicate hashes are not enforced unique at the DB level but a 256-bit
+    // collision is cryptographically infeasible, so the overwrite is a
+    // belt-and-braces structural choice that avoids conditional branching on
+    // match count rather than a load-bearing invariant.
     let mut matched_token_id = None;
     for token in &tokens {
         if crate::auth::token::verify_device_token(password, &token.token_hash) {
