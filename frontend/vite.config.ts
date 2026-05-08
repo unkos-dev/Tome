@@ -58,10 +58,10 @@ export default defineConfig({
     // localhost and an IPv4-side proxy hits ECONNREFUSED.
     host: true,
     // When fronted by a reverse proxy on a different external port
-    // (e.g. a Cloudflare tunnel terminating TLS at 443 for
-    // dev.reverie.unkos.net), the browser would otherwise try
-    // `wss://<host>:5173/` and fail — set REVERIE_DEV_HMR_CLIENT_PORT
-    // to reconnect via the edge instead. Localhost dev leaves it unset.
+    // (e.g. a Cloudflare tunnel terminating TLS on 443), the browser
+    // would otherwise try `wss://<host>:5173/` and fail — set
+    // REVERIE_DEV_HMR_CLIENT_PORT to reconnect via the edge instead.
+    // Localhost dev leaves it unset.
     ...parseHmrConfig(process.env.REVERIE_DEV_HMR_CLIENT_PORT),
     // DNS-rebinding guard active against an env-driven allowlist
     // (REVERIE_DEV_HOSTS, comma-separated). The guard rejects

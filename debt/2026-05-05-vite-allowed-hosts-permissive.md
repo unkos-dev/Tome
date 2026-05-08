@@ -66,9 +66,9 @@ The accepted risk is real, even if narrow:
    from day one — recording it as accepted debt avoids "we'll fix
    this someday" drift.
 3. Once cloudflared ([UNK-164](https://linear.app/unkos/issue/UNK-164))
-   stabilises the workspace hostname (`dev.reverie.unkos.net`), the
-   allowlist becomes a small static set. The constraint that
-   originally justified the workaround weakens substantially.
+   stabilises a per-operator workspace hostname, the allowlist becomes
+   a small static set. The constraint that originally justified the
+   workaround weakens substantially.
 
 ## Lift conditions
 

@@ -19,8 +19,8 @@ describe("parseAllowedHosts", () => {
   });
 
   it("parses a single host", () => {
-    expect(parseAllowedHosts("dev.reverie.unkos.net")).toEqual([
-      "dev.reverie.unkos.net",
+    expect(parseAllowedHosts("dev.example.com")).toEqual([
+      "dev.example.com",
     ]);
   });
 
@@ -49,7 +49,7 @@ describe("parseAllowedHosts", () => {
 
   it("does not merge user list with loopback defaults", () => {
     // Replace, not merge — caller decides whether loopback access is needed.
-    const result = parseAllowedHosts("dev.reverie.unkos.net");
+    const result = parseAllowedHosts("dev.example.com");
     expect(result).not.toContain("localhost");
     expect(result).not.toContain("127.0.0.1");
   });
