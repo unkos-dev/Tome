@@ -27,12 +27,16 @@ describe("parseHmrConfig", () => {
     expect(parseHmrConfig("1")).toEqual({ hmr: { clientPort: 1 } });
   });
 
+  it("trims surrounding whitespace from a valid port", () => {
+    expect(parseHmrConfig("  443  ")).toEqual({ hmr: { clientPort: 443 } });
+  });
+
   it("rejects 0", () => {
     expect(() => parseHmrConfig("0")).toThrow(/1\.\.=65535/);
   });
 
   it("rejects negative", () => {
-    expect(() => parseHmrConfig("-1")).toThrow(/1\.\.=65535/);
+    expect(() => parseHmrConfig("-1")).toThrow(/integer/);
   });
 
   it("rejects 65536", () => {

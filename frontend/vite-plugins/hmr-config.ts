@@ -3,6 +3,7 @@
 // the bundle Vite serves on 5173), the browser must reconnect HMR via
 // the proxy port — otherwise it tries `wss://<host>:5173/` and the
 // tunnel does not forward it. REVERIE_DEV_HMR_CLIENT_PORT carries that
+// override value.
 /**
  * Parse the REVERIE_DEV_HMR_CLIENT_PORT environment value into a Vite HMR client port configuration.
  *
