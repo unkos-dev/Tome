@@ -25,6 +25,20 @@ use super::root::{atom_response, base_url};
 use super::scope::{Scope, push_scope};
 
 /// Build the `/opds/library/*` router.
+///
+/// # Invariants
+/// - Every handler authenticates via the `BasicOnly` extractor — OPDS
+///   clients (e.g. `KOReader`) are Basic-only; session cookies are not
+///   accepted on these routes.
+/// - Per-row visibility is enforced inside `db::acquire_with_rls` plus
+///   a `Scope` predicate (`Scope::Library` here, `Scope::Shelf` when
+///   reused via [`super::shelves::router`]) appended through
+///   [`push_scope`].
+///
+/// Why: the feed URL determines the requested scope, but RLS in
+/// `acquire_with_rls` is the authoritative guard — `Scope` shapes
+/// which subset of visible rows the feed surfaces, and an over-broad
+/// or forged scope cannot bypass row-level security.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/opds/library", get(library_root))

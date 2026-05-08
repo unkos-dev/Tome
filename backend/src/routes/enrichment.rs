@@ -22,6 +22,20 @@ use crate::services;
 use crate::state::AppState;
 
 /// Build the enrichment-control router.
+///
+/// Mounts `POST /api/manifestations/{id}/enrichment/{trigger,dry-run}` and
+/// `GET /api/enrichment/status` on the application `AppState`.
+///
+/// # Invariants
+/// - Handlers require an authenticated non-child user
+///   (`CurrentUser::require_not_child`).
+/// - Per-manifestation visibility is gated by `db::acquire_with_rls`;
+///   manifestations the caller can't see resolve to `AppError::NotFound`
+///   so existence is not leaked across users.
+///
+/// Why: `dry_run` fans out onto `state.ingestion_pool` (the queue's
+/// pool, no RLS) for the joined-table read, so the RLS visibility check
+/// must run first on the user's pool before crossing the pool boundary.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/manifestations/{id}/enrichment/trigger", post(trigger))

@@ -22,6 +22,21 @@ use crate::services::enrichment::field_lock::{self, EntityType};
 use crate::state::AppState;
 
 /// Build the metadata-review router.
+///
+/// Mounts the `GET` views over manifestation/work metadata and the
+/// `POST` accept/reject/revert/lock/unlock mutators on `AppState`.
+///
+/// # Invariants
+/// - Every handler requires an authenticated non-child user
+///   (`CurrentUser::require_not_child`).
+/// - Reads and writes acquire a connection via `db::acquire_with_rls`
+///   so RLS policies see `app.current_user_id` for the caller.
+/// - Write paths open a transaction, take `SELECT ... FOR UPDATE` on
+///   the owning manifestation/work row, apply the change, and commit.
+///
+/// Why: the row-level lock serialises concurrent reviewers against the
+/// same entity so accept/reject/revert can't race with each other or
+/// with re-enrichment writes that mutate the same metadata row.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
