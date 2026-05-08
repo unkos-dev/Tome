@@ -1,4 +1,4 @@
--- UNK-163: roll back tower-sessions PostgresStore backing schema.
+-- Roll back tower-sessions PostgresStore backing schema.
 --
 -- Drops the table, index, and schema in reverse order. Sessions live
 -- on this storage layer only — rolling back the migration logs every

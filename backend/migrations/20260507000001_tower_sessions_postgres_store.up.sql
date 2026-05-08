@@ -1,20 +1,20 @@
--- UNK-163: tower-sessions PostgresStore backing schema.
+-- tower-sessions PostgresStore backing schema.
 --
 -- Replaces the in-memory MemoryStore with a Postgres-backed store so
--- sessions survive container restarts (LXC redeploy = no forced re-login).
--- Schema and table names match tower-sessions-sqlx-store@0.14.2 defaults
--- (see PostgresStore::new), so no with_schema_name/with_table_name override
--- is needed at construction time.
+-- sessions survive container restarts. Schema and table names match
+-- tower-sessions-sqlx-store@0.15.0 defaults (see PostgresStore::new),
+-- so no with_schema_name/with_table_name override is needed at
+-- construction time.
 --
 -- Schema choice: dedicated `tower_sessions` schema isolates the framework
 -- table from application tables and keeps the public schema clean. The
 -- crate's own migrate() helper uses the same convention.
 --
--- No RLS on this table: reverie_app reads and writes its own session
--- rows, scoped by the framework via the `id` PK (a cryptographically
--- random Id from tower-sessions). Adding RLS would require auth context
--- to be set before SessionStore can lookup the session itself — chicken
--- and egg.
+-- No RLS on this table: SessionStore::load runs before any auth context
+-- exists (the cookie's session id is the bootstrap that resolves the
+-- user), so RLS-gating the session lookup is chicken-and-egg. Access
+-- control is at the role-grant boundary below — reverie_app gets DML;
+-- reverie_readonly gets SELECT only.
 
 CREATE SCHEMA IF NOT EXISTS tower_sessions;
 

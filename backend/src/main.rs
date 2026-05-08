@@ -30,8 +30,8 @@ use crate::config::Config;
 use crate::state::AppState;
 
 pub fn build_router(state: AppState, auth_backend: AuthBackend) -> Router {
-    // PostgresStore (UNK-163): sessions persist across container restarts.
-    // The backing schema is provisioned by the
+    // Sessions persist to Postgres so a backend restart doesn't log every
+    // user out. The backing schema is provisioned by the
     // `20260507000001_tower_sessions_postgres_store` migration; defaults
     // (`tower_sessions.session`) match `PostgresStore::new`'s built-ins so
     // no `with_schema_name`/`with_table_name` overrides are needed.
