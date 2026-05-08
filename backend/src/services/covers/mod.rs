@@ -8,9 +8,14 @@
 //! artefact from the EPUB-embedded cover. Showing enrichment previews in
 //! OPDS is an orthogonal decision out of scope for Step 9 per BLUEPRINT.
 
+/// On-disk content-addressed cover cache; handles atomic writes and path
+/// derivation.
 pub mod cache;
+/// Error type for all cover-serving failure classes.
 pub mod error;
+/// Synchronous `EPUB` cover extraction; mirrors Step 5 detection semantics.
 pub mod extract;
+/// `Lanczos3` resize logic and the `CoverSize` size-tier enum.
 pub mod resize;
 
 use std::path::PathBuf;

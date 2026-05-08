@@ -1,13 +1,13 @@
 //! Cover image download and staging for the metadata enrichment pipeline.
 //!
-//! [`download`] fetches a remote URL, validates the content (content-type,
+//! `download` fetches a remote URL, validates the content (content-type,
 //! magic bytes, dimensions) against configurable limits, then writes the file
 //! atomically to a staging directory under `{library_root}/_covers/pending/`.
 //!
 //! # Security model
 //!
 //! The caller must supply an SSRF-guarded [`reqwest::Client`] (see
-//! [`super::http::cover_client`]).  This module validates the **initial** URL
+//! `cover_client`).  This module validates the **initial** URL
 //! before any network call because reqwest's redirect policy only fires on 3xx
 //! responses — a direct request to an internal address is never intercepted by
 //! the callback.
@@ -32,8 +32,11 @@ use super::http::validate_hop;
 /// The recognised cover image formats.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoverFormat {
+    /// JPEG/JFIF baseline image (`image/jpeg`).
     Jpeg,
+    /// Portable Network Graphics image (`image/png`).
     Png,
+    /// WebP image (`image/webp`).
     Webp,
 }
 
@@ -52,12 +55,15 @@ impl CoverFormat {
 pub struct CoverArtifact {
     /// Absolute path to the staged file.
     pub path: PathBuf,
-    /// SHA-256 digest of the raw bytes as written to disk.
+    /// `SHA-256` digest of the raw bytes as written to disk.
     pub sha256: Vec<u8>,
     /// Number of bytes written.
     pub size_bytes: u64,
+    /// Image width in pixels.
     pub width: u32,
+    /// Image height in pixels.
     pub height: u32,
+    /// Detected image format (verified against magic bytes).
     pub format: CoverFormat,
 }
 
@@ -82,20 +88,28 @@ pub struct DownloadConfig {
 /// Errors that can occur during a cover download.
 #[derive(Debug, thiserror::Error)]
 pub enum CoverError {
+    /// Response body exceeded [`DownloadConfig::max_bytes`]; download was aborted mid-stream.
     #[error("response body exceeds max bytes")]
     TooLarge,
+    /// `Content-Type` header was not one of `image/jpeg`, `image/png`, or `image/webp`.
     #[error("unexpected content-type: {0}")]
     WrongContentType(String),
+    /// The declared `Content-Type` did not match the image magic bytes.
     #[error("content-type did not match magic bytes")]
     MagicByteMismatch,
+    /// The image's long edge was below [`DownloadConfig::min_long_edge_px`].
     #[error("image dimensions {0}x{1} below minimum")]
     DimensionsTooSmall(u32, u32),
+    /// A filesystem `I/O` error while staging the file.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    /// A `reqwest` network error (connection failure, redirect policy rejection, etc.).
     #[error(transparent)]
     Network(#[from] reqwest::Error),
+    /// The `image` crate could not decode the body bytes.
     #[error("image decode failed: {0}")]
     Decode(String),
+    /// The initial `URL` was rejected by the `SSRF` pre-check before any network call was made.
     #[error("SSRF guard rejected initial URL: {0}")]
     SsrfBlocked(String),
 }
@@ -105,19 +119,26 @@ pub enum CoverError {
 /// Fetch a cover image from `url`, validate it, and stage it atomically.
 ///
 /// Steps performed (in order):
-/// 1. SSRF-check the initial URL.
+/// 1. `SSRF`-check the initial `URL`.
 /// 2. Send the request.
 /// 3. Validate the `Content-Type` header.
 /// 4. Stream the body with a hard byte-count limit.
 /// 5. Verify the magic bytes match the declared content-type.
 /// 6. Decode the image and check dimensions.
-/// 7. Compute SHA-256.
+/// 7. Compute `SHA-256`.
 /// 8. Write atomically via `tempfile` + `persist`.
 ///
 /// The staging path is:
 /// `{library_root}/_covers/pending/{manifestation_id}-{version_id_short}.{ext}`
 /// where `version_id_short` is the first 8 hex characters of `version_id`
 /// (no dashes).
+///
+/// The `client` **must** be an `SSRF`-guarded client (see `cover_client`).
+/// Passing a plain `reqwest::Client` bypasses the redirect-hop `SSRF` defense.
+///
+/// # Errors
+///
+/// Returns a [`CoverError`] variant for each failure class — see the enum for details.
 #[instrument(skip(client, config), fields(url, %manifestation_id))]
 pub async fn download(
     url: &str,

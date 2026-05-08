@@ -5,10 +5,16 @@
 //! as draft metadata, never auto-applied.
 
 /// Fields consumed by the enrichment confidence scorer (Step 7 task 14).
+///
+/// Advisory signal only — the result is stored as a draft metadata row and
+/// never auto-applied. A human review step (or future policy rule) decides
+/// whether to promote `probable_author` / `probable_title` to canonical.
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct InversionResult {
+    /// Reconstructed author name in natural order (e.g. `"John Smith"`).
     pub probable_author: String,
+    /// The author field value that looks like a book title.
     pub probable_title: String,
 }
 

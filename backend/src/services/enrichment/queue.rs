@@ -27,6 +27,11 @@ use super::orchestrator::{self, RunOutcome};
 
 /// Spawn the queue worker loop.  Returns when `cancel` fires, reverting any
 /// `in_progress` row back to `pending`.
+///
+/// # Errors
+///
+/// Returns an error if the shutdown-time revert of `in_progress` rows to
+/// `pending` fails (database unreachable or connection pool exhausted).
 pub async fn spawn_queue(
     pool: PgPool,
     config: Config,

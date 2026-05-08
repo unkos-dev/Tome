@@ -1,10 +1,22 @@
+//! Cover-image decodability validation layer (Layer 5).
+//!
+//! Checks that the cover image declared in the `OPF` manifest exists in the
+//! archive and can be decoded as `JPEG` or `PNG`. Other image formats produce
+//! a `Degraded` issue rather than an `Irrecoverable` one — the book is still
+//! readable without a valid cover. The `image` crate is compiled with only
+//! the `jpeg` and `png` features to limit attack surface.
+
 use super::{
     Issue, IssueKind, Layer, Severity,
     opf_layer::OpfData,
     zip_layer::{ZipHandle, read_entry},
 };
 
-/// Validate the cover image (JPEG or PNG only).
+/// Validate the cover image declared in the `OPF` manifest (`JPEG` or `PNG` only).
+///
+/// Resolves the cover href relative to the `OPF` directory, reads the entry from
+/// `handle`, and attempts to decode it with the `image` crate. A missing or
+/// undecodable cover appends a `Degraded` issue; no cover declared is not an error.
 pub fn validate(handle: &ZipHandle, opf_data: Option<&OpfData>, issues: &mut Vec<Issue>) {
     let Some(opf) = opf_data else { return };
 
@@ -43,7 +55,7 @@ pub fn validate(handle: &ZipHandle, opf_data: Option<&OpfData>, issues: &mut Vec
     }
 }
 
-/// Find the cover image href from OPF manifest/metadata.
+/// Find the cover image href from `OPF` manifest/metadata.
 /// Checks manifest item with `id="cover-image"`, `id="cover"`, etc.
 ///
 /// `pub(crate)` so `services::covers::extract` can mirror Step 5 detection

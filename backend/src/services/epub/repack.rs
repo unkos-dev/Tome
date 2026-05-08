@@ -1,13 +1,13 @@
-//! Shared ZIP repack helper for EPUB mutations.
+//! Shared `ZIP` repack helper for `EPUB` mutations.
 //!
-//! Preserves the EPUB spec's mimetype-first / stored constraint, preserves
-//! per-entry compression (Stored entries stay Stored), and offers three
-//! mutation knobs: OPF replacement, arbitrary binary-entry replacement
+//! Preserves the `EPUB` spec's mimetype-first / stored constraint, preserves
+//! per-entry compression (`Stored` entries stay `Stored`), and offers three
+//! mutation knobs: `OPF` replacement, arbitrary binary-entry replacement
 //! (e.g. cover image), and new-entry additions (e.g. regenerated
-//! container.xml or a freshly-inserted cover manifest target).
+//! `container.xml` or a freshly-inserted cover manifest target).
 //!
 //! Callers are responsible for the final atomic rename of the returned
-//! [`NamedTempFile`] onto the destination path.
+//! `NamedTempFile` onto the destination path.
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -22,26 +22,33 @@ use super::{EpubError, MAX_ENTRY_UNCOMPRESSED_BYTES};
 pub(super) const MIMETYPE_ENTRY: &str = "mimetype";
 pub(super) const MIMETYPE_CONTENT: &[u8] = b"application/epub+zip";
 
-/// Re-package the EPUB at `src_path` applying the provided mutations.
+/// Re-package the `EPUB` at `src_path` applying the provided mutations.
 ///
-/// Writes to a fresh [`NamedTempFile`] in `dest_dir` (so the caller can
+/// Writes to a fresh `NamedTempFile` in `dest_dir` (so the caller can
 /// persist to a different directory on path-rename, or back to `src_path`'s
 /// directory for in-place updates).  The caller owns the atomic rename.
 ///
-/// - `opf_path` + `opf_replacement`: when both are Some, the ZIP entry whose
+/// - `opf_path` + `opf_replacement`: when both are Some, the `ZIP` entry whose
 ///   name equals `opf_path` is replaced with `opf_replacement` bytes.
-/// - `binary_replacements`: entry-name → bytes overrides for any non-OPF
+/// - `binary_replacements`: entry-name → bytes overrides for any non-`OPF`
 ///   entry (e.g. a cover image). Entries in this map REPLACE existing
 ///   entries; they do not add new ones.
-/// - `additions`: new ZIP entries to append after all existing entries have
+/// - `additions`: new `ZIP` entries to append after all existing entries have
 ///   been copied.  Use this for entries absent from the source (e.g. a
 ///   regenerated `META-INF/container.xml` or a freshly-inserted cover
 ///   manifest target).
 ///
-/// Per-entry compression is preserved: an entry that was Stored in the source
-/// stays Stored in the output; a Deflated entry stays Deflated.  The sole
+/// Per-entry compression is preserved: an entry that was `Stored` in the source
+/// stays `Stored` in the output; a `Deflated` entry stays `Deflated`. The sole
 /// exception is the required `mimetype` entry, which is always emitted first
 /// with `CompressionMethod::Stored`.
+///
+/// # Errors
+///
+/// Returns [`EpubError::Io`] if `src_path` cannot be read or if the temp file
+/// cannot be created in `dest_dir`. Returns [`EpubError::Zip`] if
+/// `ZipArchive::new` fails to parse the source archive or if `ZipWriter`
+/// encounters an error while writing an entry.
 pub fn with_modifications(
     src_path: &Path,
     dest_dir: &Path,

@@ -2,10 +2,10 @@
 //!
 //! Provides two pre-configured [`reqwest::Client`] instances:
 //!
-//! * [`api_client`] — lightweight client for metadata REST/GraphQL calls.  Plain
+//! * `api_client` — lightweight client for metadata REST/GraphQL calls.  Plain
 //!   redirect following with a 10-second timeout and a 5-hop redirect limit.
 //!
-//! * [`cover_client`] — client for fetching cover image URLs.  Every redirect hop
+//! * `cover_client` — client for fetching cover image URLs.  Every redirect hop
 //!   is validated against a set of denied IP ranges to prevent SSRF attacks.
 //!
 //! # Design: sync DNS in a redirect callback
@@ -21,7 +21,7 @@
 //!    inside an existing async runtime.
 //!
 //! If this ever becomes a bottleneck, the right fix is to pre-validate the URL
-//! before handing it to reqwest (see [`validate_hop`]), removing the need for a
+//! before handing it to reqwest (see `validate_hop`), removing the need for a
 //! callback at all.
 
 // These items are public API consumed by the enrichment pipeline.  They are not
@@ -39,15 +39,15 @@ use tracing::warn;
 
 // ── Public error type ──────────────────────────────────────────────────────
 
-/// Reason a redirect hop was rejected.
+/// Reason a redirect hop was rejected by the `SSRF` guard.
 #[derive(Debug)]
 #[allow(dead_code)] // DnsFailure/MissingHost are constructed inside cover_download (phase D).
 pub enum HopError {
-    /// The resolved IP is in a denied range.
+    /// The resolved IP is in a denied range (loopback, `RFC 1918`, link-local, etc.).
     DenyListed(IpAddr),
-    /// DNS resolution failed.
+    /// The OS resolver returned an error or produced no addresses.
     DnsFailure,
-    /// The URL has no host component.
+    /// The `URL` has no host component and cannot be resolved.
     MissingHost,
 }
 
@@ -177,14 +177,20 @@ const fn to_ipv4_mapped(v6: Ipv6Addr) -> Option<std::net::Ipv4Addr> {
     }
 }
 
-/// Validate a single URL before following it as a redirect hop.
+/// Validate a single `URL` before following it as a redirect hop.
 ///
-/// Resolves the URL's host via the OS DNS resolver (blocking call — see
+/// Resolves the `URL`'s host via the OS DNS resolver (blocking call — see
 /// module-level design note) and checks every resolved IP against the denied
 /// ranges via [`ip_is_denied`].
 ///
 /// Returns `Ok(())` only if at least one address resolved **and** none of them
 /// are denied.
+///
+/// # Errors
+///
+/// - [`HopError::MissingHost`] — the `URL` has no host component.
+/// - [`HopError::DnsFailure`] — OS resolver returned an error or produced no addresses.
+/// - [`HopError::DenyListed`] — a resolved IP falls in a denied range.
 #[allow(dead_code)] // called from cover_download (phase D) and cover_client redirect policy.
 pub fn validate_hop(url: &reqwest::Url) -> Result<(), HopError> {
     let host = url.host_str().ok_or(HopError::MissingHost)?;
@@ -215,11 +221,11 @@ pub fn validate_hop(url: &reqwest::Url) -> Result<(), HopError> {
 
 /// Process-wide DNS resolver that filters denied IPs at lookup time.
 ///
-/// Closes the DNS-rebinding TOCTOU window between [`validate_hop`] and the
+/// Closes the DNS-rebinding TOCTOU window between `validate_hop` and the
 /// hyper connection layer: every hostname goes through the same resolver, the
 /// returned `SocketAddr` is the one reqwest dials, and any address in a
 /// denied range is dropped before reqwest ever sees it.  The redirect-hop
-/// policy on [`cover_client`] remains as defense-in-depth.
+/// policy on `cover_client` remains as defense-in-depth.
 fn ssrf_resolver() -> Arc<SsrfResolver> {
     static RESOLVER: OnceLock<Arc<SsrfResolver>> = OnceLock::new();
     RESOLVER
@@ -307,12 +313,12 @@ pub fn api_client(user_agent: &str) -> reqwest::Client {
 
 /// Build a reqwest client suitable for fetching cover image URLs.
 ///
-/// Identical to [`api_client`] but with a configurable redirect limit and
+/// Identical to `api_client` but with a configurable redirect limit and
 /// timeout.  Two layers of SSRF defense are stacked:
 ///
 /// 1. The [`ssrf_resolver`] filters denied IPs at DNS resolution time —
 ///    closes the TOCTOU window between validation and dial.
-/// 2. The redirect policy re-validates every hop via [`validate_hop`] before
+/// 2. The redirect policy re-validates every hop via `validate_hop` before
 ///    reqwest issues the next request, so a denied hostname is rejected
 ///    before any TCP connect is attempted.
 ///

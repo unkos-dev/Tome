@@ -13,11 +13,14 @@ use uuid::Uuid;
 /// `manifestations`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntityType {
+    /// The field belongs to the `works` table (e.g. `"title"`, `"language"`).
     Work,
+    /// The field belongs to the `manifestations` table (e.g. `"isbn_13"`, `"publisher"`).
     Manifestation,
 }
 
 impl EntityType {
+    /// Return the string value written to `field_locks.entity_type`.
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Work => "work",
@@ -26,6 +29,13 @@ impl EntityType {
     }
 }
 
+/// Check whether a specific `(manifestation_id, entity_type, field)` triple is locked.
+///
+/// Returns `true` if a matching row exists in `field_locks`; `false` otherwise.
+///
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails (connection error, pool timeout, etc.).
 pub async fn is_locked(
     pool: &PgPool,
     manifestation_id: Uuid,
@@ -45,6 +55,10 @@ pub async fn is_locked(
 }
 
 /// Same as [`is_locked`] but reads within an open transaction.
+///
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails.
 pub async fn is_locked_tx(
     conn: &mut PgConnection,
     manifestation_id: Uuid,
@@ -63,6 +77,15 @@ pub async fn is_locked_tx(
     Ok(hit.is_some())
 }
 
+/// Insert a lock row for `(manifestation_id, entity_type, field)`, recording the
+/// user who set the lock in `locked_by`.
+///
+/// Idempotent: a duplicate lock on the same triple is silently ignored (`ON CONFLICT DO NOTHING`).
+///
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the insert fails for any reason other than a
+/// duplicate-key conflict.
 pub async fn lock(
     pool: &PgPool,
     manifestation_id: Uuid,
@@ -86,6 +109,10 @@ pub async fn lock(
 
 /// Remove a lock. Returns `true` if a row was deleted, `false` if none
 /// existed (callers may surface 404).
+///
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the delete query fails.
 pub async fn unlock(
     pool: &PgPool,
     manifestation_id: Uuid,

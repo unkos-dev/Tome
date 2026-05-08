@@ -1,3 +1,15 @@
+//! `notify`-based filesystem watcher for the ingestion drop-zone.
+//!
+//! Wraps the platform-specific [`notify::RecommendedWatcher`] (inotify on `Linux`,
+//! FSEvents on `macOS`) and adds a 2-second debounce window. Rapid bursts of
+//! filesystem events — common when large files are copied — are coalesced into a
+//! single batch so the orchestrator is not triggered before writes complete.
+//!
+//! Only `Create` and `Modify` events on regular files are forwarded; directory events
+//! and deletions are ignored. Symlinks are not followed (`follow_links(false)` is
+//! set in the orchestrator's `WalkDir` call) to prevent an attacker with write access
+//! to the drop-zone from escaping the ingestion root via a crafted symlink.
+
 use notify::{Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
 use tokio::sync::mpsc;
@@ -8,6 +20,12 @@ use tokio_util::sync::CancellationToken;
 /// Debounces events: after the last filesystem event, waits 2 seconds of quiet
 /// before sending the accumulated paths as a batch. Exits cleanly when `cancel`
 /// is triggered.
+///
+/// # Errors
+///
+/// Returns `anyhow::Error` if the underlying `notify` watcher cannot be created
+/// (e.g. the platform watcher is unavailable) or if `ingestion_path` cannot be
+/// watched (e.g. the directory does not exist or permissions are denied).
 pub async fn watch(
     ingestion_path: PathBuf,
     tx: mpsc::Sender<Vec<PathBuf>>,

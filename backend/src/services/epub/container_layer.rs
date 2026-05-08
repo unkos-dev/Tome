@@ -1,3 +1,11 @@
+//! `META-INF/container.xml` parsing layer (Layer 2).
+//!
+//! Locates the `OPF` package-document path for the rest of the pipeline.
+//! If `container.xml` is absent, the layer scans for a `*.opf` file and
+//! regenerates the path rather than failing immediately. Path-safety checks
+//! (`..` traversal, percent-encoded variants, Windows separators) run on
+//! every candidate path before it is returned.
+
 use quick_xml::Reader;
 use quick_xml::events::Event;
 
@@ -8,10 +16,10 @@ use super::{
 
 const CONTAINER_PATH: &str = "META-INF/container.xml";
 
-/// Parse container.xml and return the OPF path.
+/// Parse `container.xml` and return the `OPF` path.
 ///
-/// If container.xml is missing, scans for a `.opf` file and regenerates.
-/// Appends issues to `issues`. Returns `None` only if no OPF can be found at all.
+/// If `container.xml` is missing, scans for a `.opf` file and regenerates.
+/// Appends issues to `issues`. Returns `None` only if no `OPF` can be found at all.
 pub fn validate(handle: &ZipHandle, issues: &mut Vec<Issue>) -> Option<String> {
     if let Some(bytes) = read_entry(handle, CONTAINER_PATH) {
         extract_opf_path(&bytes, issues)
@@ -48,7 +56,7 @@ pub fn validate(handle: &ZipHandle, issues: &mut Vec<Issue>) -> Option<String> {
     }
 }
 
-/// Extract the OPF `full-path` attribute from container.xml bytes.
+/// Extract the `OPF` `full-path` attribute from `container.xml` bytes.
 fn extract_opf_path(bytes: &[u8], issues: &mut Vec<Issue>) -> Option<String> {
     let xml = std::str::from_utf8(bytes).ok()?;
     let mut reader = Reader::from_str(xml);

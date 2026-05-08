@@ -9,15 +9,26 @@ use super::error::CoverError;
 use super::resize::CoverSize;
 use uuid::Uuid;
 
+/// Filesystem handle for the cover cache directory. All paths are derived
+/// relative to `root`; the directory is created on demand rather than at
+/// startup so the library path need not exist at process boot.
 pub struct CoverCache {
     root: PathBuf,
 }
 
 impl CoverCache {
+    /// Create a `CoverCache` rooted at `root`. Does not touch the filesystem.
     pub const fn new(root: PathBuf) -> Self {
         Self { root }
     }
 
+    /// Create the cache directory (and any missing parents) if it does not
+    /// already exist.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`CoverError::Io`] if `create_dir_all` fails (e.g. permission
+    /// denied or a non-directory inode already occupies the path).
     pub fn ensure_dir(&self) -> Result<(), CoverError> {
         std::fs::create_dir_all(&self.root).map_err(CoverError::Io)
     }

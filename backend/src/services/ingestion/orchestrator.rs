@@ -14,15 +14,29 @@ use crate::services::epub::{self, ValidationOutcome};
 use crate::services::ingestion::{cleanup, copier, format_filter, path_template, quarantine};
 use crate::services::metadata;
 
+/// Counts returned by a completed [`scan_once`] call.
 #[derive(Debug)]
 pub struct ScanResult {
+    /// Files copied to the library and committed to the database.
     pub processed: usize,
+    /// Files that errored during hashing, copying, validation, or DB insert.
     pub failed: usize,
+    /// Files whose `SHA-256` hash or destination path already exists in `manifestations`
+    /// (duplicate detection); not re-ingested.
     pub skipped: usize,
 }
 
 /// Start the filesystem watcher and process batches in a loop.
-/// Exits when `cancel` is triggered or the watcher errors.
+///
+/// Spawns the `notify`-based watcher as a background task. Each time the watcher
+/// delivers a batch of changed paths, a full [`scan_once`] is triggered. Exits
+/// cleanly when `cancel` is triggered or when the watcher channel closes.
+///
+/// # Errors
+///
+/// Returns an error only if the initial channel setup or a `scan_once` call
+/// returns an unrecoverable `anyhow::Error`. Watcher task failures are logged
+/// and cause the loop to exit but do not propagate as an error from this function.
 pub async fn run_watcher(
     config: Config,
     pool: PgPool,
@@ -81,8 +95,17 @@ const SCAN_ADVISORY_LOCK_ID: i64 = 0x5265_7665_0000_0004; // "Reve" + step 4
 /// One-shot ingestion scan: walk the ingestion directory, filter by format priority,
 /// copy to library, and track via `ingestion_jobs`.
 ///
-/// Acquires a database advisory lock to serialize concurrent scans. A second scan
-/// that arrives while one is in progress will block until the first completes.
+/// Acquires a Postgres advisory lock (`pg_advisory_lock`) to serialize concurrent
+/// scans. A second call that arrives while one is in progress will block at the
+/// lock acquire until the first completes. The lock is session-scoped and released
+/// when the connection returns to the pool.
+///
+/// # Errors
+///
+/// Returns `anyhow::Error` if the advisory lock cannot be acquired, if the
+/// `spawn_blocking` tasks panic, or if a fatal database error occurs outside
+/// the per-file error path. Per-file failures are counted in `ScanResult::failed`
+/// and do not propagate as errors.
 pub async fn scan_once(config: &Config, pool: &PgPool) -> Result<ScanResult, anyhow::Error> {
     // Serialize scans — only one can run at a time. Uses a session-level advisory
     // lock (released when the connection returns to the pool) rather than a

@@ -1,6 +1,6 @@
 //! Cover-image replacement / insertion planning.
 //!
-//! Given the source OPF + the new cover bytes, [`plan_embed`] returns:
+//! Given the source OPF + the new cover bytes, `plan_embed` returns:
 //! - binary entry replacements (existing cover manifest item → new bytes)
 //! - additions (new ZIP entries for the insertion case)
 //! - an OPF replacement reflecting any manifest changes
@@ -21,15 +21,47 @@ use zip::write::{ExtendedFileOptions, FileOptions};
 use super::error::WritebackError;
 
 /// The planning output: what to mutate inside the repack helper.
+///
+/// All paths in `binary_replacements` and `additions` are `OPF`-relative
+/// (e.g. `images/cover.jpg`).  The orchestrator translates them to
+/// `ZIP`-absolute paths before passing them to `repack::with_modifications`.
 #[derive(Debug)]
 pub struct CoverPlan {
+    /// `ZIP`-entry path → replacement bytes for entries that already exist
+    /// in the archive and whose `MIME` type matches the new cover.
     pub binary_replacements: HashMap<String, Vec<u8>>,
+    /// New `ZIP` entries to append — `(path, bytes, options)` — used when
+    /// the new cover's format differs from the existing entry or no cover
+    /// was present.
     pub additions: Vec<(String, Vec<u8>, FileOptions<'static, ExtendedFileOptions>)>,
+    /// Rewritten `OPF` bytes when the manifest must change (new cover href
+    /// or new `MIME` type); `None` when an in-place binary replacement
+    /// requires no structural `OPF` change.
     pub opf_replacement: Option<Vec<u8>>,
 }
 
-/// Plan an embed of `new_cover_bytes` into the EPUB whose OPF is
-/// `opf_bytes`.  Returns the repack inputs for the helper.
+/// Plan an embed of `new_cover_bytes` into the `EPUB` whose `OPF` is
+/// `opf_bytes`.  Returns the repack inputs for the caller.
+///
+/// Three branches, chosen by scanning the `OPF` manifest:
+///
+/// 1. Existing cover, same `MIME` type — in-place binary replacement; no `OPF`
+///    rewrite needed.
+/// 2. Existing cover, different `MIME` type — new `ZIP` entry under a fresh
+///    name (`images/cover-image-writeback.<ext>`) plus `OPF` manifest rewrite.
+///    The old entry becomes an orphan (accepted MVP trade-off; Step 11 sweep
+///    repacks to drop orphans).
+/// 3. No cover present — new `ZIP` entry plus `OPF` manifest insertion.  For
+///    `EPUB2`, a `<meta name="cover">` element is also inserted.
+///
+/// # Errors
+///
+/// - `WritebackError::ValidationRegressed("unknown cover format: …")` — the
+///   `image` crate cannot recognise `new_cover_bytes` as a supported format.
+/// - `WritebackError::Xml` — the `OPF` rewrite pass (branches 2 and 3)
+///   encountered a `quick_xml` parse error.
+/// - `WritebackError::ValidationRegressed("opf has no <manifest>")` — the
+///   `OPF` in branch 3 contains no `<manifest>` element to insert into.
 pub fn plan_embed(opf_bytes: &[u8], new_cover_bytes: &[u8]) -> Result<CoverPlan, WritebackError> {
     let fmt = image::guess_format(new_cover_bytes)
         .map_err(|e| WritebackError::ValidationRegressed(format!("unknown cover format: {e}")))?;

@@ -1,3 +1,14 @@
+//! `ZIP` archive integrity layer (Layer 1) and the `ZipHandle` backing store.
+//!
+//! Reads the entire archive into memory once, checks every entry for path
+//! traversal, per-entry uncompressed size (500 MB cap), aggregate uncompressed
+//! size (2 GB cap), and extractability. Entries passing all checks are recorded
+//! in `ZipHandle::entries`; the raw bytes are kept in `ZipHandle::bytes` so
+//! upper layers can re-open the archive without additional filesystem I/O.
+//!
+//! All size checks use the `ZIP` central-directory declared size to bound
+//! allocation, plus a lying-central-directory probe for small entries.
+
 use std::io::Read;
 use std::path::Path;
 use zip::ZipArchive;
@@ -9,16 +20,23 @@ use super::{
 
 /// Lightweight handle returned by `zip_layer` so upper layers can re-open the archive.
 pub struct ZipHandle {
-    /// Raw bytes of the entire archive (read once; ZIP seeks into this).
+    /// Raw bytes of the entire archive (read once; `ZIP` seeks into this).
     pub bytes: Vec<u8>,
     /// Names of all successfully readable entries.
     pub entries: Vec<String>,
 }
 
-/// Validate ZIP integrity, path safety, and size bounds.
+/// Validate `ZIP` integrity, path safety, and size bounds.
 ///
-/// Returns a [`ZipHandle`] on success. Appends [`Issue`]s to `issues`.
+/// Returns a `ZipHandle` on success. Appends `Issue`s to `issues`.
 /// If any `Irrecoverable` issue is added, the caller short-circuits.
+///
+/// # Errors
+///
+/// Returns `EpubError::Io` if the file at `path` cannot be read from
+/// the filesystem. A corrupt central directory or unreadable entry is recorded
+/// as an `IssueKind::CorruptEntry` issue rather than returned as an
+/// error — the function still returns `Ok` with those issues appended.
 pub fn validate(path: &Path, issues: &mut Vec<Issue>) -> Result<ZipHandle, super::EpubError> {
     let bytes = std::fs::read(path)?;
     let mut entries = Vec::new();

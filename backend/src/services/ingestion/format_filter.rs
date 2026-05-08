@@ -1,3 +1,10 @@
+//! Format-priority filter for the ingestion pipeline.
+//!
+//! When a drop-zone contains multiple editions of the same title (e.g. both
+//! `Foundation.epub` and `Foundation.pdf`), `select_by_priority` picks the
+//! single highest-priority format per `(directory, lowercase stem)` group so
+//! the orchestrator ingests exactly one file per logical book.
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 

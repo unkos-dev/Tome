@@ -1,20 +1,42 @@
 //! Transforms `OpfData` into structured metadata ready for DB storage.
+//!
+//! The single entry point `extract` sanitises every text field via
+//! [`crate::services::metadata::sanitiser`], resolves `ISBN` identifiers,
+//! detects title-author inversion, and computes a completeness-based
+//! confidence score. The output is passed downstream to `draft::write_drafts`.
 
 use crate::services::epub::opf_layer;
 
 use super::{inversion, isbn, sanitiser};
 
+/// Fully processed metadata derived from a single `OPF` document.
+///
+/// All text fields have been sanitised (entities decoded, `HTML` stripped,
+/// whitespace normalised). Fields are `None` when absent or empty after
+/// sanitisation — callers must not treat empty strings as valid values.
 #[derive(Debug, Clone)]
 pub struct ExtractedMetadata {
+    /// Sanitised display title, or `None` if the `OPF` title was absent or empty.
     pub title: Option<String>,
+    /// Lowercased sort key derived from `title`; absent when `title` is absent.
     pub sort_title: Option<String>,
+    /// Sanitised book description / synopsis.
     pub description: Option<String>,
+    /// `BCP 47` language tag as declared in the `OPF` (e.g. `"en"`, `"fr"`).
     pub language: Option<String>,
+    /// Ordered list of sanitised creators (authors, editors, translators).
     pub creators: Vec<ExtractedCreator>,
+    /// Sanitised publisher name.
     pub publisher: Option<String>,
+    /// Publication date parsed from `OPF` `<dc:date>` in `YYYY`, `YYYY-MM`,
+    /// or `YYYY-MM-DD` format. Partial dates default to the first of month/year.
     pub pub_date: Option<time::Date>,
+    /// Validated `ISBN` result; `valid` is `false` when no recognisable `ISBN`
+    /// was found among the `OPF` identifiers.
     pub isbn: Option<isbn::IsbnResult>,
+    /// Sanitised subject/genre tags.
     pub subjects: Vec<String>,
+    /// Series name and position parsed from Calibre-style `OPF` series metadata.
     pub series: Option<SeriesInfo>,
     /// Consumed by the enrichment confidence scorer (Step 7 task 14).
     #[allow(dead_code)]
@@ -23,20 +45,33 @@ pub struct ExtractedMetadata {
     pub confidence: f32,
 }
 
+/// A single contributor (author, editor, translator, narrator) extracted from `OPF`.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ExtractedCreator {
+    /// Sanitised display name as it appears in the `OPF`.
     pub name: String,
+    /// Sort key in `"Surname, Given"` form; single-word names are returned as-is.
     pub sort_name: String,
+    /// Contributor role mapped from the `OPF` `relator` code: `"author"`,
+    /// `"editor"`, `"translator"`, or `"narrator"`. Unknown codes map to `"author"`.
     pub role: String,
 }
 
+/// Series membership parsed from Calibre-style `OPF` series metadata.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct SeriesInfo {
+    /// Sanitised series name.
     pub name: String,
+    /// Position within the series (e.g. `1.0`, `2.5`). `None` when absent.
     pub position: Option<f64>,
 }
 
-/// Extract and sanitise metadata from parsed OPF data.
+/// Build an [`ExtractedMetadata`] from a parsed `OPF` document.
+///
+/// Applies the full sanitisation pipeline to every text field, resolves
+/// `ISBN` identifiers, generates sort keys, detects title-author inversion,
+/// and computes a completeness-based confidence score (base 0.3 + 0.1 per
+/// present field, capped at 1.0).
 pub fn extract(opf: &opf_layer::OpfData) -> ExtractedMetadata {
     let title = opf
         .title

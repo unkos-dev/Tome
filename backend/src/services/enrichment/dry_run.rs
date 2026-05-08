@@ -1,7 +1,7 @@
 //! Dry-run preview for the enrichment pipeline.
 //!
 //! Reuses the source fan-out and cache write steps from
-//! [`super::orchestrator`] but does NOT touch `metadata_versions` or
+//! `orchestrator` but does NOT touch `metadata_versions` or
 //! canonical columns.  The caller receives an in-memory diff.
 
 use std::collections::HashMap;
@@ -17,30 +17,63 @@ use super::policy::{self, Decision, PolicyInputRow};
 use super::sources::SourceResult;
 use super::value_hash;
 
+/// The result of a dry-run enrichment pass for a single manifestation.
+///
+/// Contains three mutually exclusive lists: changes that would be applied
+/// immediately, changes that would be staged for review, and fields that
+/// are locked (silently skipped).  Source failures are surfaced separately
+/// so callers can distinguish data results from infrastructure issues.
 #[derive(Debug, Serialize)]
 pub struct DryRunDiff {
+    /// Manifestation that was evaluated.
     pub manifestation_id: Uuid,
+    /// Parent work of the manifestation.
     pub work_id: Uuid,
+    /// Fields that would be promoted to canonical (one entry per field).
     pub would_apply: Vec<FieldChange>,
+    /// Fields that would be left as pending and require human review.
     pub would_stage: Vec<FieldChange>,
+    /// Field names that were skipped because a user lock is active.
     pub locked: Vec<String>,
+    /// Sources that returned an error during this run.
     pub source_failures: Vec<SourceFailureSummary>,
 }
 
+/// One proposed change to a single field from a single source.
 #[derive(Debug, Serialize)]
 pub struct FieldChange {
+    /// Canonical field name (e.g. `"title"`, `"isbn_13"`).
     pub field_name: String,
+    /// Source that produced this value (e.g. `"openlibrary"`, `"googlebooks"`).
     pub source_id: String,
+    /// The proposed new value in its raw `JSON` form.
     pub new_value: serde_json::Value,
+    /// Number of sources that reported the same value (quorum count).
     pub quorum: u32,
 }
 
+/// A brief summary of a source-level failure during a dry-run pass.
 #[derive(Debug, Serialize)]
 pub struct SourceFailureSummary {
+    /// Source that failed (e.g. `"hardcover"`).
     pub source_id: String,
+    /// Human-readable error description.
     pub error: String,
 }
 
+/// Simulate an enrichment run for `manifestation_id` and return an in-memory diff.
+///
+/// Reuses the full source fan-out path from `orchestrator` — including
+/// cache writes — but does **not** mutate `metadata_versions`, canonical columns,
+/// or `writeback_jobs`.  Safe to call on any manifestation without side-effects
+/// beyond the `api_cache` table.
+///
+/// # Errors
+///
+/// Returns an error if the database is unreachable, the manifestation does not
+/// exist, or the fan-out call fails at the infrastructure level.  Individual
+/// source failures are collected into [`DryRunDiff::source_failures`] rather
+/// than causing an error return.
 pub async fn preview(
     pool: &PgPool,
     config: &Config,

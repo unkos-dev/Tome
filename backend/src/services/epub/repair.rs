@@ -1,3 +1,12 @@
+//! High-level repair orchestrator for the `EPUB` validation pipeline.
+//!
+//! Reads the `Repaired`-severity `Issue`s produced by the earlier pipeline
+//! layers and applies the corresponding fixes: broken spine-ref removal (by
+//! rewriting the `OPF` `XML`), `META-INF/container.xml` regeneration, and
+//! encoding transcoding. All mutations go through [`repack::with_modifications`]
+//! so the repacked archive is always written to a temp file and then atomically
+//! renamed over the source.
+
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
@@ -7,10 +16,18 @@ use zip::write::{ExtendedFileOptions, FileOptions};
 use super::repack;
 use super::{EpubError, Issue, IssueKind};
 
-/// Re-package the EPUB at `path` applying all `Repaired`-severity issues.
+/// Re-package the `EPUB` at `path` applying all `Repaired`-severity issues.
 ///
 /// Writes to a temp file in the same directory, then `rename()`s over `path`
 /// atomically. If re-packaging fails, `path` is left untouched.
+///
+/// # Errors
+///
+/// Returns [`EpubError::Io`] if the archive bytes cannot be read from `path`
+/// or if a `ZIP` entry referenced by an encoding-fix issue cannot be extracted.
+/// Returns [`EpubError::Zip`] if `ZipArchive::new` or `by_name` fails while
+/// reading entries for the rewrite phase. Returns [`EpubError::TempFile`] if
+/// the repacked temp file cannot be atomically persisted over `path`.
 #[allow(
     clippy::too_many_lines,
     reason = "repackage handles 4 distinct EPUB structural repair cases in one pass; splitting would require passing shared state between helpers and obscure the repair logic"
@@ -150,7 +167,7 @@ pub fn repackage(path: &Path, issues: &[Issue], opf_path: Option<&str>) -> Resul
     Ok(())
 }
 
-/// Rewrite OPF XML removing `<itemref>` elements whose `idref` is in `broken_refs`.
+/// Rewrite `OPF` `XML` removing `<itemref>` elements whose `idref` is in `broken_refs`.
 fn rewrite_opf_remove_broken_spine(opf_bytes: &[u8], broken_refs: &[String]) -> Vec<u8> {
     let Ok(xml) = std::str::from_utf8(opf_bytes) else {
         return opf_bytes.to_vec();
@@ -253,7 +270,7 @@ fn transcode_to_utf8(bytes: &[u8], declared_enc: &str) -> Option<Vec<u8>> {
     Some(utf8_str.into_bytes())
 }
 
-/// Escape XML special characters in `s` for use in an attribute value.
+/// Escape `XML` special characters in `s` for use in an attribute value.
 fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;")
         .replace('<', "&lt;")

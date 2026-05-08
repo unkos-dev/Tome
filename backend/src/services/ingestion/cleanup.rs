@@ -1,8 +1,17 @@
+//! Post-ingestion cleanup: remove processed source files and prune empty directories.
+//!
+//! Cleanup runs only after a batch completes with zero failures, so source files
+//! are preserved whenever any ingest step errors. The ingestion root is never
+//! deleted — it is the sentinel that bounds upward directory removal.
+
 use std::path::{Path, PathBuf};
 
+/// Counts of filesystem objects removed during a cleanup pass.
 #[derive(Debug)]
 pub struct CleanupResult {
+    /// Number of individual source files successfully deleted.
     pub removed_files: usize,
+    /// Number of now-empty parent directories successfully pruned.
     pub removed_dirs: usize,
 }
 
