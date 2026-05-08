@@ -19,9 +19,10 @@
 
 /// Authorization role assigned to a [`crate::models::user::User`].
 ///
-/// Drives `auth::middleware::require_admin` and `require_not_child`;
-/// renaming a variant compile-errors at every consumer, eliminating the
-/// silent-lockout hazard documented in UNK-108.
+/// Drives `auth::middleware::CurrentUser::require_admin` and
+/// `auth::middleware::CurrentUser::require_not_child`; renaming a variant
+/// compile-errors at every consumer, eliminating the silent-lockout
+/// hazard documented in UNK-108.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize, sqlx::Type,
 )]

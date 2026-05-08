@@ -11,8 +11,9 @@
 //!    `works.{title,description,language}_version_id` + `work_authors.source_version_id`
 //!    from the draft IDs returned by `metadata::draft::write_drafts`.
 //!
-//! `find_or_create` remains as a transaction-wrapped convenience for call sites
-//! that don't need the ingest-invariant split (notably the existing tests).
+//! `find_or_create` (test-only, `#[cfg(test)]`) remains as a
+//! transaction-wrapped convenience for call sites that don't need the
+//! ingest-invariant split (notably the existing tests).
 //!
 //! Deviation from plan task 4: the plan's single `find_or_create(tx, meta, draft_ids)`
 //! signature cannot be implemented without breaking the FK cycle

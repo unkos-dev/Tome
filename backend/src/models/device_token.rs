@@ -21,8 +21,7 @@ pub struct DeviceToken {
     pub user_id: Uuid,
     /// User-supplied label (e.g. "My Kindle").
     pub name: String,
-    /// SHA-256 of the issued token. Stored, never the plaintext.
-    /// Skipped in serialization so JSON responses can't leak it.
+    /// SHA-256 of the issued token. Never the plaintext.
     #[serde(skip)]
     pub token_hash: String,
     /// `now()` of the last successful auth, written by

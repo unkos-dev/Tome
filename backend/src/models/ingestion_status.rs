@@ -30,7 +30,9 @@ pub enum IngestionStatus {
     Processing,
     /// Ingestion finished successfully.
     Complete,
-    /// Ingestion failed; the job row records the cause.
+    /// Ingestion failed; the cause is recorded on the corresponding
+    /// [`crate::models::ingestion_job::IngestionJob`]'s `error_message`
+    /// field, not on the manifestation row carrying this status.
     Failed,
     /// File was skipped (e.g. duplicate hash, unsupported format under current policy).
     Skipped,
