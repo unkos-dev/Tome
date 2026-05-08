@@ -77,6 +77,20 @@ services:
         condition: service_healthy
     # Healthcheck baked into the runtime image (see Dockerfile) — compose
     # inherits HEALTHCHECK from the image so no override here.
+    #
+    # No `ports:` mapping and no Traefik labels by design. Routing/TLS
+    # terminate at the host's reverse proxy (out-of-tree). The operator
+    # is expected to attach this service to a Traefik-reachable docker
+    # network out-of-band — typically:
+    #
+    #   docker network connect <traefik-net> docker-reverie-1
+    #
+    # or, if the operator's deploy automation already declares the
+    # Traefik network as `external`, an override compose file extends
+    # this service with the appropriate `networks:` entry. Keeping the
+    # in-tree compose minimal means the same file works regardless of
+    # the operator's reverse-proxy choice (Traefik file provider,
+    # Traefik docker provider, Caddy, nginx-proxy, etc.).
     restart: unless-stopped
 
 volumes:
