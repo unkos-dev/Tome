@@ -47,27 +47,28 @@ use crate::state::AppState;
 
 /// Build the production Axum router with a Postgres-backed session store.
 ///
-/// Wires every reserved-prefix route (`/api`, `/auth`, `/health`, `/opds`),
-/// the SPA assets fallback (when `frontend_dist_path` is configured), the
-/// CSP middleware stack, and the auth/session layers. Returned router is
-/// ready for `axum::serve`.
+/// Wires the unconditional reserved-prefix routes (`/api`, `/auth`,
+/// `/health`), the OPDS catalogue at `/opds` when `config.opds.enabled`
+/// is set, the SPA assets fallback when `frontend_dist_path` is
+/// configured, the CSP middleware stack, and the auth/session layers.
+/// Returned router is ready for `axum::serve`.
 ///
 /// Production callers should reach this through [`run`]. Embedders mounting
 /// Reverie inside another Axum service can call it directly, supplying a
 /// fully-initialised [`AppState`] (DB pools + finalised CSP headers on
 /// `state.config.security`) and an [`AuthBackend`] sharing the same primary
 /// pool.
-// Sessions persist to Postgres so a backend restart doesn't log every
-// user out. The backing schema is provisioned by the
-// `20260507000001_tower_sessions_postgres_store` migration; defaults
-// (`tower_sessions.session`) match `PostgresStore::new`'s built-ins so
-// no `with_schema_name`/`with_table_name` overrides are needed.
-// Expired-session cleanup is a manual sweep (`ExpiredDeletion::delete_expired`)
-// — not currently scheduled; rows accumulate until reaped manually.
-// For a single-instance self-hosted deployment this is acceptable; if
-// session growth becomes a footprint concern, wire a tokio-cron-style
-// sweep in main.
 pub fn build_router(state: AppState, auth_backend: AuthBackend) -> Router {
+    // Sessions persist to Postgres so a backend restart doesn't log every
+    // user out. The backing schema is provisioned by the
+    // `20260507000001_tower_sessions_postgres_store` migration; defaults
+    // (`tower_sessions.session`) match `PostgresStore::new`'s built-ins so
+    // no `with_schema_name`/`with_table_name` overrides are needed.
+    // Expired-session cleanup is a manual sweep (`ExpiredDeletion::delete_expired`)
+    // — not currently scheduled; rows accumulate until reaped manually.
+    // For a single-instance self-hosted deployment this is acceptable; if
+    // session growth becomes a footprint concern, wire a tokio-cron-style
+    // sweep in main.
     let session_store = PostgresStore::new(state.pool.clone());
     build_router_with_session_store(state, auth_backend, session_store)
 }
@@ -166,16 +167,33 @@ fn resolve_log_filter(configured_level: &str) -> (EnvFilter, Option<String>) {
 
 /// Boot and run the Reverie API server until shutdown.
 ///
-/// Loads configuration from environment, finalises CSP headers, opens DB
-/// pools (primary, ingestion, writeback), initialises the OIDC client,
-/// builds the router, spawns the ingestion watcher, the enrichment
-/// queue, and the writeback worker, then binds the listener and serves
-/// until SIGINT/SIGTERM. Returns once graceful shutdown completes.
+/// Loads configuration from the environment, finalises CSP headers, opens
+/// the primary and ingestion DB pools, initialises the OIDC client, builds
+/// the router, spawns the ingestion watcher, the enrichment queue, and the
+/// writeback worker (the last on a dedicated `reverie_app` pool that sets
+/// `app.system_context = 'writeback'` per-connection), then binds the
+/// listener and serves until SIGINT/SIGTERM. Returns once graceful
+/// shutdown completes.
 ///
 /// Caller is responsible for installing a tokio runtime — typically by
 /// being invoked from a `#[tokio::main]` `async fn main` in the binary
 /// crate. Failures during startup return an error rather than panicking;
 /// callers should surface those to operators with a non-zero exit.
+///
+/// # Errors
+///
+/// Returns an error when:
+/// - configuration cannot be loaded from the environment
+///   (missing or invalid env var);
+/// - the API or HTML CSP string fails to parse as a valid HTTP header
+///   value (a programming-invariant failure that beats silently dropping
+///   the header on every response);
+/// - frontend dist validation fails when `frontend_dist_path` is set
+///   (rebuild the frontend with `vite build`);
+/// - any of the primary, ingestion, or writeback DB pools cannot connect;
+/// - OIDC discovery against the configured issuer fails;
+/// - the TCP listener cannot bind to the configured port;
+/// - `axum::serve` returns an error during the serving loop.
 pub async fn run() -> anyhow::Result<()> {
     let mut config =
         Config::from_env().map_err(|e| anyhow::anyhow!("invalid configuration: {e}"))?;

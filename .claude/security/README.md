@@ -86,8 +86,8 @@ the deviation over editing the imported file.
 **Override:** `codeguard-0-session-management-and-cookies.md` → "Cookie Security
 Configuration" — mandates `Secure` on session cookies.
 
-**Reverie's position:** `Secure` is omitted. See `backend/src/main.rs` (session
-setup).
+**Reverie's position:** `Secure` is omitted. See
+`backend/src/lib.rs::build_router_with_session_store` (session setup).
 
 **Rationale:** The backend runs behind a TLS-terminating reverse proxy and
 sees plain HTTP. Setting `Secure` on the cookie would prevent delivery over
