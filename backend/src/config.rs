@@ -1,4 +1,18 @@
-#![allow(missing_docs)]
+//! Environment-driven configuration loaded once at startup.
+//!
+//! [`Config::from_env`] is the production entry point; tests inject a
+//! `HashMap`-backed closure through [`Config::from_source`] so test setup
+//! never mutates the process environment (UNK-100). Subsystem configs
+//! ([`OpdsConfig`], [`EnrichmentConfig`], [`CoverConfig`],
+//! [`WritebackConfig`], [`SecurityConfig`]) own their own per-var parsing
+//! to keep the `Config::from_source` body shallow.
+//!
+//! [`SecurityConfig`] is a partial value after `from_env` — the
+//! `csp_html_header` / `csp_api_header` fields stay `None` until
+//! [`crate::run`] precomputes them from the FOUC-script hash and the
+//! configured report endpoint. Rendering a request before that
+//! finalisation pass would silently emit no `Content-Security-Policy`;
+//! `run` panics rather than letting that happen.
 
 use std::env;
 
@@ -10,32 +24,95 @@ use crate::models::manifestation_format::ManifestationFormat;
 // `debt/2026-05-05-env-lock-config-tests.md`.
 type EnvGet<'a> = dyn Fn(&str) -> Option<String> + 'a;
 
+/// Resolved process-wide configuration. Fields reflect the settled view of
+/// the environment after defaults, parsing, and validation; subsystem
+/// configs (OPDS, enrichment, cover, writeback, security) are nested as
+/// owned values so callers do not pass the entire `Config` into helpers
+/// that only need one slice.
 #[derive(Debug, Clone)]
 pub struct Config {
+    /// HTTP listen port (`REVERIE_PORT`, default `3000`).
     pub port: u16,
+    /// Primary database DSN (`DATABASE_URL`, required). Connections opened
+    /// against this DSN run as `reverie_app`; user-facing queries acquire
+    /// transactions through [`crate::db::acquire_with_rls`].
     pub database_url: String,
+    /// Filesystem root for persisted manifestation files
+    /// (`REVERIE_LIBRARY_PATH`, default `./library`). The OPDS download
+    /// handler canonicalises file paths against this root.
     pub library_path: String,
+    /// Watched ingestion drop directory (`REVERIE_INGESTION_PATH`,
+    /// default `./ingestion`). The watcher consumes files from here.
     pub ingestion_path: String,
+    /// Failed-ingestion quarantine directory
+    /// (`REVERIE_QUARANTINE_PATH`, default `./quarantine`).
     pub quarantine_path: String,
+    /// `RUST_LOG`-style filter directive used as the fallback when
+    /// `RUST_LOG` itself is unset or unparseable
+    /// (`RUST_LOG`, default `info`).
     pub log_level: String,
+    /// Per-pool connection cap (`REVERIE_DB_MAX_CONNECTIONS`, default
+    /// `10`); applied identically to the primary, ingestion, and
+    /// writeback pools.
     pub db_max_connections: u32,
+    /// OIDC issuer URL (`OIDC_ISSUER_URL`, required) — the trust seam
+    /// for the entire authentication subsystem; TLS validation against
+    /// system roots is the boundary control.
     pub oidc_issuer_url: String,
+    /// OIDC client id (`OIDC_CLIENT_ID`, required).
     pub oidc_client_id: String,
+    /// OIDC client secret (`OIDC_CLIENT_SECRET`, required). Treated as
+    /// secret material — never logged.
     pub oidc_client_secret: String,
+    /// OIDC redirect URI (`OIDC_REDIRECT_URI`, required). Must match
+    /// the value registered with the issuer.
     pub oidc_redirect_uri: String,
+    /// Ingestion-pipeline DSN (`DATABASE_URL_INGESTION`); falls back to
+    /// `database_url` when unset. Connections run as
+    /// `reverie_ingestion` against the `*_ingestion_full_access` RLS
+    /// policies.
     pub ingestion_database_url: String,
+    /// Ranked acceptable formats (`REVERIE_FORMAT_PRIORITY`,
+    /// comma-separated; default `epub,pdf,mobi,azw3,cbz,cbr`). The
+    /// ingestion pipeline picks the highest-ranked file when an
+    /// incoming work has multiple candidates.
     pub format_priority: Vec<ManifestationFormat>,
+    /// Post-ingestion cleanup behaviour (`REVERIE_CLEANUP_MODE`,
+    /// default `all`). See [`CleanupMode`] for variant semantics.
     pub cleanup_mode: CleanupMode,
+    /// Metadata enrichment knobs (concurrency, cache TTLs, etc.).
     pub enrichment: EnrichmentConfig,
+    /// Cover-image acquisition limits (max bytes, redirect cap, etc.).
     pub cover: CoverConfig,
+    /// Writeback worker knobs (concurrency, retry cap).
     pub writeback: WritebackConfig,
+    /// OPDS catalogue settings (mount enable, page size, realm,
+    /// `public_url`).
     pub opds: OpdsConfig,
+    /// Response-header policy (CSP, HSTS, reporting endpoint, dist
+    /// path). `csp_*_header` fields are finalised by [`crate::run`]
+    /// after construction.
     pub security: SecurityConfig,
+    /// `OpenLibrary` API base URL (`REVERIE_OPENLIBRARY_BASE_URL`,
+    /// default `https://openlibrary.org`).
     pub openlibrary_base_url: String,
+    /// Google Books API base URL (`REVERIE_GOOGLEBOOKS_BASE_URL`,
+    /// default `https://www.googleapis.com/books/v1`).
     pub googlebooks_base_url: String,
+    /// Optional Google Books API key
+    /// (`REVERIE_GOOGLEBOOKS_API_KEY`); when set, requests bypass the
+    /// public anonymous quota.
     pub googlebooks_api_key: Option<String>,
+    /// Hardcover GraphQL endpoint (`REVERIE_HARDCOVER_BASE_URL`,
+    /// default `https://api.hardcover.app/v1/graphql`).
     pub hardcover_base_url: String,
+    /// Optional Hardcover bearer token
+    /// (`REVERIE_HARDCOVER_API_TOKEN`); requests are skipped when
+    /// unset.
     pub hardcover_api_token: Option<String>,
+    /// Operator contact (`REVERIE_OPERATOR_CONTACT`); embedded into
+    /// the outbound `User-Agent` to claim `OpenLibrary`'s identified
+    /// 3 req/s rate-limit tier (vs. 1 req/s anonymous).
     pub operator_contact: Option<String>,
 }
 
@@ -48,38 +125,89 @@ pub struct Config {
 /// regardless of OPDS availability.
 #[derive(Debug, Clone)]
 pub struct OpdsConfig {
+    /// Whether the `/opds/*` routes are mounted
+    /// (`REVERIE_OPDS_ENABLED`, default `true`).
     pub enabled: bool,
+    /// Default page size for paginated feeds (`REVERIE_OPDS_PAGE_SIZE`,
+    /// default `50`; valid range 1-500).
     pub page_size: u32,
+    /// `WWW-Authenticate: Basic realm=...` value emitted on 401
+    /// responses from `/opds/*` (`REVERIE_OPDS_REALM`, default
+    /// `"Reverie OPDS"`). Validated to exclude `"` to keep the header
+    /// well-formed.
     pub realm: String,
+    /// Externally-visible base URL the catalogue emits absolute links
+    /// rooted at (`REVERIE_PUBLIC_URL`). Required when `enabled=true`;
+    /// optional otherwise.
     pub public_url: Option<url::Url>,
 }
 
+/// Metadata-enrichment subsystem knobs (background workers that fetch
+/// from `OpenLibrary` / Google Books / Hardcover).
 #[derive(Debug, Clone)]
 pub struct EnrichmentConfig {
+    /// Whether the enrichment queue is spawned
+    /// (`REVERIE_ENRICHMENT_ENABLED`, default `true`).
     pub enabled: bool,
+    /// In-flight enrichment job concurrency
+    /// (`REVERIE_ENRICHMENT_CONCURRENCY`, default `2`; valid range 1-10).
     pub concurrency: u32,
+    /// Sleep between empty-queue polls
+    /// (`REVERIE_ENRICHMENT_POLL_IDLE_SECS`, default `30`).
     pub poll_idle_secs: u64,
+    /// Per-job overall fetch budget
+    /// (`REVERIE_ENRICHMENT_FETCH_BUDGET_SECS`, default `15`).
     pub fetch_budget_secs: u64,
+    /// Per-request HTTP timeout for outbound metadata fetches
+    /// (`REVERIE_ENRICHMENT_HTTP_TIMEOUT_SECS`, default `10`).
     pub http_timeout_secs: u64,
+    /// Maximum retry attempts before a job is considered exhausted
+    /// (`REVERIE_ENRICHMENT_MAX_ATTEMPTS`, default `10`).
     pub max_attempts: u32,
+    /// Cache TTL for successful (`hit`) responses
+    /// (`REVERIE_ENRICHMENT_CACHE_TTL_HIT_DAYS`, default `30`).
     pub cache_ttl_hit_days: u32,
+    /// Cache TTL for "not found" (`miss`) responses
+    /// (`REVERIE_ENRICHMENT_CACHE_TTL_MISS_DAYS`, default `7`).
     pub cache_ttl_miss_days: u32,
+    /// Cache TTL for transient-error responses
+    /// (`REVERIE_ENRICHMENT_CACHE_TTL_ERROR_MINS`, default `15`).
     pub cache_ttl_error_mins: u32,
 }
 
+/// Cover-image acquisition limits applied by the cover service when
+/// fetching from third-party metadata providers.
 #[derive(Debug, Clone)]
 pub struct CoverConfig {
+    /// Maximum bytes accepted per cover image
+    /// (`REVERIE_COVER_MAX_BYTES`, default `10_485_760` — 10 MiB).
     pub max_bytes: u64,
+    /// Per-download HTTP timeout
+    /// (`REVERIE_COVER_DOWNLOAD_TIMEOUT_SECS`, default `30`).
     pub download_timeout_secs: u64,
+    /// Minimum long-edge pixel dimension; smaller images are rejected
+    /// (`REVERIE_COVER_MIN_LONG_EDGE_PX`, default `1000`).
     pub min_long_edge_px: u32,
+    /// Maximum HTTP redirect hops the cover fetcher will follow
+    /// (`REVERIE_COVER_REDIRECT_LIMIT`, default `3`).
     pub redirect_limit: usize,
 }
 
+/// Writeback-worker knobs (the background task that flushes pending
+/// canonical-metadata mutations into the source manifestation files).
 #[derive(Debug, Clone)]
 pub struct WritebackConfig {
+    /// Whether the writeback worker is spawned
+    /// (`REVERIE_WRITEBACK_ENABLED`, default `true`).
     pub enabled: bool,
+    /// In-flight writeback job concurrency
+    /// (`REVERIE_WRITEBACK_CONCURRENCY`, default `2`; valid range 1-10).
     pub concurrency: u32,
+    /// Sleep between empty-queue polls
+    /// (`REVERIE_WRITEBACK_POLL_IDLE_SECS`, default `5`).
     pub poll_idle_secs: u64,
+    /// Maximum retry attempts before a writeback job is considered
+    /// exhausted (`REVERIE_WRITEBACK_MAX_ATTEMPTS`, default `10`).
     pub max_attempts: u32,
 }
 
@@ -106,15 +234,43 @@ pub struct WritebackConfig {
 /// are still applied because they are derived on demand.
 #[derive(Debug, Clone)]
 pub struct SecurityConfig {
+    /// Whether the deployment is fronted by a TLS-terminating reverse
+    /// proxy (`REVERIE_BEHIND_HTTPS`, default `false`). Gates HSTS
+    /// emission — never emitted on plaintext HTTP because the browser
+    /// would refuse the next TLS-less request to this host.
     pub behind_https: bool,
+    /// Whether the HSTS header carries `; includeSubDomains`
+    /// (`REVERIE_HSTS_INCLUDE_SUBDOMAINS`, default `false`). Requires
+    /// `behind_https=true`.
     pub hsts_include_subdomains: bool,
+    /// Whether the HSTS header carries `; preload`
+    /// (`REVERIE_HSTS_PRELOAD`, default `false`). Requires
+    /// `hsts_include_subdomains=true` (chrome.com / hstspreload.org
+    /// rules).
     pub hsts_preload: bool,
+    /// Optional CSP-violation reporting endpoint
+    /// (`REVERIE_CSP_REPORT_ENDPOINT`). Pre-validated at startup to
+    /// reject `"`/`;`/CR/LF (header-injection guard) and any scheme
+    /// other than `http`/`https`.
     pub csp_report_endpoint: Option<url::Url>,
+    /// Optional path to the built frontend dist directory
+    /// (`REVERIE_FRONTEND_DIST_PATH`). When set, the SPA assets router
+    /// is mounted and the FOUC-script hash is read at startup to seed
+    /// the HTML CSP.
     pub frontend_dist_path: Option<std::path::PathBuf>,
+    /// Precomputed `Content-Security-Policy` header for HTML
+    /// responses. `None` after [`Self::from_env`]; finalised by
+    /// [`crate::run`] from the FOUC-script hash + reporting endpoint.
     pub csp_html_header: Option<axum::http::HeaderValue>,
+    /// Precomputed `Content-Security-Policy` header for API
+    /// responses. `None` after [`Self::from_env`]; finalised by
+    /// [`crate::run`] from the reporting endpoint
+    /// (`default-src 'none'`-rooted, no script-src hashes).
     pub csp_api_header: Option<axum::http::HeaderValue>,
 }
 
+/// Post-ingestion cleanup behaviour selector for the watcher's
+/// "after a successful batch" hook.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CleanupMode {
     /// Delete all files in the ingestion directory after a successful batch
@@ -125,12 +281,25 @@ pub enum CleanupMode {
     None,
 }
 
+/// Configuration-load failure mode. Surfaces missing required vars and
+/// parse/validation failures with the offending var name attached so
+/// operator error messages are actionable.
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigError {
+    /// A required environment variable was unset. Carries the variable
+    /// name verbatim for surfacing to operators.
     #[error("missing required environment variable: {0}")]
     MissingVar(String),
+    /// A variable was set but parse/validation rejected the value.
+    /// `var` names the variable; `reason` describes why the value was
+    /// rejected (out of range, malformed URL, unsupported enum, etc.).
     #[error("invalid value for {var}: {reason}")]
-    Invalid { var: String, reason: String },
+    Invalid {
+        /// Name of the offending environment variable.
+        var: String,
+        /// Why the supplied value was rejected.
+        reason: String,
+    },
 }
 
 /// Process-env adapter for `Config::from_env`. Extracted from a closure so it
@@ -143,6 +312,17 @@ fn process_env_get(k: &str) -> Option<String> {
 impl Config {
     /// Public entry point for production: loads `.env` (best-effort) then
     /// reads from process env via `std::env::var`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::MissingVar`] when a required variable is
+    /// unset (`DATABASE_URL`, `OIDC_*`); returns [`ConfigError::Invalid`]
+    /// when an optional variable is set but fails parse or validation
+    /// (out-of-range numerics, unsupported `format_priority` entries,
+    /// malformed URLs, header-injection-prone characters in
+    /// `REVERIE_CSP_REPORT_ENDPOINT`, etc.). The variant carries the
+    /// offending variable name so the surfaced operator-facing message
+    /// is actionable.
     pub fn from_env() -> Result<Self, ConfigError> {
         dotenvy::dotenv().ok();
         Self::from_source(&process_env_get)
@@ -151,6 +331,13 @@ impl Config {
     /// Inject env via a closure. Tests pass a `HashMap`-backed `&EnvGet` so
     /// they never mutate process env (UNK-100). Production calls this via
     /// `from_env` with the `std::env::var` adapter.
+    ///
+    /// # Errors
+    ///
+    /// Same surface as [`Self::from_env`] minus the dotenv side-effect:
+    /// [`ConfigError::MissingVar`] for missing required vars,
+    /// [`ConfigError::Invalid`] for values that fail parse or
+    /// validation.
     #[allow(
         clippy::too_many_lines,
         reason = "Config::from_source threads ~15 independent env vars with error propagation; extracting would produce boilerplate without improving readability"
@@ -383,6 +570,23 @@ impl OpdsConfig {
 }
 
 impl SecurityConfig {
+    /// Production entry point: read security-related env vars from the
+    /// process environment.
+    ///
+    /// The returned value is a partial — `csp_html_header` and
+    /// `csp_api_header` are `None` until [`crate::run`] precomputes them
+    /// from the FOUC-script hash and the configured report endpoint.
+    /// Embedders that bypass `run` must perform that finalisation
+    /// themselves (see [`crate::security::csp`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::Invalid`] when a security-related variable
+    /// fails validation: HSTS preconditions
+    /// (`REVERIE_HSTS_INCLUDE_SUBDOMAINS` requires `behind_https`;
+    /// `REVERIE_HSTS_PRELOAD` requires `include_subdomains`), the
+    /// CSP-reporting URL header-injection guard (`"`/`;`/CR/LF rejected),
+    /// or unsupported scheme on the reporting URL.
     pub fn from_env() -> Result<Self, ConfigError> {
         Self::from_source(&process_env_get)
     }
