@@ -57,11 +57,6 @@ use crate::state::AppState;
 /// fully-initialised [`AppState`] (DB pools + finalised CSP headers on
 /// `state.config.security`) and an [`AuthBackend`] sharing the same primary
 /// pool.
-///
-/// Tests that need to share a `MemoryStore` between the harness and the
-/// server (so the test can inspect server-written session state, e.g. the
-/// OIDC `nonce` set by `/auth/login`) bypass this entry and call
-/// `crate::build_router_with_session_store` directly.
 // Sessions persist to Postgres so a backend restart doesn't log every
 // user out. The backing schema is provisioned by the
 // `20260507000001_tower_sessions_postgres_store` migration; defaults
@@ -217,7 +212,7 @@ pub async fn run() -> anyhow::Result<()> {
     if let Some(err) = log_level_parse_err {
         tracing::warn!(
             error = %err,
-            "REVERIE_LOG_LEVEL unparseable; falling back to info. Set RUST_LOG or fix REVERIE_LOG_LEVEL to silence."
+            "RUST_LOG is unparseable; falling back to info. Fix RUST_LOG to silence this warning."
         );
     }
 
