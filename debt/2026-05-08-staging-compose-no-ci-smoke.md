@@ -94,4 +94,5 @@ When that PR merges:
   master ticket
 - PR #179 — landed the workaround (manual smoke only)
 - `docker/compose.staging.yml`, `docker/init-roles.sql`,
-  `docker/staging.env.example` — workaround surface
+  `docker/staging.env.bootstrap.example`,
+  `docker/staging.env.runtime.example` — workaround surface

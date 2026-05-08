@@ -6,24 +6,26 @@
 # host port exposure on postgres (LXC-internal only).
 #
 # Routing/TLS terminate at the host's reverse proxy via out-of-tree dynamic
-# config — no traefik labels here. `.env` alongside this file is populated
-# by the host secret-management agent (out-of-tree); compose only consumes it.
+# config — no traefik labels here. The `.env` and `.env.runtime` files
+# alongside this file are populated by the host secret-management agent
+# (out-of-tree); compose only consumes them.
 #
-# Required env vars (in `.env`):
-#   - POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB  (postgres bootstrap)
-#   - REVERIE_APP_PASSWORD, REVERIE_INGESTION_PASSWORD, REVERIE_READONLY_PASSWORD
-#                                  (consumed by init-roles.sql at fresh-volume
-#                                  init; the password embedded in DATABASE_URL /
-#                                  INGESTION_DATABASE_URL must match)
-#   - DATABASE_URL                 (consumed by Reverie; reverie_app role)
-#   - INGESTION_DATABASE_URL       (consumed by Reverie; reverie_ingestion role)
-#   - REVERIE_FRONTEND_DIST_PATH=/srv/frontend
-#   - REVERIE_VERSION              (image tag — driven by deploy script,
-#                                   not pinned here, so deploys are immutable
-#                                   and reversible by env-bump alone)
-#   - Reverie config: REVERIE_PORT, REVERIE_OPERATOR_CONTACT,
-#     OIDC settings, session secret, CSP report endpoint, etc.
-#     See backend/CLAUDE.md and docs/security/.
+# Two env files keep the postgres-bootstrap blast radius out of the app
+# container:
+#
+#   `.env` — auto-loaded by compose for `${VAR}` interpolation. Holds
+#            postgres-bootstrap creds and runtime-role passwords (consumed
+#            only by `reverie-postgres` via the explicit `environment:`
+#            block below) plus REVERIE_VERSION (image tag).
+#            Spec: docker/staging.env.bootstrap.example.
+#
+#   `.env.runtime` — injected only into the `reverie` service. Holds
+#            DATABASE_URL, INGESTION_DATABASE_URL, REVERIE_FRONTEND_DIST_PATH,
+#            REVERIE_PORT, REVERIE_OPERATOR_CONTACT, REVERIE_LOG_LEVEL,
+#            OIDC config. Spec: docker/staging.env.runtime.example.
+#
+# Compromise of the reverie container exposes only the non-superuser
+# DATABASE_URL passwords via `/proc/<pid>/environ`, not POSTGRES_PASSWORD.
 #
 # Bring up:  docker compose -f docker/compose.staging.yml up -d
 # Validate:  docker compose -f docker/compose.staging.yml config
@@ -69,8 +71,12 @@ services:
 
   reverie:
     image: ghcr.io/unkos-dev/reverie:${REVERIE_VERSION:?required}
+    # Scoped runtime env — `.env.runtime` excludes postgres-bootstrap
+    # superuser creds (POSTGRES_USER/PASSWORD/DB) so a compromised app
+    # container reading `/proc/<pid>/environ` can't escalate to a DB
+    # superuser. Spec: docker/staging.env.runtime.example.
     env_file:
-      - path: .env
+      - path: .env.runtime
         required: true
     depends_on:
       reverie-postgres:
