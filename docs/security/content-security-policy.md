@@ -92,6 +92,7 @@ absolute `http(s)://` URL.
 | API CSP           | Vite proxies `/api`, `/auth`, `/opds` to the backend; backend's API CSP applies to those responses | `default-src 'none'; frame-ancestors 'none'; base-uri 'none'` |
 | HSTS              | Off                                                | Off by default; on behind TLS with `REVERIE_BEHIND_HTTPS=true` |
 | `font-src` policy | `'self'` (matches prod)                            | `'self'` (declared in `csp.rs::build_html_csp`)            |
+| `connect-src` policy | `'self'` plus Vite HMR WebSocket                | `'self'` (declared in `csp.rs::build_html_csp`)            |
 | index.html source | Vite dev server, transformed with plugin markers   | Pre-built `dist/index.html` served by the backend          |
 
 **Dev relaxations do not ship to prod.** `'unsafe-inline' 'unsafe-eval'` in

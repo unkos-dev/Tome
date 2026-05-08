@@ -1,19 +1,33 @@
-//! Response-header middleware wiring.
+//! Response-header middleware wiring for Reverie (UNK-106).
 //!
 //! Three concerns, three surfaces:
-//! - [`security_headers`] — outermost uniform middleware. Sets XCTO,
-//!   Referrer-Policy, Permissions-Policy, X-Frame-Options, and (conditional)
-//!   HSTS + Reporting-Endpoints from precomputed `HeaderValue` fields on
-//!   `SecurityConfig`. Applied on the composite router.
-//! - [`api_csp_layer`] / [`html_csp_layer`] — per-router middleware that
-//!   writes `Content-Security-Policy` from the precomputed `HeaderValue` on
-//!   `SecurityConfig` (validated at startup in `main()`). Attached to matched
-//!   routes only.
-//! - [`composite_fallback`] — the single fallback handler for the composite.
-//!   Path-prefix-dispatches to either a JSON 404 + API CSP (reserved
-//!   prefixes) or an `index.html` + HTML CSP (SPA fallback). Neither the
-//!   per-router CSP layers nor any other middleware attaches CSP to fallback
-//!   responses, so the handler sets CSP itself.
+//!
+//! - [`crate::security::headers::security_headers`] — outermost uniform
+//!   middleware. Sets XCTO, Referrer-Policy, Permissions-Policy,
+//!   X-Frame-Options, and (conditional) HSTS + Reporting-Endpoints from
+//!   precomputed `HeaderValue` fields on `SecurityConfig`. Applied on the
+//!   composite router.
+//! - [`crate::security::headers::api_csp_layer`] /
+//!   [`crate::security::headers::html_csp_layer`] — per-router middleware
+//!   that writes `Content-Security-Policy` from the precomputed
+//!   `HeaderValue` on `SecurityConfig` (validated at startup in
+//!   `reverie_api::run`). Attached to matched routes only.
+//! - [`crate::security::headers::composite_fallback`] — the single
+//!   fallback handler for the composite. Path-prefix-dispatches to either
+//!   a JSON 404 + API CSP (reserved prefixes) or an `index.html` + HTML
+//!   CSP (SPA fallback). Neither the per-router CSP layers nor any other
+//!   middleware attaches CSP to fallback responses, so the handler sets
+//!   CSP itself.
+//!
+//! # Tier 2 — security-critical
+//!
+//! Everything in this file is the response-header trust boundary. Drift
+//! between the per-router CSP layers and the composite fallback (or
+//! adding a second CSP source from a reverse proxy) silently breaks
+//! the route-class differentiation that motivates having two policies.
+//! `backend/CLAUDE.md` § "Security headers (UNK-106)" warns against
+//! duplicate CSP emission from a proxy; that warning lives or dies by
+//! what is wired here.
 
 use axum::body::Body;
 use axum::extract::{Request, State};
@@ -31,8 +45,19 @@ const PERMISSIONS_POLICY_VALUE: &str = "camera=(), microphone=(), geolocation=()
 
 const RESERVED_PREFIXES: &[&str] = &["/api", "/auth", "/health", "/opds"];
 
-/// Uniform security headers middleware — applies to every response from the
+/// Uniform security-headers middleware applied to every response from the
 /// composite router (including the composite fallback).
+///
+/// Unconditional headers: `X-Content-Type-Options: nosniff`,
+/// `Referrer-Policy: no-referrer`, `Permissions-Policy: camera=(), ...`,
+/// `X-Frame-Options: DENY`. Conditional headers:
+/// `Strict-Transport-Security` only when `behind_https` is set;
+/// `Reporting-Endpoints` only when `csp_report_endpoint` is configured.
+///
+/// Threat: HSTS leaking onto a plaintext deployment is a footgun (locks
+/// browsers out of the site entirely). The conditional emission depends on
+/// `SecurityConfig::hsts_header_value` returning `None` when `behind_https`
+/// is false; that contract is verified at the config layer.
 pub async fn security_headers(
     State(state): State<AppState>,
     req: Request<Body>,
@@ -66,8 +91,15 @@ pub async fn security_headers(
 
 /// Sets `Content-Security-Policy` to the API CSP for all responses from the
 /// API-like router (matched routes under `/api`, `/auth`, `/health`, `/opds`).
-/// Unmatched responses flow through the composite fallback which attaches the
-/// correct CSP manually — this layer does not see them.
+///
+/// Unmatched responses flow through the composite fallback which attaches
+/// the correct CSP manually via [`composite_fallback`] — this layer does
+/// not see them.
+///
+/// Threat: a missing `csp_api_header` (API-only dev runs) silently emits no
+/// CSP from this layer; the route-class differentiation degrades to
+/// "uniform headers only". Acceptable in dev; production startup
+/// validation rejects the empty configuration.
 pub async fn api_csp_layer(
     State(state): State<AppState>,
     req: Request<Body>,
@@ -82,11 +114,16 @@ pub async fn api_csp_layer(
 }
 
 /// Sets `Content-Security-Policy` to the HTML CSP on responses from the
-/// matched `/assets/*` routes. Does NOT cover SPA `index.html` responses —
-/// those come from the composite fallback, which attaches HTML CSP directly
-/// via [`attach_html_csp`]. When the HTML CSP is not configured (API-only
-/// dev runs), no header is written — dev mode relies on Vite's own
-/// `server.headers` block.
+/// matched `/assets/*` routes.
+///
+/// Does NOT cover SPA `index.html` responses — those come from the
+/// composite fallback, which attaches HTML CSP directly. When the HTML CSP
+/// is not configured (API-only dev runs), no header is written — dev mode
+/// relies on Vite's own `server.headers` block.
+///
+/// Threat: silently emitting no CSP on a missing `csp_html_header` is
+/// dev-only behaviour; production startup validates the dist and configures
+/// this header before the router is built.
 pub async fn html_csp_layer(
     State(state): State<AppState>,
     req: Request<Body>,
@@ -100,10 +137,19 @@ pub async fn html_csp_layer(
     resp
 }
 
-/// Composite-router fallback. Axum 0.8 panics when `.merge()` combines two
-/// routers each carrying a fallback, so this is the single fallback on the
-/// merged composite. It mirrors what the per-router CSP layers would have
-/// set: API CSP for reserved-prefix 404s, HTML CSP for SPA deep-links.
+/// Composite-router fallback handler. Single fallback for the merged
+/// composite — axum 0.8 panics when `.merge()` combines two routers each
+/// carrying their own.
+///
+/// Path-prefix-dispatches: reserved prefixes (`/api`, `/auth`, `/health`,
+/// `/opds`) yield a JSON 404 + API CSP; anything else falls through to the
+/// SPA `index.html` + HTML CSP.
+///
+/// Threat: the dispatch table and the per-router CSP layers together
+/// implement route-class differentiation. Adding a route under a reserved
+/// prefix that should serve HTML — or removing a prefix from
+/// `RESERVED_PREFIXES` without adjusting routes — would silently emit the
+/// wrong CSP class on the affected paths.
 pub async fn composite_fallback(State(state): State<AppState>, uri: Uri) -> Response {
     if is_reserved_prefix(uri.path()) {
         api_404_with_csp(&state)
@@ -112,9 +158,13 @@ pub async fn composite_fallback(State(state): State<AppState>, uri: Uri) -> Resp
     }
 }
 
-/// 404 JSON + API CSP. Mirrors [`crate::error::AppError::NotFound`] shape
-/// (`{"error":"not found"}`). Written here instead of reusing `AppError` so
-/// the CSP header can be attached without extra layering.
+/// 404 JSON + API CSP. Mirrors the [`crate::error::AppError::NotFound`]
+/// shape (`{"error":"not found"}`).
+///
+/// Written here instead of reusing `AppError` so the CSP header can be
+/// attached without extra layering. Drift between this body and
+/// `AppError::NotFound` is a low-impact UX issue (clients keying off the
+/// JSON shape would break) but not a security regression.
 pub fn api_404_with_csp(state: &AppState) -> Response {
     let mut resp = (
         StatusCode::NOT_FOUND,
