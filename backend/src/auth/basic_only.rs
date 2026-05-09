@@ -4,8 +4,8 @@
 //! Used by the `/opds/*` routes so that OPDS reader apps (`KOReader`, Moon+,
 //! Librera, `KyBook` 3) receive a 401 with `WWW-Authenticate: Basic realm="…",
 //! charset="UTF-8"` and prompt for credentials — the cookie-or-Basic
-//! [`CurrentUser`] extractor returns a JSON 401 without a challenge, which
-//! mobile clients silently treat as an error.
+//! [`crate::auth::middleware::CurrentUser`] extractor returns a JSON 401
+//! without a challenge, which mobile clients silently treat as an error.
 
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
@@ -19,7 +19,10 @@ use crate::state::AppState;
 /// returns [`AppError::BasicAuthRequired`], which emits the RFC 7617
 /// challenge.
 #[derive(Debug, Clone)]
-pub struct BasicOnly(pub CurrentUser);
+pub struct BasicOnly(
+    /// The authenticated user identity, resolved exclusively via Basic auth.
+    pub CurrentUser,
+);
 
 impl FromRequestParts<AppState> for BasicOnly {
     type Rejection = AppError;

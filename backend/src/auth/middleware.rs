@@ -1,3 +1,22 @@
+//! `CurrentUser` extractor and Basic-auth verification for Reverie.
+//!
+//! [`crate::auth::middleware::CurrentUser`] is the primary identity extractor used by route handlers.
+//! It resolves the caller in two steps: session cookie first (via
+//! axum-login's `AuthSession`), Basic auth second (via
+//! [`crate::auth::middleware::verify_basic`]). Handlers that receive a `CurrentUser` are guaranteed
+//! an authenticated identity; unauthenticated requests are rejected with
+//! `AppError::Unauthorized` before the handler body runs.
+//!
+//! [`crate::auth::middleware::AuthCtx`] is a type alias for the axum-login session handle, exposed
+//! so OIDC callback handlers can call `auth_session.login(&user)` without
+//! importing the full generic form.
+//!
+//! # Tier 2 — security-critical
+//!
+//! This module is the authentication seam for every non-public route.
+//! Threat annotations mark the timing-side-channel mitigations in
+//! [`crate::auth::middleware::verify_basic`] and the role-assertion invariants on [`crate::auth::middleware::CurrentUser`].
+
 use axum::extract::FromRequestParts;
 use axum::http::request::Parts;
 use axum_login::AuthSession;
@@ -10,17 +29,53 @@ use crate::models::role::Role;
 use crate::models::{device_token, user};
 use crate::state::AppState;
 
+/// axum-login session handle parameterised on [`AuthBackend`].
+///
+/// Exposes `login`, `logout`, and `user` on the OIDC callback and logout
+/// handlers without requiring callers to spell out the full generic form.
 pub type AuthCtx = AuthSession<AuthBackend>;
 
+/// Resolved identity for an authenticated request.
+///
+/// Extracted from the request by [`FromRequestParts`]. Resolution order:
+/// session cookie (via axum-login) → `Authorization: Basic` (via
+/// [`verify_basic`]). Returns [`AppError::Unauthorized`] if neither
+/// path yields a valid identity.
+///
+/// Role-assertion methods ([`require_admin`](CurrentUser::require_admin),
+/// [`require_not_child`](CurrentUser::require_not_child)) are the canonical
+/// way for handlers to enforce access control; callers must not read `role`
+/// or `is_child` and implement their own checks.
 #[derive(Debug, Clone)]
 pub struct CurrentUser {
+    /// Database UUID of the authenticated user.
     pub user_id: Uuid,
+
+    /// Access-control role assigned to this user.
+    ///
+    /// Use [`require_admin`](CurrentUser::require_admin) rather than matching
+    /// directly — keeps role-assertion logic in one place and simplifies future
+    /// role-model changes.
     pub role: Role,
+
+    /// Whether this account is flagged as a child profile.
+    ///
+    /// Use [`require_not_child`](CurrentUser::require_not_child) for access
+    /// control rather than reading this field directly.
     pub is_child: bool,
 }
 
 impl CurrentUser {
     /// Return `Err(Forbidden)` unless the user is an admin.
+    ///
+    /// Role-assertion invariant: callers that gate on admin must use this
+    /// method. Directly matching `self.role == Role::Admin` bypasses the
+    /// single point of enforcement and will not automatically extend to
+    /// future role-model changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Forbidden`] when `self.role` is not [`Role::Admin`].
     pub const fn require_admin(&self) -> Result<(), AppError> {
         if matches!(self.role, Role::Admin) {
             Ok(())
@@ -30,8 +85,13 @@ impl CurrentUser {
     }
 
     /// Return `Err(Forbidden)` for child accounts. Adult and admin pass.
+    ///
     /// Used to gate metadata/enrichment endpoints that should not be visible
     /// to children.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Forbidden`] when `self.is_child` is `true`.
     #[allow(dead_code)] // wired up by Step 7 tasks 25/26 (metadata + enrichment routes)
     pub const fn require_not_child(&self) -> Result<(), AppError> {
         if self.is_child {
@@ -42,15 +102,24 @@ impl CurrentUser {
     }
 }
 
-/// Verify a `Authorization: Basic <b64>` header against the device-token
+/// Verify an `Authorization: Basic <b64>` header against the device-token
 /// registry. Shared by [`CurrentUser`] (cookie-or-Basic) and
 /// [`crate::auth::basic_only::BasicOnly`] (Basic-only).
+///
+/// Timing-side-channel mitigation: all tokens for the user are iterated in
+/// full before returning a match result — see `// THREAT:` inline below.
 ///
 /// Returns `Ok(Some(user))` when Basic credentials validate, `Ok(None)` when
 /// no `Authorization: Basic ...` is present, and `Err(Unauthorized)` when a
 /// Basic header is present but credentials are malformed or don't match any
 /// active token. Side-effect: schedules an async `update_last_used` write
 /// (SQL-side debounced to at most one UPDATE per token per 5 minutes).
+///
+/// # Errors
+///
+/// Returns [`AppError::Unauthorized`] when the `Authorization: Basic` header
+/// is present but the credentials are malformed, the user UUID is unknown, or
+/// no stored token matches. Returns [`AppError::Internal`] on database errors.
 pub async fn verify_basic(
     state: &AppState,
     parts: &Parts,
@@ -80,7 +149,24 @@ pub async fn verify_basic(
         .await
         .map_err(|e| AppError::Internal(e.into()))?;
 
-    // Iterate all tokens to avoid timing side-channel that leaks token position.
+    // THREAT: early-exit on first match would leak the token's position in the
+    // list via response timing, allowing an attacker to narrow guesses to
+    // recently-issued tokens. Iterating all tokens in full — combined with
+    // constant-time comparison of the SHA-256 hex digests (performed via
+    // `subtle::ConstantTimeEq` inside `token::verify_device_token`) — closes
+    // this side-channel. Only the digest comparison is constant-time; the
+    // SHA-256 computation itself is not a cryptographic constant-time
+    // primitive and its wall-clock cost grows with input length, which is
+    // attacker-controlled here (`password` comes from the Basic credentials).
+    // This mitigation targets secret-dependent early-exit in the
+    // comparison/match step, not input-length-driven timing variance.
+    // `matched_token_id` is overwritten on each match so only the last
+    // matching token wins. Note that `device_tokens.token_hash` carries no DB
+    // `UNIQUE` constraint, so uniqueness is not a structural/DB invariant;
+    // SHA-256 collision resistance (2^256 work factor) makes duplicate hashes
+    // cryptographically infeasible in practice, so the overwrite is a
+    // belt-and-braces choice that avoids conditional branching on match count
+    // rather than a load-bearing invariant.
     let mut matched_token_id = None;
     for token in &tokens {
         if crate::auth::token::verify_device_token(password, &token.token_hash) {

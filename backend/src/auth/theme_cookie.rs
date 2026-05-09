@@ -33,6 +33,19 @@ use crate::models::theme_preference::ThemePreference;
 /// All three MUST agree. Tracked as instance 1 under UNK-105.
 pub const THEME_COOKIE_NAME: &str = "reverie_theme";
 
+/// Add or replace the `reverie_theme` cookie in `jar` with the given preference.
+///
+/// Cookie attributes are set to match the frontend's `writeThemeCookie`
+/// (`frontend/src/lib/theme/cookie.ts`) exactly: `Path=/`,
+/// `Max-Age=31536000`, `SameSite=Lax`, `Secure`, no `HttpOnly`.
+/// Attribute drift between this function and the frontend writer produces
+/// two cookies of the same name with different attributes in the browser jar,
+/// which silently breaks FOUC suppression. See the module-level docs for
+/// the lifecycle rationale.
+///
+/// The returned `CookieJar` replaces the caller's jar and must be included
+/// in the response via `(jar, response)` — discarding it silently drops the
+/// cookie write.
 pub fn set_theme_cookie(jar: CookieJar, value: ThemePreference) -> CookieJar {
     let cookie = Cookie::build((THEME_COOKIE_NAME, value.as_str().to_owned()))
         .path("/")
