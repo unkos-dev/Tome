@@ -20,6 +20,9 @@ use crate::error::AppError;
 use crate::services::covers::{CoverError, CoverSize, get_or_create};
 use crate::state::AppState;
 
+/// Build the OPDS-mount cover router (`/opds/books/:id/cover{,/thumb}`)
+/// gated by [`BasicOnly`] so OPDS clients' Basic credentials remain
+/// inside the RFC 7617 paired protection space.
 pub fn opds_router() -> Router<AppState> {
     Router::new()
         .route(
@@ -44,6 +47,9 @@ pub fn opds_router() -> Router<AppState> {
         )
 }
 
+/// Build the API-mount cover router (`/api/books/:id/cover{,/thumb}`)
+/// gated by [`CurrentUser`] so the web UI can load covers with a
+/// session cookie. Always mounted independent of `config.opds.enabled`.
 pub fn api_router() -> Router<AppState> {
     Router::new()
         .route(

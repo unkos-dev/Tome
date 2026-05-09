@@ -24,6 +24,21 @@ use super::feed::{AcquisitionEntry, FeedBuilder, FeedKind, author_urn, feed_urn,
 use super::root::{atom_response, base_url};
 use super::scope::{Scope, push_scope};
 
+/// Build the `/opds/library/*` router.
+///
+/// # Invariants
+/// - Every handler authenticates via the `BasicOnly` extractor — OPDS
+///   clients (e.g. `KOReader`) are Basic-only; session cookies are not
+///   accepted on these routes.
+/// - Per-row visibility is enforced inside `db::acquire_with_rls` plus
+///   a `Scope` predicate (`Scope::Library` here, `Scope::Shelf` when
+///   reused via [`super::shelves::router`]) appended through
+///   [`push_scope`].
+///
+/// Why: the feed URL determines the requested scope, but RLS in
+/// `acquire_with_rls` is the authoritative guard — `Scope` shapes
+/// which subset of visible rows the feed surfaces, and an over-broad
+/// or forged scope cannot bypass row-level security.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/opds/library", get(library_root))
@@ -81,8 +96,11 @@ pub(super) fn build_subcatalog_root(base: &Url, self_path: &str, title: &str) ->
 
 // ── Subcatalog handlers ──────────────────────────────────────────────────
 
+/// Cursor pagination input shared by every paginated feed handler.
 #[derive(Debug, Deserialize, Default)]
 pub struct PageParams {
+    /// Opaque cursor returned in a previous response's `rel="next"` link;
+    /// `None` returns the first page.
     pub cursor: Option<String>,
 }
 
@@ -180,8 +198,11 @@ async fn library_series_books(
     Ok(atom_response(bytes, FeedKind::Acquisition.content_type()))
 }
 
+/// `OpenSearch` `?q=` query parameter for the search endpoints.
 #[derive(Debug, Deserialize, Default)]
 pub struct SearchParams {
+    /// Search term; an empty (or whitespace-only) query short-circuits
+    /// to an empty feed without hitting the DB.
     #[serde(default)]
     pub q: String,
 }

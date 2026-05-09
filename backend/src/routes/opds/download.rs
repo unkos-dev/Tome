@@ -25,6 +25,7 @@ use crate::state::AppState;
 
 use super::feed::EPUB_MIME;
 
+/// Build the OPDS download router.
 pub fn router() -> Router<AppState> {
     Router::new().route("/opds/books/{id}/file", get(download_epub))
 }

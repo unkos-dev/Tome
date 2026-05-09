@@ -1,3 +1,5 @@
+//! Library-scan trigger (`POST /api/ingestion/scan`); admin-only.
+
 use axum::extract::State;
 use axum::response::IntoResponse;
 use axum::routing::post;
@@ -8,6 +10,15 @@ use crate::error::AppError;
 use crate::services;
 use crate::state::AppState;
 
+/// Build the ingestion-control router for `POST /api/ingestion/scan`.
+///
+/// # Invariants
+/// - Admin-only: the `scan` handler enforces `CurrentUser::require_admin`
+///   before doing any work.
+///
+/// Why: `services::ingestion::scan_once` mutates library state and is
+/// expensive enough to warrant being kept off regular user flows; the
+/// admin gate is the single trust boundary for triggering it via HTTP.
 pub fn router() -> Router<AppState> {
     Router::new().route("/api/ingestion/scan", post(scan))
 }

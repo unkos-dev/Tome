@@ -10,9 +10,17 @@
 use sqlx::{Postgres, QueryBuilder};
 use uuid::Uuid;
 
+/// URL-derived scope for an OPDS feed request.
+///
+/// Determined entirely by the feed URL — no per-token or per-user
+/// preference. Always applied inside [`crate::db::acquire_with_rls`];
+/// never a substitute for RLS.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Scope {
+    /// Whole library; child accounts still see only shelf-assigned
+    /// manifestations under this scope via RLS.
     Library,
+    /// Single shelf (by id); restricts visibility to that shelf's items.
     Shelf(Uuid),
 }
 
