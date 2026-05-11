@@ -1,12 +1,12 @@
 ---
-status: active
+status: lifted
 severity: medium
 surfaces: [server-operator, ci, security]
 adopted: 2026-05-08
 adopted-because: PR #179 review (CodeRabbit) flagged absence of automated coverage for staging compose init path; deferred to ship the compose seam itself
 lift-when-class: internal-refactor
 lift-when: UNK-185 (CI smoke test for staging compose) merged to main
-lifted: ~
+lifted: 2026-05-11
 superseded-by: ~
 ---
 
