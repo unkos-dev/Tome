@@ -19,7 +19,8 @@ reviews:
   profile: assertive
   request_changes_workflow: false
   high_level_summary: true
-  poem: true
+  # Disabled — adds nothing to the signal, just summary-block noise.
+  poem: false
   review_status: true
   collapse_walkthrough: false
   suggested_reviewers: false
