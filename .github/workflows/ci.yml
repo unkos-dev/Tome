@@ -241,12 +241,16 @@ jobs:
           # service isn't being started. Populate with stub values — never
           # read since reverie isn't started.
           cp staging.env.runtime.example .env.runtime
+          # Use `=.*` (not `=$`) so substitutions remain robust if the
+          # example files ever acquire non-empty default values; an exact-
+          # empty anchor would silently no-op and the smoke would fail
+          # later at auth with an opaque 28P01.
           sed -i \
-            -e 's|^POSTGRES_PASSWORD=$|POSTGRES_PASSWORD=smoke_super_pw_1|' \
-            -e 's|^REVERIE_APP_PASSWORD=$|REVERIE_APP_PASSWORD=smoke_app_pw_2|' \
-            -e 's|^REVERIE_INGESTION_PASSWORD=$|REVERIE_INGESTION_PASSWORD=smoke_ing_pw_3|' \
-            -e 's|^REVERIE_READONLY_PASSWORD=$|REVERIE_READONLY_PASSWORD=smoke_ro_pw_4|' \
-            -e 's|^REVERIE_VERSION=$|REVERIE_VERSION=smoke-test|' \
+            -e 's|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=smoke_super_pw_1|' \
+            -e 's|^REVERIE_APP_PASSWORD=.*|REVERIE_APP_PASSWORD=smoke_app_pw_2|' \
+            -e 's|^REVERIE_INGESTION_PASSWORD=.*|REVERIE_INGESTION_PASSWORD=smoke_ing_pw_3|' \
+            -e 's|^REVERIE_READONLY_PASSWORD=.*|REVERIE_READONLY_PASSWORD=smoke_ro_pw_4|' \
+            -e 's|^REVERIE_VERSION=.*|REVERIE_VERSION=smoke-test|' \
             .env
 
       - name: Bring up postgres service
@@ -270,9 +274,14 @@ jobs:
               echo "Role ${role} missing or cannot login" >&2
               exit 1
             fi
-            has_connect=$(exec_psql -c "SELECT has_database_privilege('${role}', current_database(), 'CONNECT')")
+            # Query pg_database.datacl directly (not has_database_privilege)
+            # so a regression that deletes the explicit GRANT CONNECT lines
+            # from init-roles.sql is caught even while Postgres' default
+            # PUBLIC -> CONNECT grant is still in place. has_database_privilege
+            # returns true via PUBLIC and would mask the deletion.
+            has_connect=$(exec_psql -c "SELECT EXISTS (SELECT 1 FROM pg_database d, aclexplode(d.datacl) acl WHERE d.datname = current_database() AND acl.grantee = (SELECT oid FROM pg_roles WHERE rolname = '${role}') AND acl.privilege_type = 'CONNECT')")
             if [ "$has_connect" != "t" ]; then
-              echo "Role ${role} lacks CONNECT on $(exec_psql -c 'SELECT current_database()')" >&2
+              echo "Role ${role} lacks an explicit CONNECT grant on $(exec_psql -c 'SELECT current_database()')" >&2
               exit 1
             fi
           done
@@ -304,7 +313,13 @@ jobs:
       # no daemon spin-up needed. Key-name presence in stderr is the
       # load-bearing signal — exact wording of compose's error message is
       # not pinned across versions.
+      #
+      # `if: !cancelled()` ensures this step runs even if the happy-path
+      # assertions failed — otherwise a regression in the `:?required`
+      # mechanism would be silently skipped behind any earlier failure,
+      # since `compose config` is independent of the live containers.
       - name: Assert missing required env var hard-fails
+        if: ${{ !cancelled() }}
         working-directory: docker
         run: |
           set -euo pipefail
