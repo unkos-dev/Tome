@@ -1,12 +1,41 @@
-#![allow(missing_docs)]
+//! Application error type and HTTP response mapping.
+//!
+//! [`AppError`] is the single error returned by Axum handlers via
+//! `Result<impl IntoResponse, AppError>`. Its [`axum::response::IntoResponse`]
+//! impl is the only place where errors become HTTP status codes + JSON bodies
+//! — handlers `?`-propagate into it, the impl flattens to a uniform
+//! `{"error": "..."}` shape (or, for [`AppError::BasicAuthRequired`], an
+//! empty body with a `WWW-Authenticate` challenge per RFC 7617).
+//!
+//! Internal errors (anything wrapped in [`AppError::Internal`]) deliberately
+//! do **not** leak the inner cause's message to clients — the cause is
+//! `tracing::error!`-logged and the response body is a fixed
+//! `"internal server error"` string. This is a deliberate
+//! information-disclosure mitigation: handlers may `?`-propagate errors
+//! whose `Display` includes connection strings, file paths, or other
+//! sensitive context that has no business reaching the network.
 
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
+/// Errors returned from Axum handlers; converted to HTTP responses by the
+/// [`IntoResponse`] impl on this type.
+///
+/// Handlers convert library errors via `?` (using `#[from]` on
+/// [`Self::Internal`] for `anyhow::Error` and any `Into<anyhow::Error>`
+/// type — `sqlx::Error` and friends). Domain-specific failures use the
+/// dedicated variants ([`Self::NotFound`], [`Self::Validation`]) so the
+/// HTTP mapping is explicit at the call site rather than buried inside an
+/// `anyhow` chain.
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
+    /// Resource not found. Maps to HTTP 404 with body `{"error":"not found"}`.
     #[error("not found")]
     NotFound,
+    /// Caller is unauthenticated. Maps to HTTP 401 with body
+    /// `{"error":"unauthorized"}` and **no** `WWW-Authenticate` challenge —
+    /// for the OPDS Basic-auth challenge variant use
+    /// [`Self::BasicAuthRequired`].
     #[error("unauthorized")]
     Unauthorized,
     /// 401 that emits a `WWW-Authenticate: Basic` challenge (RFC 7617). Used by
@@ -14,11 +43,28 @@ pub enum AppError {
     /// credentials. `realm` is operator-configured and validated at startup
     /// (no embedded `"` allowed).
     #[error("basic auth required")]
-    BasicAuthRequired { realm: String },
+    BasicAuthRequired {
+        /// The `realm` value emitted in the `WWW-Authenticate: Basic`
+        /// challenge. Pre-validated at config load (no embedded `"`).
+        realm: String,
+    },
+    /// Caller is authenticated but lacks the role/policy to perform the
+    /// action. Maps to HTTP 403.
     #[error("forbidden")]
     Forbidden,
+    /// Request validation failed (malformed input, business-rule
+    /// violation). Maps to HTTP 422; the inner string is emitted as
+    /// the `error` value in the JSON body
+    /// (`{"error":"<message>"}`), so callers should keep it free of
+    /// sensitive context.
     #[error("validation error: {0}")]
     Validation(String),
+    /// Anything else — unhandled `sqlx::Error`, IO failure, etc. Mapped to
+    /// HTTP 500 with a fixed `"internal server error"` body so the inner
+    /// cause's message (potentially containing connection strings, file
+    /// paths, or other operational detail) does not leak to clients. The
+    /// inner error is `tracing::error!`-logged with full context for
+    /// operator triage.
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
