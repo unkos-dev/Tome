@@ -67,12 +67,21 @@ query SearchByTitleAuthor($title: String!, $author: String!) {
 }
 ";
 
+/// `Hardcover` metadata adapter (`GraphQL`-backed).
+///
+/// Issues `GraphQL` queries against the `Hardcover` API to retrieve
+/// bibliographic data. The adapter is disabled when no API token is configured;
+/// see [`MetadataSource::enabled`].
 pub struct Hardcover {
     base_url: String,
     token: Option<String>,
 }
 
 impl Hardcover {
+    /// Creates a new `Hardcover` adapter targeting `base_url`.
+    ///
+    /// `token` is a `Hardcover` API bearer token. When `None`, [`MetadataSource::enabled`]
+    /// returns `false` and `lookup` returns an empty result without hitting the network.
     pub fn new(base_url: impl Into<String>, token: Option<String>) -> Self {
         Self {
             base_url: base_url.into(),

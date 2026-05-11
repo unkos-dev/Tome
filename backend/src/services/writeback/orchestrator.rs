@@ -1,13 +1,24 @@
 //! Per-job writeback orchestrator.
 //!
-//! Loads the job + manifestation + work snapshot, rewrites the OPF and
-//! (optionally) embeds a new cover, repacks the EPUB, swaps the file
+//! Loads the job + manifestation + work snapshot, rewrites the `OPF` and
+//! (optionally) embeds a new cover, repacks the `EPUB`, swaps the file
 //! atomically, re-validates, rolls back on regression, and updates
 //! `manifestations.current_file_hash` on success.
 //!
 //! The orchestrator does NOT take a transaction — the queue's `finish`
 //! owns the job-status update via its own short-lived statement.  The
 //! per-job file mutations here happen outside any user-facing tx.
+//!
+//! ## `RLS` system-context invariant
+//!
+//! `run_once` MUST be called with a `PgPool` whose connections set the
+//! Postgres `GUC` `app.system_context = 'writeback'` on `after_connect`.
+//! The `manifestations_update_system` and `manifestations_select_system`
+//! `RLS` policies match against this value; without it every
+//! `UPDATE manifestations` write produces zero rows affected and the
+//! `current_file_hash` update silently disappears.  The writeback pool is
+//! created by `crate::test_support::db::writeback_pool_for` in tests and by
+//! `db::init_writeback_pool`, instantiated in `lib.rs::run` at runtime.
 
 use std::collections::HashMap;
 use std::io::Read;
@@ -38,26 +49,35 @@ use super::path_rename;
 #[derive(Debug)]
 pub enum RunOutcome {
     /// Writeback completed cleanly.  `current_file_hash` is the new
-    /// on-disk SHA-256; the queue emits `writeback_complete` with it.
+    /// on-disk `SHA-256`; the queue emits `writeback_complete` with it.
     Success {
+        /// The manifestation that was updated.
         manifestation_id: Uuid,
+        /// The `writeback_jobs.reason` string (e.g. `"metadata"`, `"cover"`).
         reason: String,
+        /// Hex-encoded `SHA-256` of the on-disk file after writeback.
         current_file_hash: String,
     },
     /// Retrying won't help (unsupported format, missing file, post-
     /// validation rollback).  Bypasses the retry path directly to
     /// `mark_skipped`.  `skip_reason` is the user-facing explanation.
     Skipped {
+        /// The manifestation the job referenced.
         manifestation_id: Uuid,
+        /// The `writeback_jobs.reason` string.
         reason: String,
+        /// Human-readable explanation stored in `writeback_jobs.error`.
         skip_reason: String,
     },
     /// Writeback failed in a way that's potentially retryable (the
     /// queue's `finish` decides whether `attempt_count` has reached
     /// `max_attempts` and escalates to `skipped`).
     Failed {
+        /// The manifestation the job referenced.
         manifestation_id: Uuid,
+        /// The `writeback_jobs.reason` string.
         reason: String,
+        /// Error description stored in `writeback_jobs.error`.
         error: String,
     },
 }
@@ -92,6 +112,37 @@ struct JobSnapshot {
     primary_author: Option<String>,
 }
 
+/// Run the full writeback pipeline for a single job.
+///
+/// Loads the job snapshot, skips early for unsupported formats or missing
+/// files, rewrites the `OPF`, optionally embeds a cover, repacks the `EPUB`,
+/// commits atomically, re-validates, rolls back on regression, re-renders the
+/// path template, and updates `manifestations.current_file_hash`.
+///
+/// Returns `Ok(RunOutcome)` for all terminal states including business-level
+/// failures (unsupported format, post-validation regression).  Only propagates
+/// `Err` for infrastructure faults that should count against the retry budget.
+///
+/// The `pool` argument MUST be a writeback-context pool (see module-level
+/// `RLS` invariant).
+///
+/// # Errors
+///
+/// - `WritebackError::JobNotFound` — no `writeback_jobs` row exists for
+///   `job_id` (terminal; `finish` routes to `mark_skipped`).
+/// - `WritebackError::Db` — a `sqlx` query failed (snapshot load,
+///   `current_file_hash` update, or `file_path` update).
+/// - `WritebackError::Io` — reading the source file, fsyncing, or writing
+///   the rollback tempfile failed.
+/// - `WritebackError::Zip` — the source `EPUB` could not be opened as a
+///   `ZIP` archive.
+/// - `WritebackError::Xml` — `OPF` parse or rewrite failed.
+/// - `WritebackError::Epub` — the pre-writeback `EPUB` validation call
+///   returned an error.
+/// - `WritebackError::MissingOpf` — `META-INF/container.xml` was absent or
+///   contained no `OPF` root-file path.
+/// - `WritebackError::Persist` — the atomic commit, cross-FS copy, or
+///   path-rename step failed.
 #[allow(
     clippy::too_many_lines,
     reason = "run_once implements the full writeback pipeline: snapshot load → transform → pack → rename → post-validation → DB update; each step is a data-dependency on the previous"

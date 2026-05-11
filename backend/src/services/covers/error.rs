@@ -1,6 +1,10 @@
 //! Cover serving errors. Maps to HTTP status at the handler boundary:
 //! `NoCover` → 404, everything else → 500.
 
+/// All failure modes that can arise when serving a cover image. The handler
+/// maps `NoCover` → 404 and every other variant → 500; variants carry
+/// enough context for structured log fields without leaking internals to the
+/// client.
 #[derive(Debug, thiserror::Error)]
 pub enum CoverError {
     /// EPUB has no cover image per Step 5 detection (no manifest item with
@@ -18,8 +22,12 @@ pub enum CoverError {
     /// Format detected successfully but not one we serve (GIF, BMP, …).
     #[error("unsupported format: {0}")]
     UnsupportedFormat(String),
+    /// Corrupt or unreadable `ZIP`/`EPUB` archive structure (propagated from
+    /// the `zip` crate via `#[from]`).
     #[error("zip: {0}")]
     Zip(#[from] zip::result::ZipError),
+    /// Underlying filesystem `IO` failure (e.g. cache directory creation,
+    /// atomic-write rename) propagated via `#[from]`.
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
 }

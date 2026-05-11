@@ -1,3 +1,12 @@
+//! `OPF` package-document parsing layer (Layer 3).
+//!
+//! Parses the `OPF` file to extract the manifest (id → href map), the reading
+//! spine, Dublin Core bibliographic metadata, W3C accessibility `<meta>`
+//! elements, and series metadata from both calibre (`<meta name="calibre:…">`)
+//! and `EPUB3` `belongs-to-collection`. Broken spine refs (idrefs not in the
+//! manifest) are removed and recorded as `Repaired` issues. Manifest hrefs
+//! that fail the path-safety check are dropped and recorded as `Degraded`.
+
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use std::collections::{HashMap, HashSet};
@@ -7,25 +16,32 @@ use super::{
     zip_layer::{ZipHandle, read_entry},
 };
 
+/// A Dublin Core `dc:creator` entry with an optional `MARC` relator role.
 #[derive(Debug, Clone)]
 pub struct Creator {
+    /// The creator's name as it appears in the `OPF` metadata.
     pub name: String,
+    /// Optional `MARC` relator code (e.g. `"aut"`, `"edt"`) from `opf:role` or `role` attribute.
     pub role: Option<String>,
 }
 
+/// Series affiliation metadata sourced from calibre or `EPUB3` collection elements.
 #[derive(Debug, Clone)]
 pub struct SeriesMeta {
+    /// Series title (calibre `calibre:series` or `EPUB3` `belongs-to-collection`).
     pub name: String,
+    /// Position within the series, if declared.
     pub position: Option<f64>,
 }
 
+/// All data extracted from the `OPF` package document in a single parse pass.
 #[derive(Debug, Clone)]
 pub struct OpfData {
     /// All manifest items: id → href
     pub manifest: HashMap<String, String>,
     /// Spine idrefs (after removing broken refs)
     pub spine_idrefs: Vec<String>,
-    /// OPF path within the archive (needed by repair and other layers)
+    /// `OPF` path within the archive (needed by repair and other layers)
     pub opf_path: String,
     /// Raw W3C accessibility metadata from `<meta>` elements, if any
     pub accessibility_metadata: Option<serde_json::Value>,
@@ -45,7 +61,7 @@ pub struct OpfData {
     pub identifiers: Vec<String>,
     /// Dublin Core: subject values
     pub subjects: Vec<String>,
-    /// Series metadata (calibre or EPUB 3 collection)
+    /// Series metadata (calibre or `EPUB3` collection)
     pub series_meta: Option<SeriesMeta>,
 }
 
@@ -57,7 +73,16 @@ fn local_name(name: &[u8]) -> &[u8] {
         .map_or(name, |pos| &name[pos + 1..])
 }
 
-/// Validate the OPF file. Returns `None` if OPF cannot be read.
+/// Parse the `OPF` package document at `opf_path` and return structured metadata.
+///
+/// Extracts the manifest, spine, Dublin Core fields, W3C accessibility `<meta>`
+/// elements, and series metadata in a single `quick_xml` pass. Broken spine
+/// idrefs (not present in the manifest) are removed and recorded as `Repaired`
+/// issues. Manifest hrefs failing the path-safety check are dropped with a
+/// `Degraded` issue.
+///
+/// Returns `None` if `opf_path` is `None`, the entry cannot be read from
+/// `handle`, or the entry bytes are not valid `UTF-8`.
 #[allow(
     clippy::too_many_lines,
     reason = "OPF parser handles the full EPUB 2/3 metadata element set in one pass; the per-element cases are mechanical and cannot meaningfully be split without introducing a second parse pass"

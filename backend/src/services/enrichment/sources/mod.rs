@@ -1,16 +1,19 @@
 //! External metadata source adapters.
 //!
-//! Each adapter implements [`MetadataSource`] for one provider
+//! Each adapter implements `MetadataSource` for one provider
 //! (Open Library, Google Books, Hardcover).  The orchestrator fans out
-//! to every enabled source in parallel and collects [`SourceResult`]s
+//! to every enabled source in parallel and collects `SourceResult`s
 //! into the journal.
 //!
 //! Per-source rate-limiting lives inside each adapter (module-level
 //! `governor::RateLimiter`) so one misbehaving provider can't drain
 //! another's quota.
 
+/// `Google Books` metadata adapter.
 pub mod google_books;
+/// `Hardcover` metadata adapter (`GraphQL`-backed; requires an API token).
 pub mod hardcover;
+/// `OpenLibrary` metadata adapter.
 pub mod open_library;
 
 use std::time::Duration;
@@ -26,12 +29,17 @@ use super::cache::CachedResponse;
 pub enum LookupKey {
     /// ISBN-10 or ISBN-13 in canonical form (from `lookup_key::isbn_key`).
     Isbn(String),
-    /// Fuzzy title+author search when ISBN is unavailable.
-    TitleAuthor { title: String, author: String },
+    /// Fuzzy title+author search when `ISBN` is unavailable.
+    TitleAuthor {
+        /// Book title to search for.
+        title: String,
+        /// Primary author name to search for.
+        author: String,
+    },
 }
 
 impl LookupKey {
-    /// Cache-key form used by [`super::cache`].
+    /// Cache-key form used by `cache`.
     pub fn cache_key(&self) -> String {
         match self {
             Self::Isbn(k) => k.clone(),
@@ -41,6 +49,10 @@ impl LookupKey {
         }
     }
 
+    /// Returns the confidence-scoring match type string for this key variant.
+    ///
+    /// The returned value corresponds to the `match_type` column written by
+    /// adapters into `SourceResult` and consumed by `confidence::match_modifier`.
     #[allow(dead_code)] // Kept alongside cache_key() as the public shape of LookupKey; used by adapter tests.
     pub const fn match_type_for(&self) -> &'static str {
         match self {
@@ -69,14 +81,22 @@ pub struct SourceResult {
 #[derive(Debug, thiserror::Error)]
 #[allow(dead_code)] // NotFound is part of the adapter contract; currently expressed as Ok(vec![]) by all adapters.
 pub enum SourceError {
+    /// The provider returned no record for the requested key (clean miss).
     #[error("not found")]
     NotFound,
+    /// The provider signalled quota exhaustion (`HTTP 429`).
     #[error("rate limited")]
-    RateLimited { retry_after: Option<Duration> },
+    RateLimited {
+        /// Suggested retry delay from the `Retry-After` response header, if present.
+        retry_after: Option<Duration>,
+    },
+    /// The provider returned an unexpected non-success `HTTP` status code.
     #[error("http {0}")]
     Http(StatusCode),
+    /// The outbound `HTTP` request exceeded the configured timeout.
     #[error("timeout")]
     Timeout,
+    /// Any other error (network failure, `JSON` parse error, `GraphQL` error payload).
     #[error(transparent)]
     Other(#[from] anyhow::Error),
 }
@@ -84,6 +104,7 @@ pub enum SourceError {
 /// Context passed into every `lookup` call.  Non-owning so the orchestrator
 /// can share one HTTP client across all adapters.
 pub struct LookupCtx<'a> {
+    /// Shared `HTTP` client; adapters must not construct their own to avoid bypassing pool limits.
     pub http: &'a reqwest::Client,
     /// Optional cache hit supplied by the caller.  If present, the adapter
     /// MAY return its results directly from the cached payload instead of
@@ -112,7 +133,7 @@ pub trait MetadataSource: Send + Sync {
     /// The adapter is responsible for:
     /// * rate-limiting itself,
     /// * mapping HTTP + JSON errors to [`SourceError`],
-    /// * normalising the payload into one [`SourceResult`] per field.
+    /// * normalising the payload into one `SourceResult` per field.
     async fn lookup(
         &self,
         ctx: &LookupCtx<'_>,

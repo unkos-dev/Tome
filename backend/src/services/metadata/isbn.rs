@@ -1,9 +1,22 @@
-//! ISBN-10 and ISBN-13 checksum validation and conversion.
+//! `ISBN-10` and `ISBN-13` checksum validation, conversion, and normalisation.
+//!
+//! Accepts raw identifier strings in common `OPF` formats (`urn:isbn:`, `ISBN:`,
+//! hyphenated, space-separated). All public functions normalise input before
+//! validation, so callers do not need to pre-strip hyphens or prefixes.
 
+/// Normalised `ISBN` identifiers extracted from an `OPF` identifier field.
+///
+/// Both forms are populated when derivable: an `ISBN-13` with `978` prefix can
+/// yield an `ISBN-10`, and any valid `ISBN-10` is converted to `ISBN-13`.
+/// When neither checksum validates, `valid` is `false` and both fields are
+/// `None`.
 #[derive(Debug, Clone)]
 pub struct IsbnResult {
+    /// Normalised `ISBN-10` (digits only, `X` check digit uppercase), if present and valid.
     pub isbn_10: Option<String>,
+    /// Normalised `ISBN-13` (digits only), if present and valid.
     pub isbn_13: Option<String>,
+    /// `true` when at least one form passed checksum validation.
     pub valid: bool,
 }
 

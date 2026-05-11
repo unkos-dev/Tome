@@ -1,3 +1,11 @@
+//! Library path template rendering and filename-heuristic extraction.
+//!
+//! Paths written into the library are derived from a template (`{Author}/{Title}.{ext}`
+//! by default). All user-supplied components pass through `sanitize_path_component`
+//! before substitution, which strips filesystem-unsafe characters and prevents
+//! path-traversal via embedded `/` or `\` sequences. The rendered path is always
+//! relative; callers join it to the absolute library root before any I/O.
+
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -34,7 +42,16 @@ pub fn render(template: &str, vars: &HashMap<String, String>) -> PathBuf {
     PathBuf::from(output)
 }
 
-/// Sanitize a single path component by replacing unsafe characters.
+/// Sanitize a single path component by replacing filesystem-unsafe characters with `_`.
+///
+/// Replaces `/`, `\`, `:`, `*`, `?`, `"`, `<`, `>`, `|`, and `\0` — the union of
+/// characters forbidden on POSIX, Windows `NTFS`, and common network filesystems.
+/// Leading/trailing whitespace and dots are trimmed; consecutive underscores are
+/// collapsed to one. An empty result is replaced with `"Unknown"`.
+///
+/// This function is the path-traversal guard for the library write path: because
+/// `/` and `\` are replaced, a metadata field containing `../../etc/passwd` cannot
+/// escape the library root when its sanitized value is joined to an absolute base.
 pub fn sanitize_path_component(s: &str) -> String {
     let mut result: String = s
         .chars()
@@ -60,6 +77,15 @@ pub fn sanitize_path_component(s: &str) -> String {
 }
 
 /// If `path` already exists, append ` (2)`, ` (3)`, etc. until a free name is found.
+///
+/// Checks for the existence of the path and up to 998 suffixed candidates.
+/// The returned path is guaranteed not to exist at the moment of the check,
+/// though a subsequent create may still race on highly concurrent systems.
+///
+/// # Errors
+///
+/// Returns `std::io::Error` with kind `AlreadyExists` if all 998 suffixed
+/// candidates are occupied and no free slot can be found.
 pub fn resolve_collision(path: &Path) -> std::io::Result<PathBuf> {
     if !path.exists() {
         return Ok(path.to_path_buf());

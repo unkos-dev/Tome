@@ -34,7 +34,9 @@ pub enum Decision {
 /// Minimal row slice that [`decide`] needs; callers build these from DB rows.
 #[derive(Debug, Clone)]
 pub struct PolicyInputRow {
+    /// `metadata_versions.id` — used as the apply-pointer in [`Decision::Apply`].
     pub id: Uuid,
+    /// `SHA-256` hash of the field value; used to detect quorum and disagreement.
     pub value_hash: Vec<u8>,
 }
 

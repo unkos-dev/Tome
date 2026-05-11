@@ -1,6 +1,25 @@
-//! Text sanitisation for metadata fields: HTML stripping, entity decoding, whitespace normalisation.
+//! Text sanitisation for metadata fields: `HTML` stripping, entity decoding, whitespace normalisation.
+//!
+//! `OPF` metadata fields arrive as untrusted strings from ingested `EPUB` files.
+//! Without sanitisation, attacker-controlled descriptions or titles containing
+//! `HTML` markup or entity-encoded payloads could propagate injection vectors
+//! into the rendered UI. This module reduces all text fields to plaintext before
+//! they reach the database or any downstream consumer.
+//!
+//! Invariant: every value returned by `sanitise` is free of `HTML` tags;
+//! valid numeric character references and the named entities recognised by
+//! `decode_entities` (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, `&nbsp;`)
+//! are decoded; malformed or out-of-range numeric entities (where
+//! `parse_numeric_entity` returns `None`) and unknown named entities are
+//! preserved literally — the `&` and surrounding characters survive;
+//! whitespace is collapsed to single spaces.
 
-/// Full sanitisation pipeline: decode entities -> strip HTML -> normalise whitespace.
+/// Reduce an untrusted metadata string to sanitised plaintext.
+///
+/// Applies the three-stage pipeline in order: entity decoding →
+/// `HTML` tag stripping → whitespace normalisation. The pipeline
+/// mitigates `HTML` injection by ensuring no markup survives into stored
+/// metadata values or the rendered UI.
 pub fn sanitise(input: &str) -> String {
     let decoded = decode_entities(input);
     let stripped = strip_html(&decoded);

@@ -9,11 +9,16 @@ use super::error::CoverError;
 /// Two size tiers. Values in pixels of the long edge.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoverSize {
+    /// Full-resolution tier — long edge capped at 1 200 px. Used for the
+    /// reader view where cover quality matters.
     Full,
+    /// Thumbnail tier — long edge capped at 300 px. Used for grid and list
+    /// views where many covers load simultaneously.
     Thumb,
 }
 
 impl CoverSize {
+    /// Return the maximum pixel length of the long edge for this tier.
     pub const fn long_edge(self) -> u32 {
         match self {
             Self::Full => 1200,
@@ -22,6 +27,19 @@ impl CoverSize {
     }
 }
 
+/// Decode `bytes` as `fmt`, resize to the long-edge cap of `size` using the
+/// `Lanczos3` filter if the image exceeds the cap, then re-encode in the
+/// original format. Images already within the cap are re-encoded without
+/// resizing.
+///
+/// Only `JPEG`, `PNG`, and `WebP` are accepted; any other `ImageFormat`
+/// variant is rejected before decoding.
+///
+/// # Errors
+///
+/// - [`CoverError::UnsupportedFormat`] — `fmt` is not `JPEG`, `PNG`, or `WebP`.
+/// - [`CoverError::Decode`] — `image::load_from_memory_with_format` or
+///   `DynamicImage::write_to` fail (malformed bytes or encoder error).
 pub fn resize_cover(
     bytes: &[u8],
     fmt: ImageFormat,

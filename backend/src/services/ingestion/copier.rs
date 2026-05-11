@@ -1,3 +1,11 @@
+//! Atomic, integrity-verified file copy from the ingestion drop-zone to the library.
+//!
+//! Files are written to a `tempfile` on the same filesystem as the destination, then
+//! renamed atomically. A `SHA-256` digest is computed inline during the write and
+//! compared against the pre-computed source hash — any corruption introduced during
+//! the copy causes `copy_verified` to return `CopyError::HashMismatch` before the
+//! rename, leaving no partial file in the library directory.
+
 use std::fmt::Write as _;
 
 use sha2::{Digest, Sha256};
@@ -7,29 +15,49 @@ use tempfile::NamedTempFile;
 
 const BUF_SIZE: usize = 64 * 1024;
 
+/// Outcome of a successful [`copy_verified`] call.
 #[derive(Debug)]
 pub struct CopyResult {
+    /// Path of the file as it now exists in the library directory
+    /// (`dest_dir.join(dest_relative)`; absolute only if `dest_dir` was
+    /// absolute — `copy_verified` does not canonicalise).
     #[allow(dead_code)] // Used by future callers (e.g. status endpoints)
     pub dest_path: PathBuf,
+    /// Lowercase hex `SHA-256` digest of the copied bytes, verified against the source.
     pub sha256: String,
+    /// File size in bytes, read from source metadata before copying.
     pub file_size: u64,
 }
 
+/// Errors returned by [`copy_verified`] and [`hash_file`].
 #[derive(Debug, thiserror::Error)]
 pub enum CopyError {
+    /// An underlying I/O failure (open, read, write, rename, or metadata).
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+    /// The destination `SHA-256` digest did not match `source_hash` after copying,
+    /// indicating corruption in transit. The temp file is discarded automatically.
     #[error("SHA-256 mismatch: source_hash={source_hash}, dest_hash={dest_hash}")]
     HashMismatch {
+        /// `SHA-256` digest of the source file (caller-supplied; the value
+        /// the copy was meant to reproduce).
         source_hash: String,
+        /// `SHA-256` digest computed from the destination bytes during the
+        /// streaming write — diverges from `source_hash` on transit corruption.
         dest_hash: String,
     },
+    /// `tempfile` failed to rename the temp file to the final destination path.
     #[error("tempfile persist failed: {0}")]
     Persist(#[from] tempfile::PersistError),
 }
 
-/// Hash a file using streaming SHA-256 with a 64KB buffer.
+/// Hash a file using streaming `SHA-256` with a 64 KB buffer.
+///
 /// Returns the lowercase hex digest.
+///
+/// # Errors
+///
+/// Returns `std::io::Error` if the file cannot be opened or read.
 pub fn hash_file(path: &Path) -> Result<String, std::io::Error> {
     let file = std::fs::File::open(path)?;
     let mut reader = BufReader::with_capacity(BUF_SIZE, file);
@@ -55,7 +83,7 @@ pub fn hash_file(path: &Path) -> Result<String, std::io::Error> {
         }))
 }
 
-/// Atomically copy `source` to `dest_dir/dest_relative`, verifying SHA-256 integrity.
+/// Atomically copy `source` to `dest_dir/dest_relative`, verifying `SHA-256` integrity.
 ///
 /// Accepts a pre-computed `source_hash` to avoid re-reading the source file for hashing.
 /// The source is read once (for copying), and the destination bytes are hashed inline
@@ -68,6 +96,14 @@ pub fn hash_file(path: &Path) -> Result<String, std::io::Error> {
 /// 3. Copy bytes from source to temp, hashing the destination stream inline
 /// 4. Compare dest hash against provided `source_hash`
 /// 5. Persist (atomic rename) to final path
+///
+/// # Errors
+///
+/// - `CopyError::Io` — source cannot be opened/read, parent directory creation fails,
+///   or source metadata cannot be read.
+/// - `CopyError::HashMismatch` — the digest of the written bytes does not match
+///   `source_hash`; the temp file is discarded before returning.
+/// - `CopyError::Persist` — the atomic rename of the temp file to the final path fails.
 pub fn copy_verified(
     source: &Path,
     dest_dir: &Path,

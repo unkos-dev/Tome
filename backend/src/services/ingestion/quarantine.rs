@@ -1,10 +1,32 @@
+//! Quarantine: moves rejected files out of the ingestion pipeline.
+//!
+//! Files that fail hashing, copying, or `EPUB` structural validation are moved to a
+//! dedicated quarantine directory alongside a `JSON` sidecar that records the original
+//! path, the failure reason, and a `RFC 3339` timestamp. Operators can inspect the
+//! sidecar to triage failures without re-running ingestion.
+//!
+//! The quarantine directory is created on demand and is never pruned automatically —
+//! operators own the retention policy for quarantined files.
+
 use std::path::{Path, PathBuf};
 use time::OffsetDateTime;
 
-/// Move a file to the quarantine directory with a JSON sidecar explaining why.
+/// Move a file to the quarantine directory with a `JSON` sidecar explaining why.
 ///
-/// If the destination filename collides, a timestamp suffix is appended.
-/// Falls back to copy+delete if rename fails (cross-filesystem).
+/// If the destination filename collides, a `Unix` timestamp suffix is appended to
+/// produce a unique name. Falls back to copy-then-delete if rename fails
+/// (cross-filesystem move).
+///
+/// # Errors
+///
+/// Returns `std::io::Error` if:
+/// - the quarantine directory cannot be created,
+/// - `source` has no filename component (`InvalidInput`),
+/// - the copy fallback fails (rename is tried first and a copy failure is returned),
+/// - or the `JSON` sidecar cannot be written.
+///
+/// A best-effort source deletion failure after a successful copy is logged as a
+/// warning but does not cause this function to return an error.
 pub fn quarantine_file(
     source: &Path,
     quarantine_dir: &Path,

@@ -27,6 +27,14 @@ use super::orchestrator::{self, RunOutcome};
 
 /// Spawn the queue worker loop.  Returns when `cancel` fires, reverting any
 /// `in_progress` row back to `pending`.
+///
+/// # Errors
+///
+/// Returns an error if any of the per-tick queue queries fail — typically a
+/// `claim_next` failure during normal polling (transient DB error, pool
+/// exhaustion) — or if the shutdown-time revert of `in_progress` rows to
+/// `pending` fails. Both failure modes exit the worker loop; the supervisor
+/// is responsible for restarts.
 pub async fn spawn_queue(
     pool: PgPool,
     config: Config,

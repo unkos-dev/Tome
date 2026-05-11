@@ -1,3 +1,13 @@
+//! `XHTML` spine-document validation layer (Layer 4).
+//!
+//! Iterates every spine idref, resolves the entry path relative to the `OPF`
+//! directory, and validates encoding and `XML` well-formedness. Encoding
+//! repair fires only when all three conditions hold: (a) a non-`UTF-8`
+//! encoding is declared in the `XML` declaration or `BOM`; (b) the raw bytes
+//! fail `UTF-8` parse; (c) decoding under the declared encoding succeeds
+//! without errors. Spine documents exceeding [`MAX_SPINE_ITEMS`] are skipped
+//! and recorded as `Degraded` to bound worst-case validation time.
+
 use quick_xml::Reader;
 
 use super::{
@@ -6,7 +16,13 @@ use super::{
     zip_layer::{ZipHandle, read_entry},
 };
 
-/// Validate XHTML spine documents.
+/// Validate all `XHTML` spine documents referenced in `opf_data`.
+///
+/// Resolves each spine idref to an archive path relative to the `OPF` directory,
+/// reads the entry bytes, and delegates to [`validate_xhtml_document`]. Skips
+/// entries that are missing from the archive (the `OPF` layer already records
+/// broken spine refs). If the spine exceeds [`MAX_SPINE_ITEMS`], emits a single
+/// `Degraded` issue and returns early.
 pub fn validate(handle: &ZipHandle, opf_data: Option<&OpfData>, issues: &mut Vec<Issue>) {
     let Some(opf) = opf_data else { return };
 
@@ -42,6 +58,15 @@ pub fn validate(handle: &ZipHandle, opf_data: Option<&OpfData>, issues: &mut Vec
     }
 }
 
+/// Validate encoding and `XML` well-formedness for a single `XHTML` document.
+///
+/// Applies the conservative three-condition encoding-repair rule:
+/// if the declared encoding (from `XML` declaration or `BOM`) differs from
+/// `UTF-8`, the raw bytes fail `UTF-8` parse, and re-decoding under the
+/// declared encoding succeeds cleanly, an `EncodingMismatch` (`Repaired`)
+/// issue is emitted and the decoded bytes are validated as `XML`. Otherwise,
+/// if `UTF-8` parse fails without a usable declared encoding, an
+/// `AmbiguousEncoding` (`Degraded`) issue is emitted.
 pub fn validate_xhtml_document(bytes: &[u8], entry_name: &str, issues: &mut Vec<Issue>) {
     // Conservative encoding repair rule:
     // Only transcode if ALL THREE conditions hold:
@@ -90,7 +115,7 @@ pub fn validate_xhtml_document(bytes: &[u8], entry_name: &str, issues: &mut Vec<
     validate_xml_parse(bytes, entry_name, issues);
 }
 
-/// Parse XML and report structural errors as Degraded issues.
+/// Parse `XML` and report structural errors as `Degraded` issues.
 fn validate_xml_parse(bytes: &[u8], entry_name: &str, issues: &mut Vec<Issue>) {
     let Ok(xml) = std::str::from_utf8(bytes) else {
         return;
@@ -117,7 +142,7 @@ fn validate_xml_parse(bytes: &[u8], entry_name: &str, issues: &mut Vec<Issue>) {
     }
 }
 
-/// Extract encoding declared in XML declaration (`<?xml ... encoding="..." ?>`) or BOM.
+/// Extract encoding declared in `XML` declaration (`<?xml ... encoding="..." ?>`) or `BOM`.
 fn detect_declared_encoding(bytes: &[u8]) -> Option<String> {
     // BOM detection
     if bytes.starts_with(b"\xFF\xFE") {

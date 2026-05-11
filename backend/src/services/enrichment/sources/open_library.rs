@@ -9,7 +9,7 @@
 //! `/authors/OL...` keys and required a second hop).
 //!
 //! Rate-limited to 3 requests per second — `OpenLibrary`'s identified-request
-//! tier, unlocked by the `User-Agent` set in [`super::super::http::api_client`].
+//! tier, unlocked by the `User-Agent` set in `api_client`.
 
 use std::num::NonZeroU32;
 use std::sync::OnceLock;
@@ -37,11 +37,21 @@ fn limiter() -> &'static Limiter {
     })
 }
 
+/// `OpenLibrary` metadata adapter.
+///
+/// Uses two `OpenLibrary` endpoints: the `ISBN` lookup path (`/api/books`)
+/// which returns inline author names without a second hop, and the full-text
+/// search path (`/search.json`) for title+author queries.
 pub struct OpenLibrary {
     base_url: String,
 }
 
 impl OpenLibrary {
+    /// Creates a new `OpenLibrary` adapter targeting `base_url`.
+    ///
+    /// The adapter is always enabled; no API credentials are required.
+    /// Rate limits are enforced internally at 3 req/sec, matching the
+    /// `OpenLibrary` identified-request tier.
     pub fn new(base_url: impl Into<String>) -> Self {
         Self {
             base_url: base_url.into(),

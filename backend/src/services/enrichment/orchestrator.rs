@@ -1,7 +1,7 @@
 //! Per-manifestation enrichment flow.
 //!
 //! * Load canonical current state + enabled sources.
-//! * Build a [`LookupKey`] (ISBN preferred, title+author fallback).
+//! * Build a `LookupKey` (ISBN preferred, title+author fallback).
 //! * Parallel fan-out to every enabled source, bounded by the fetch budget.
 //! * Write each source's raw response to `api_cache`.
 //! * Upsert one `metadata_versions` journal row per field result.
@@ -44,23 +44,32 @@ use crate::services::enrichment::value_hash;
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // consumed by queue.rs + tracing
 pub struct RunOutcome {
+    /// Manifestation that was enriched.
     pub manifestation_id: Uuid,
+    /// Number of fields promoted to canonical in this run.
     pub applied: usize,
+    /// Number of fields left as pending (awaiting review) in this run.
     pub staged: usize,
+    /// Number of fields skipped because a user lock was active.
     pub skipped_locked: usize,
+    /// Per-source error details for sources that did not return results.
     pub source_failures: Vec<SourceFailure>,
+    /// Set to `true` when an `ISBN` change triggered a duplicate-work suspicion.
     pub duplicate_suspected: bool,
 }
 
+/// A source-level error captured during [`run_once`].
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // source_id + error are surfaced via tracing
 pub struct SourceFailure {
+    /// Source that failed (e.g. `"openlibrary"`).
     pub source_id: String,
+    /// Human-readable error description.
     pub error: String,
-    /// Populated when the source reported HTTP 429.  The queue uses this to
+    /// Populated when the source reported `HTTP 429`.  The queue uses this to
     /// schedule the next retry attempt.
     pub retry_after: Option<Duration>,
-    /// True if the error was non-retryable (4xx other than 429).
+    /// `true` if the error was non-retryable (4xx other than 429).
     pub terminal: bool,
 }
 
@@ -68,24 +77,44 @@ pub struct SourceFailure {
 /// [`run_once`] and [`crate::services::enrichment::dry_run`].
 #[derive(Debug)]
 pub struct Snapshot {
+    /// Manifestation whose fields are being enriched.
     pub manifestation_id: Uuid,
+    /// Parent work of the manifestation.
     pub work_id: Uuid,
+    /// Best available lookup key (`ISBN` preferred, title/author fallback).
     pub lookup_key: Option<LookupKey>,
+    /// Current canonical field values loaded before the fan-out.
     pub canonical: CanonicalState,
 }
 
+/// Current canonical values for the fields managed by the enrichment pipeline.
+///
+/// Fields are `None` when the column is `NULL` and `Some("")` when the column
+/// holds an empty string.  [`is_empty_for`](CanonicalState::is_empty_for) treats
+/// both as "absent" to prevent auto-fill from writing over a blank placeholder.
 #[derive(Debug, Default, Clone)]
 pub struct CanonicalState {
+    /// Work-level title (`works.title`).
     pub title: Option<String>,
+    /// Work-level description (`works.description`).
     pub description: Option<String>,
+    /// Work-level `BCP 47` language tag (`works.language`).
     pub language: Option<String>,
+    /// Manifestation-level publisher string.
     pub publisher: Option<String>,
+    /// Manifestation-level publication date (`YYYY-MM-DD` string after normalisation).
     pub pub_date: Option<String>,
+    /// Manifestation-level `ISBN-10`.
     pub isbn_10: Option<String>,
+    /// Manifestation-level `ISBN-13`.
     pub isbn_13: Option<String>,
 }
 
 impl CanonicalState {
+    /// Returns `true` when the canonical slot for `field` is absent or blank.
+    ///
+    /// Both `None` and `Some("")` are treated as empty so that stub titles
+    /// (inserted as `""` by `work::create_stub`) do not block auto-fill.
     pub fn is_empty_for(&self, field: &str) -> bool {
         fn blank(v: Option<&str>) -> bool {
             v.unwrap_or("").is_empty()
@@ -127,6 +156,15 @@ pub fn build_sources(config: &Config) -> Vec<Arc<dyn MetadataSource>> {
 
 /// Full per-manifestation run.  Writes to `api_cache`, `metadata_versions`,
 /// and canonical columns atomically.
+///
+/// Returns early with an empty [`RunOutcome`] (zero applied/staged) when no
+/// lookup key can be derived.  Individual source failures are captured in
+/// [`RunOutcome::source_failures`] rather than causing an error return.
+///
+/// # Errors
+///
+/// Returns an error if the database is unreachable, the manifestation does
+/// not exist, or the transaction commit fails.
 pub async fn run_once(
     pool: &PgPool,
     config: &Config,
@@ -355,6 +393,10 @@ async fn apply_canonical_batch(
 }
 
 /// Load the current canonical + lookup state for a manifestation.
+///
+/// # Errors
+///
+/// Returns an error if the manifestation does not exist or the query fails.
 pub async fn load_snapshot(pool: &PgPool, manifestation_id: Uuid) -> anyhow::Result<Snapshot> {
     let row = sqlx::query!(
         "SELECT m.work_id, m.isbn_10, m.isbn_13, m.publisher, m.pub_date, \
@@ -439,9 +481,11 @@ fn derive_lookup_key(
     None
 }
 
-/// One fan-out entry.
+/// One fan-out entry: the result of a single source lookup during [`fan_out`].
 pub struct SourceRun {
+    /// Source identifier (e.g. `"openlibrary"`, `"googlebooks"`).
     pub source_id: String,
+    /// Field results on success, or the first error on failure.
     pub outcome: Result<Vec<SourceResult>, SourceError>,
 }
 
@@ -856,8 +900,12 @@ fn summarise_failure(source_id: &str, err: &SourceError) -> SourceFailure {
     }
 }
 
-/// Helper used by [`super::dry_run::preview`] — same fan-out + cache but no journal
+/// Helper used by `dry_run::preview` — same fan-out + cache but no journal
 /// writes and no canonical updates.
+///
+/// # Errors
+///
+/// Returns an error if the manifestation does not exist or a database query fails.
 pub async fn fan_out_for_dry_run(
     pool: &PgPool,
     config: &Config,

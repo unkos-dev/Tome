@@ -3,7 +3,7 @@
 //! Streams the source OPF as `quick_xml` events, replaces targeted Dublin
 //! Core / `<meta>` elements in place, and preserves everything else
 //! byte-for-byte (unknown namespaces, custom `<meta>`, `<dc:coverage>`,
-//! prologue, declaration order).  Callers pass a [`Target`] carrying the
+//! prologue, declaration order).  Callers pass a `Target` carrying the
 //! desired per-field values; `None` for a field means "leave the OPF's
 //! current value alone".
 //!
@@ -17,33 +17,55 @@ use std::io::Cursor;
 
 use super::error::WritebackError;
 
-/// Target values to write back into the OPF.  Each field semantics:
-/// - `None`: leave the OPF's current value alone.
-/// - `Some(v)`: set the DC element's text content to `v`.  An empty `v`
-///   is still written as an empty element (not deleted) — the MVP does
-///   not delete existing OPF fields.
+/// Target values to write back into the `OPF`.  Each field semantics:
+///
+/// - `None`: leave the `OPF`'s current value alone.
+/// - `Some(v)`: set the Dublin Core element's text content to `v`.  An empty
+///   `v` is written as an empty element (not deleted) — the MVP does not
+///   delete existing `OPF` fields.
 #[derive(Debug, Default, Clone)]
 pub struct Target<'a> {
+    /// `dc:title` text.
     pub title: Option<&'a str>,
+    /// `dc:description` text (blurb / synopsis).
     pub description: Option<&'a str>,
+    /// `dc:language` BCP 47 tag (e.g. `"en"`, `"fr"`).
     pub language: Option<&'a str>,
+    /// `dc:publisher` text.
     pub publisher: Option<&'a str>,
-    /// ISO 8601 date string (YYYY-MM-DD or full timestamp).
+    /// ISO 8601 date string (`YYYY-MM-DD` or full timestamp).
     pub pub_date: Option<&'a str>,
+    /// `ISBN`-10 string; used as fallback when `isbn_13` is absent.
     pub isbn_10: Option<&'a str>,
+    /// `ISBN`-13 string; preferred over `isbn_10` when both are set.
     pub isbn_13: Option<&'a str>,
+    /// Series name and optional position; written as `belongs-to-collection`
+    /// (`EPUB3`) and/or `calibre:series` (`EPUB2` or when both forms exist).
     pub series: Option<SeriesRef<'a>>,
 }
 
+/// Series membership reference used by `Target`.
 #[derive(Debug, Clone, Copy)]
 pub struct SeriesRef<'a> {
+    /// Display name of the series (e.g. `"Mistborn"`).
     pub name: &'a str,
+    /// One-based reading order position within the series; `None` when unknown.
     pub index: Option<f64>,
 }
 
-/// Apply `target` to the OPF bytes at `opf_bytes`, returning the rewritten
-/// UTF-8 XML.  Preserves all non-targeted elements, attributes, and
+/// Apply `target` to the `OPF` bytes at `opf_bytes`, returning the rewritten
+/// `UTF-8` `XML`.  Preserves all non-targeted elements, attributes, and
 /// whitespace.
+///
+/// Performs two passes: a scan pass to detect `EPUB` version, existing
+/// `calibre:series`, and `belongs-to-collection` markers; then a rewrite
+/// pass that replaces targeted Dublin Core elements in place and appends
+/// missing identifiers/series metadata before the closing `</metadata>` tag.
+///
+/// # Errors
+///
+/// - `WritebackError::Xml` — `quick_xml` failed to parse the input bytes or
+///   write an event to the output buffer.
 #[allow(
     clippy::too_many_lines,
     reason = "transform implements a two-pass XML rewrite over 11 metadata axes plus EPUB 2/3 version-specific formats; the passes share state that cannot be cleanly separated without significant architecture changes"

@@ -18,10 +18,19 @@ use crate::services::enrichment::value_hash;
 /// Map of `field_name -> metadata_versions.id` for every row written in this call.
 pub type DraftIds = HashMap<String, Uuid>;
 
-/// Write every non-None extracted field as an `opf`-source journal row.
+/// Write every non-`None` extracted field as an `opf`-source journal row.
 ///
-/// * `conn` — open connection or transaction; this function does not begin or commit.
-/// * Returns the version IDs so the caller can wire canonical pointer columns.
+/// `conn` must be an open connection or transaction; this function does not
+/// begin or commit. On a repeat observation of the same `(manifestation_id,
+/// field_name, value_hash)` the existing row's `observation_count` and
+/// `last_seen_at` are bumped and its `id` is returned unchanged.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` if any individual `INSERT … ON CONFLICT` statement
+/// fails (e.g. constraint violation, connection loss, or serialisation failure).
+/// Partial writes within an uncommitted transaction are visible to the caller
+/// and will be rolled back if the caller rolls back.
 #[allow(
     clippy::too_many_lines,
     reason = "write_drafts inserts a draft row per canonical metadata axis; the per-axis cases are mechanical and cannot meaningfully be split without changing the function's transaction contract"

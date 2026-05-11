@@ -32,12 +32,21 @@ fn limiter() -> &'static Limiter {
     })
 }
 
+/// `Google Books` metadata adapter.
+///
+/// Queries the `Google Books` Volumes `API` to retrieve bibliographic data.
+/// An optional API key lifts the anonymous per-IP quota (~1 000 req/day);
+/// without it the adapter remains functional but is rate-limited conservatively.
 pub struct GoogleBooks {
     base_url: String,
     api_key: Option<String>,
 }
 
 impl GoogleBooks {
+    /// Creates a new `GoogleBooks` adapter targeting `base_url`.
+    ///
+    /// `api_key` is optional; when `None` the adapter uses anonymous access,
+    /// subject to the shared IP-level quota enforced by `Google`.
     pub fn new(base_url: impl Into<String>, api_key: Option<String>) -> Self {
         Self {
             base_url: base_url.into(),

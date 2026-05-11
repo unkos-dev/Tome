@@ -19,8 +19,11 @@ use time::OffsetDateTime;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, sqlx::Type)]
 #[sqlx(type_name = "api_cache_kind", rename_all = "lowercase")]
 pub enum ApiCacheKind {
+    /// The source returned a usable result.
     Hit,
+    /// The source confirmed the key does not exist (e.g. `HTTP 404`).
     Miss,
+    /// The source returned an error (e.g. rate-limit, server fault).
     Error,
 }
 
@@ -28,22 +31,33 @@ pub enum ApiCacheKind {
 #[derive(Debug, Clone)]
 #[allow(dead_code)] // fields populated for consumers of `read`; orchestrator only writes today.
 pub struct CachedResponse {
+    /// Raw `JSON` body returned by the upstream source.
     pub response: Value,
+    /// Whether the stored response was a hit, miss, or error.
     pub kind: ApiCacheKind,
+    /// `HTTP` status code from the upstream response, if applicable.
     pub http_status: Option<i32>,
+    /// Timestamp when the upstream call was made (stored in `UTC`).
     pub fetched_at: OffsetDateTime,
 }
 
-/// Per-kind TTL configuration passed to [`write()`].
+/// Per-kind `TTL` configuration passed to `write`.
 pub struct CacheTtls {
+    /// How long to keep a successful hit before expiry.
     pub hit: time::Duration,
+    /// How long to remember a confirmed miss (avoids immediate re-lookup).
     pub miss: time::Duration,
+    /// How long to suppress retries after a source error.
     pub error: time::Duration,
 }
 
 /// Read a live cache entry for `(source, lookup_key)`.
 ///
-/// Returns `None` if no row exists or the row is expired.
+/// Returns `None` if no row exists or the row is expired (`expires_at <= now()`).
+///
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the query fails (connection error, decode failure, etc.).
 #[allow(dead_code)] // orchestrator only writes today; read is exercised by the integration tests.
 pub async fn read(
     pool: &PgPool,
@@ -79,8 +93,12 @@ pub async fn read(
 /// Insert or update a cache row for `(source, lookup_key)`.
 ///
 /// The `expires_at` timestamp is computed in Rust as
-/// `now + ttls.<kind>` so the TTL logic stays testable without a DB.
+/// `now + ttls.<kind>` so the `TTL` logic stays testable without a DB.
 /// On conflict the existing row is fully replaced.
+///
+/// # Errors
+///
+/// Returns a [`sqlx::Error`] if the upsert fails.
 pub async fn write(
     pool: &PgPool,
     source: &str,

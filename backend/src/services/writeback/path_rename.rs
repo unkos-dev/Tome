@@ -1,9 +1,16 @@
-//! Render + commit + collision-check for on-disk EPUB path updates.
+//! Render + commit + collision-check for on-disk `EPUB` path updates.
 //!
 //! `commit` performs an atomic rename when `src` and `dest` are on the
-//! same filesystem.  When the kernel returns EXDEV (or
-//! `ErrorKind::CrossesDevices` on newer Rust), it falls back to
-//! copy-with-hash-verify + unlink-original.
+//! same filesystem.  When the kernel returns `EXDEV` (or
+//! `ErrorKind::CrossesDevices` on newer Rust), it falls back to a
+//! copy-via-tempfile + `SHA-256` verify + unlink-original path so writeback
+//! never leaves a partially-written file at the destination.
+//!
+//! Invariant: every file mutation in the writeback pipeline flows through
+//! either `commit` (tempfile → dest) or `move_existing` (src → dest),
+//! never via a bare `std::fs::rename`.  Both helpers fsync the destination's
+//! parent directory after rename so the directory-entry update is durable
+//! across a power loss.
 
 use std::path::{Path, PathBuf};
 
@@ -13,7 +20,22 @@ use tempfile::NamedTempFile;
 use super::error::WritebackError;
 
 /// Persist `temp` onto `dest` atomically on same-FS, or fall back to
-/// copy + verify + unlink when crossing filesystem boundaries.
+/// copy + `SHA-256` verify + unlink when crossing filesystem boundaries.
+///
+/// The same-FS path calls `tempfile::NamedTempFile::persist`, which delegates
+/// to `libc::rename` — a single syscall that is atomic for visibility.  The
+/// cross-FS (`EXDEV`) path copies bytes into a second tempfile in `dest`'s
+/// parent directory, fsyncs that file, persists it to `dest`, then verifies
+/// the on-disk `SHA-256` matches the source before returning.
+///
+/// # Errors
+///
+/// - `WritebackError::Persist` — the same-FS persist failed for a reason
+///   other than `EXDEV`.
+/// - `WritebackError::Io` — an I/O error occurred during the cross-FS copy,
+///   fsync, post-copy read, or hash verification.
+/// - `WritebackError::Persist("post-copy hash mismatch")` — the bytes on
+///   disk after the cross-FS copy do not match the source tempfile.
 pub fn commit(temp: NamedTempFile, dest: &Path) -> Result<(), WritebackError> {
     match temp.persist(dest) {
         Ok(_) => {
@@ -103,11 +125,23 @@ fn exdev_fallback(temp: NamedTempFile, dest: &Path) -> Result<(), WritebackError
 }
 
 /// Move an existing on-disk file to `dest`.  Same-FS → atomic rename.
-/// Cross-FS (EXDEV) → tempfile-in-dest-dir + persist + unlink-original.
+/// Cross-FS (`EXDEV`) → tempfile-in-dest-dir + persist + unlink-original.
 ///
-/// This is the "rename a file already on disk" sibling of [`commit`]
-/// (which takes a [`NamedTempFile`]).  Used by the orchestrator's
+/// This is the "rename a file already on disk" sibling of `commit`
+/// (which takes a `NamedTempFile`).  Used by the orchestrator's
 /// path-rename step after post-writeback validation passes.
+///
+/// Both parent directories are fsynced after a same-FS rename when `src`
+/// and `dest` have different parents, so both the creation and unlink sides
+/// of the directory-entry change are durable.
+///
+/// # Errors
+///
+/// - `WritebackError::Io` — `std::fs::rename` returned an error that is not
+///   `EXDEV`; or an I/O error occurred during the cross-FS copy or fsync.
+/// - `WritebackError::Persist("dest has no parent dir")` — `dest` has no
+///   parent component (bare filename passed as destination).
+/// - Any error returned by `commit` during the cross-FS fallback path.
 pub fn move_existing(src: &Path, dest: &Path) -> Result<(), WritebackError> {
     match std::fs::rename(src, dest) {
         Ok(()) => {
@@ -144,9 +178,18 @@ pub fn move_existing(src: &Path, dest: &Path) -> Result<(), WritebackError> {
 }
 
 /// Normalise a rendered path: reject `..` components and absolute paths
-/// that escape the library root.  Returns the input unchanged if it is
-/// already safe.  This is a defensive second line — primary sanitisation
-/// happens inside `services::ingestion::path_template::render`.
+/// that escape the library root.  Returns an equivalent relative
+/// `PathBuf` with `./` components stripped.
+///
+/// This is a defensive second line — primary sanitisation happens inside
+/// `services::ingestion::path_template::render`.  Without this check, a
+/// crafted title containing `../` segments could rename an `EPUB` outside
+/// the library root.
+///
+/// # Errors
+///
+/// - `WritebackError::Persist` — `p` contains a `..` (`ParentDir`)
+///   component or an absolute prefix (`RootDir` or `Prefix`).
 pub fn normalise_relative(p: &Path) -> Result<PathBuf, WritebackError> {
     let mut out = PathBuf::new();
     for comp in p.components() {

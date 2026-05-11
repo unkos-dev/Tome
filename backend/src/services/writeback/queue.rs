@@ -2,21 +2,34 @@
 //!
 //! Mirrors `services::enrichment::queue` with one change: at most one job
 //! per manifestation is ever `in_progress` at the same time, so two
-//! workers can never race writebacks on the same on-disk EPUB.
+//! workers can never race writebacks on the same on-disk `EPUB`.
 //!
 //! The guarantee is enforced in two layers:
-//!   1. A partial UNIQUE index (`idx_writeback_jobs_in_progress_unique`)
-//!      on `(manifestation_id) WHERE status = 'in_progress'` — the
-//!      load-bearing correctness gate.  Two workers racing the same
-//!      manifestation both survive `NOT EXISTS` under READ COMMITTED
-//!      (which can't see a peer's uncommitted UPDATE), but when the
-//!      second worker's UPDATE would create a duplicate `in_progress`
-//!      tuple, Postgres waits on the first worker's uncommitted index
-//!      entry, then fails with SQLSTATE 23505.  `claim_next` translates
-//!      that into `Ok(None)`.
-//!   2. A `NOT EXISTS` clause inside the claim CTE — a cheap soft filter
-//!      that avoids the unique-violation round-trip on the common path
-//!      where a sibling job already holds the `in_progress` slot.
+//!
+//! 1. A partial `UNIQUE` index (`idx_writeback_jobs_in_progress_unique`)
+//!    on `(manifestation_id) WHERE status = 'in_progress'` — the
+//!    load-bearing correctness gate.  Two workers racing the same
+//!    manifestation both survive `NOT EXISTS` under `READ COMMITTED`
+//!    (which can't see a peer's uncommitted `UPDATE`), but when the
+//!    second worker's `UPDATE` would create a duplicate `in_progress`
+//!    tuple, Postgres waits on the first worker's uncommitted index
+//!    entry, then fails with `SQLSTATE 23505`.  `claim_next` translates
+//!    that into `Ok(None)`.
+//! 2. A `NOT EXISTS` clause inside the claim `CTE` — a cheap soft filter
+//!    that avoids the unique-violation round-trip on the common path
+//!    where a sibling job already holds the `in_progress` slot.
+//!
+//! ## `RLS` system-context invariant
+//!
+//! The `pool` passed to [`spawn_worker`] MUST have its connections
+//! configured with `app.system_context = 'writeback'` (set via
+//! `after_connect`).  The `manifestations_update_system` `RLS` policy
+//! matches against this `GUC`; without it, the orchestrator's
+//! `UPDATE manifestations SET current_file_hash = …` writes produce
+//! zero rows affected and the hash update is silently dropped.  User-facing
+//! pools (`reverie_app` without the `GUC` set) can never satisfy this
+//! policy, which is intentional: it prevents a future handler bug from
+//! inadvertently calling `run_once` on a user-context pool.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,6 +48,20 @@ use super::orchestrator::{self, RunOutcome};
 
 /// Spawn the writeback queue worker loop.  Returns when `cancel` fires,
 /// reverting any `in_progress` row back to `pending`.
+///
+/// On startup, calls [`revert_in_progress`] to recover any rows left
+/// `in_progress` by a prior process crash.  The worker then polls
+/// `writeback_jobs` on a configurable interval, claiming and dispatching
+/// up to `config.writeback.concurrency` jobs concurrently using a
+/// `tokio` semaphore.
+///
+/// The `pool` MUST be a writeback-context pool (see module-level `RLS`
+/// system-context invariant).
+///
+/// # Errors
+///
+/// - `anyhow::Error` wrapping `sqlx::Error` if [`revert_in_progress`] or
+///   `claim_next` fails at the database layer.
 pub async fn spawn_worker(
     pool: PgPool,
     config: Config,
@@ -95,11 +122,23 @@ pub async fn spawn_worker(
     }
 }
 
-/// Atomic claim.  Returns `Some((id, new_attempt_count))` when a row was
-/// claimed.  The partial UNIQUE index on
-/// `(manifestation_id) WHERE status = 'in_progress'` is the load-bearing
-/// serialisation primitive; the `NOT EXISTS` clause in the CTE is a
-/// common-path optimisation that avoids a unique-violation round-trip.
+/// Atomic claim of the next eligible `writeback_jobs` row.
+///
+/// Returns `Some((id, new_attempt_count))` when a row was claimed, or
+/// `None` when the queue is empty, all eligible rows are inside their
+/// back-off window, or a concurrent worker won the race on the partial
+/// `UNIQUE` index.
+///
+/// The partial `UNIQUE` index on `(manifestation_id) WHERE status =
+/// 'in_progress'` is the load-bearing serialisation primitive; the
+/// `NOT EXISTS` clause in the `CTE` is a common-path optimisation that
+/// avoids a unique-violation round-trip.
+///
+/// # Errors
+///
+/// - `sqlx::Error` (any variant other than unique-violation) — a database
+///   error occurred while executing the claim `CTE`.  Unique-violation
+///   (`SQLSTATE 23505`) is translated to `Ok(None)`.
 pub async fn claim_next(pool: &PgPool) -> sqlx::Result<Option<(Uuid, i32)>> {
     let result = sqlx::query!(
         r"WITH eligible AS (
@@ -311,8 +350,16 @@ async fn mark_failed(
     Ok(())
 }
 
-/// Revert any `in_progress` rows back to `pending`.  Called on shutdown
-/// AND on worker startup (crash recovery).
+/// Revert any `in_progress` rows back to `pending`.
+///
+/// Called on worker startup (crash recovery) and on graceful shutdown.
+/// A process killed between claiming a job and finishing it leaves a row
+/// in `in_progress` indefinitely; this call restores it to `pending` so
+/// the next startup picks it up.
+///
+/// # Errors
+///
+/// - `sqlx::Error` — the `UPDATE writeback_jobs` statement failed.
 pub async fn revert_in_progress(pool: &PgPool) -> sqlx::Result<()> {
     let res = sqlx::query!(
         "UPDATE writeback_jobs SET status = 'pending' \
