@@ -23,6 +23,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       audit: ${{ steps.filter.outputs.audit }}
       frontend: ${{ steps.filter.outputs.frontend }}
+      staging: ${{ steps.filter.outputs.staging }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v4
@@ -49,6 +50,12 @@ jobs:
             frontend:
               - 'frontend/**'
               - 'Dockerfile'
+              - '.github/workflows/ci.yml'
+            staging:
+              - 'docker/compose.staging.yml'
+              - 'docker/init-roles.sql'
+              - 'docker/staging.env.bootstrap.example'
+              - 'docker/staging.env.runtime.example'
               - '.github/workflows/ci.yml'
 
   backend:
@@ -205,3 +212,127 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  # UNK-185: smoke test the staging compose init path. Catches role-clause
+  # regressions in init-roles.sql and required-env-var regressions in the
+  # compose `${VAR:?required}` interpolations before they land on staging.
+  # Postgres-only `up` — the `reverie` service isn't booted (no image
+  # available in this lane; the init surface under test is postgres).
+  staging-smoke:
+    name: Staging compose smoke
+    needs: changes
+    if: needs.changes.outputs.staging == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      # Build .env from the committed example to also catch regressions where
+      # a required key is renamed in compose.staging.yml but not in the
+      # example (debt entry's failure mode #2). Distinct passwords per role
+      # so a swapped CREATE ROLE clause in init-roles.sql can't authenticate
+      # cross-role and pass silently.
+      - name: Prepare env files from examples
+        working-directory: docker
+        run: |
+          set -euo pipefail
+          cp staging.env.bootstrap.example .env
+          # `.env.runtime` is required: true on the reverie service; compose
+          # still validates env_file presence at parse time even when the
+          # service isn't being started. Populate with stub values — never
+          # read since reverie isn't started.
+          cp staging.env.runtime.example .env.runtime
+          # Use `=.*` (not `=$`) so substitutions remain robust if the
+          # example files ever acquire non-empty default values; an exact-
+          # empty anchor would silently no-op and the smoke would fail
+          # later at auth with an opaque 28P01.
+          sed -i \
+            -e 's|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=smoke_super_pw_1|' \
+            -e 's|^REVERIE_APP_PASSWORD=.*|REVERIE_APP_PASSWORD=smoke_app_pw_2|' \
+            -e 's|^REVERIE_INGESTION_PASSWORD=.*|REVERIE_INGESTION_PASSWORD=smoke_ing_pw_3|' \
+            -e 's|^REVERIE_READONLY_PASSWORD=.*|REVERIE_READONLY_PASSWORD=smoke_ro_pw_4|' \
+            -e 's|^REVERIE_VERSION=.*|REVERIE_VERSION=smoke-test|' \
+            .env
+
+      - name: Bring up postgres service
+        run: docker compose -f docker/compose.staging.yml up -d --wait --wait-timeout 120 reverie-postgres
+
+      # Assert init-roles.sql actually provisioned the three runtime roles
+      # with LOGIN and CONNECT grant on POSTGRES_DB. `docker compose exec`
+      # keeps the psql client version matched to the server image (postgres:18).
+      - name: Assert roles exist with CONNECT grant
+        run: |
+          set -euo pipefail
+          exec_psql() {
+            docker compose -f docker/compose.staging.yml exec -T \
+              -e PGPASSWORD=smoke_super_pw_1 \
+              reverie-postgres psql -v ON_ERROR_STOP=1 -At \
+              -U reverie -d reverie "$@"
+          }
+          for role in reverie_app reverie_ingestion reverie_readonly; do
+            exists=$(exec_psql -c "SELECT 1 FROM pg_roles WHERE rolname = '${role}' AND rolcanlogin")
+            if [ "$exists" != "1" ]; then
+              echo "Role ${role} missing or cannot login" >&2
+              exit 1
+            fi
+            # Query pg_database.datacl directly (not has_database_privilege)
+            # so a regression that deletes the explicit GRANT CONNECT lines
+            # from init-roles.sql is caught even while Postgres' default
+            # PUBLIC -> CONNECT grant is still in place. has_database_privilege
+            # returns true via PUBLIC and would mask the deletion.
+            has_connect=$(exec_psql -c "SELECT EXISTS (SELECT 1 FROM pg_database d, aclexplode(d.datacl) acl WHERE d.datname = current_database() AND acl.grantee = (SELECT oid FROM pg_roles WHERE rolname = '${role}') AND acl.privilege_type = 'CONNECT')")
+            if [ "$has_connect" != "t" ]; then
+              echo "Role ${role} lacks an explicit CONNECT grant on $(exec_psql -c 'SELECT current_database()')" >&2
+              exit 1
+            fi
+          done
+
+      # Authenticate as each runtime role with the password we supplied via
+      # env. Catches `LOGIN PASSWORD` clause regressions in init-roles.sql
+      # (the 28P01-at-runtime failure mode the debt entry calls out).
+      - name: Assert each role authenticates with its supplied password
+        run: |
+          set -euo pipefail
+          login_as() {
+            local role=$1 pw=$2
+            docker compose -f docker/compose.staging.yml exec -T \
+              -e PGPASSWORD="${pw}" \
+              reverie-postgres psql -v ON_ERROR_STOP=1 -At \
+              -h localhost -U "${role}" -d reverie -c 'SELECT 1' >/dev/null
+          }
+          login_as reverie_app       smoke_app_pw_2
+          login_as reverie_ingestion smoke_ing_pw_3
+          login_as reverie_readonly  smoke_ro_pw_4
+
+      - name: Tear down postgres service
+        if: always()
+        run: docker compose -f docker/compose.staging.yml down -v
+
+      # Negative path: blank a required env var, run `compose config`, assert
+      # the `${VAR:?required}` interpolation surfaces a hard fail. `config`
+      # is sufficient because variable substitution happens at parse time;
+      # no daemon spin-up needed. Key-name presence in stderr is the
+      # load-bearing signal — exact wording of compose's error message is
+      # not pinned across versions.
+      #
+      # `if: !cancelled()` ensures this step runs even if the happy-path
+      # assertions failed — otherwise a regression in the `:?required`
+      # mechanism would be silently skipped behind any earlier failure,
+      # since `compose config` is independent of the live containers.
+      - name: Assert missing required env var hard-fails
+        if: ${{ !cancelled() }}
+        working-directory: docker
+        run: |
+          set -euo pipefail
+          sed -i 's|^REVERIE_APP_PASSWORD=.*|REVERIE_APP_PASSWORD=|' .env
+          if stderr=$(docker compose -f compose.staging.yml config 2>&1 >/dev/null); then
+            echo "Expected compose config to fail with missing REVERIE_APP_PASSWORD, but it succeeded" >&2
+            echo "stderr was:" >&2
+            echo "${stderr}" >&2
+            exit 1
+          fi
+          if ! grep -qF REVERIE_APP_PASSWORD <<<"${stderr}"; then
+            echo "compose config failed but stderr did not mention REVERIE_APP_PASSWORD" >&2
+            echo "stderr was:" >&2
+            echo "${stderr}" >&2
+            exit 1
+          fi
