@@ -26,11 +26,13 @@ use super::{EpubError, Issue, IssueKind};
 /// Returns [`EpubError::Io`] if the archive bytes cannot be read from `path`
 /// or if a `ZIP` entry referenced by an encoding-fix issue cannot be extracted.
 /// Returns [`EpubError::Zip`] when `ZipArchive::new` or `by_name` fails while
-/// reading the `OPF` entry for the spine-rewrite path; the encoding-only `OPF`
-/// rewrite path (taken when no broken spine refs exist) uses `.ok()?` for the
-/// same calls and silently skips the fix rather than propagating. Returns
-/// [`EpubError::TempFile`] if the repacked temp file cannot be atomically
-/// persisted over `path`.
+/// reading entries in either of the two propagating paths: the spine-rewrite
+/// `OPF` read, or the non-`OPF` encoding-fix loop where `ZipArchive::new` is
+/// invoked once per entry to transcode (`?` propagation). The encoding-only
+/// `OPF` rewrite path (taken when no broken spine refs exist) uses `.ok()?`
+/// for the same calls and silently skips the fix rather than propagating.
+/// Returns [`EpubError::TempFile`] if the repacked temp file cannot be
+/// atomically persisted over `path`.
 #[allow(
     clippy::too_many_lines,
     reason = "repackage handles 4 distinct EPUB structural repair cases in one pass; splitting would require passing shared state between helpers and obscure the repair logic"

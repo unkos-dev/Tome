@@ -632,7 +632,7 @@ async fn commit_ingest(
     .fetch_one(&mut *tx)
     .await?;
 
-    // 3. Write drafts — OPF or heuristic-fallback (Step 7 task 5).
+    // 3. Write drafts — OPF metadata when available, heuristic fallback otherwise.
     //    The heuristic row gives the canonical title_version_id pointer even
     //    when no OPF metadata exists, preserving the ingest invariant.
     let metadata_for_drafts: ExtractedMetadata = extracted.as_ref().map_or_else(

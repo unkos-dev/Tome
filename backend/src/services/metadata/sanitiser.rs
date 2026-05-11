@@ -7,10 +7,12 @@
 //! they reach the database or any downstream consumer.
 //!
 //! Invariant: every value returned by `sanitise` is free of `HTML` tags;
-//! numeric character references and the named entities recognised by
+//! valid numeric character references and the named entities recognised by
 //! `decode_entities` (`&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;`, `&nbsp;`)
-//! are decoded; unknown named entities are preserved literally (the `&` and
-//! surrounding characters survive); whitespace is collapsed to single spaces.
+//! are decoded; malformed or out-of-range numeric entities (where
+//! `parse_numeric_entity` returns `None`) and unknown named entities are
+//! preserved literally — the `&` and surrounding characters survive;
+//! whitespace is collapsed to single spaces.
 
 /// Reduce an untrusted metadata string to sanitised plaintext.
 ///

@@ -11,9 +11,13 @@ use super::{inversion, isbn, sanitiser};
 
 /// Fully processed metadata derived from a single `OPF` document.
 ///
-/// All text fields have been sanitised (entities decoded, `HTML` stripped,
-/// whitespace normalised). Fields are `None` when absent or empty after
-/// sanitisation — callers must not treat empty strings as valid values.
+/// Free-form text fields (title, description, creators, publisher, subjects,
+/// series name) have been sanitised (entities decoded, `HTML` stripped,
+/// whitespace normalised). The `language` field is passed through unchanged
+/// because it is a structured `BCP 47` token, not free-form text — callers
+/// must validate it themselves before trusting it. Optional fields are
+/// `None` when absent or empty after sanitisation — callers must not treat
+/// empty strings as valid values.
 #[derive(Debug, Clone)]
 pub struct ExtractedMetadata {
     /// Sanitised display title, or `None` if the `OPF` title was absent or empty.
