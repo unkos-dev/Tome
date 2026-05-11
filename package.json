@@ -2,6 +2,9 @@
   "private": true,
   "name": "reverie-dev",
   "description": "Development tooling for Reverie",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "prepare": "husky"
   },
