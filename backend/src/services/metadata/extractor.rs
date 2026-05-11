@@ -31,8 +31,10 @@ pub struct ExtractedMetadata {
     /// Publication date parsed from `OPF` `<dc:date>` in `YYYY`, `YYYY-MM`,
     /// or `YYYY-MM-DD` format. Partial dates default to the first of month/year.
     pub pub_date: Option<time::Date>,
-    /// Validated `ISBN` result; `valid` is `false` when no recognisable `ISBN`
-    /// was found among the `OPF` identifiers.
+    /// First valid `ISBN` found among the `OPF` identifiers. `None` when no
+    /// recognisable valid `ISBN` was present (the extractor selects the first
+    /// `IsbnResult` whose `valid` flag is set, so an invalid-only identifier
+    /// list yields `None` rather than a `valid = false` result).
     pub isbn: Option<isbn::IsbnResult>,
     /// Sanitised subject/genre tags.
     pub subjects: Vec<String>,

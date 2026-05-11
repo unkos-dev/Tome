@@ -27,12 +27,15 @@ use super::error::WritebackError;
 /// `ZIP`-absolute paths before passing them to `repack::with_modifications`.
 #[derive(Debug)]
 pub struct CoverPlan {
-    /// `ZIP`-entry path → replacement bytes for entries that already exist
-    /// in the archive and whose `MIME` type matches the new cover.
+    /// `OPF`-relative path → replacement bytes for entries that already exist
+    /// in the archive and whose `MIME` type matches the new cover. The
+    /// orchestrator translates these to `ZIP`-absolute paths before passing
+    /// them to `repack::with_modifications`.
     pub binary_replacements: HashMap<String, Vec<u8>>,
-    /// New `ZIP` entries to append — `(path, bytes, options)` — used when
-    /// the new cover's format differs from the existing entry or no cover
-    /// was present.
+    /// New entries to append — `(opf-relative path, bytes, options)` — used
+    /// when the new cover's format differs from the existing entry or no
+    /// cover was present. Translated to `ZIP`-absolute paths by the
+    /// orchestrator before repack.
     pub additions: Vec<(String, Vec<u8>, FileOptions<'static, ExtendedFileOptions>)>,
     /// Rewritten `OPF` bytes when the manifest must change (new cover href
     /// or new `MIME` type); `None` when an in-place binary replacement

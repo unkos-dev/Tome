@@ -244,10 +244,12 @@ pub const MAX_SPINE_ITEMS: usize = 500;
 /// # Errors
 ///
 /// Returns [`EpubError::Io`] if the file at `path` cannot be read from the
-/// filesystem. Returns [`EpubError::Zip`] if the archive is structurally
-/// invalid (corrupt central directory or unsupported compression) before any
-/// individual-entry checks can run. Returns [`EpubError::TempFile`] if the
-/// repaired archive cannot be atomically persisted over `path`.
+/// filesystem. Returns [`EpubError::Zip`] only when the repair pass
+/// ([`repair::repackage`]) hits a `ZIP` failure while rewriting the archive;
+/// structural archive invalidity detected by the Layer 1 scan is recorded as
+/// an `Irrecoverable` issue and surfaced via [`ValidationOutcome::Quarantined`]
+/// rather than as an error. Returns [`EpubError::TempFile`] if the repaired
+/// archive cannot be atomically persisted over `path`.
 pub fn validate_and_repair(path: &Path) -> Result<ValidationReport, EpubError> {
     let mut issues: Vec<Issue> = Vec::new();
 

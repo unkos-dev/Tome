@@ -18,7 +18,9 @@ const BUF_SIZE: usize = 64 * 1024;
 /// Outcome of a successful [`copy_verified`] call.
 #[derive(Debug)]
 pub struct CopyResult {
-    /// Absolute path of the file as it now exists in the library directory.
+    /// Path of the file as it now exists in the library directory
+    /// (`dest_dir.join(dest_relative)`; absolute only if `dest_dir` was
+    /// absolute — `copy_verified` does not canonicalise).
     #[allow(dead_code)] // Used by future callers (e.g. status endpoints)
     pub dest_path: PathBuf,
     /// Lowercase hex `SHA-256` digest of the copied bytes, verified against the source.
