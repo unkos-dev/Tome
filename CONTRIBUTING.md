@@ -38,7 +38,7 @@ Backend only (requires Rust toolchain):
 cd backend && cargo run
 ```
 
-Frontend only (requires Node.js 22+):
+Frontend only (requires Node.js >=24.15.0; root tooling such as commitlint/husky requires Node.js >=22):
 
 ```bash
 cd frontend && npm install && npm run dev
