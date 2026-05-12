@@ -18,6 +18,9 @@ permissions:
   contents: read
   packages: write
 
+# cancel-in-progress trades intermediate `:sha-<7>` pins on fast-follow
+# `main` pushes for build-queue throughput. SHA pins are therefore
+# best-effort, not a guaranteed log of every commit that landed.
 concurrency:
   group: docker-publish-${{ github.ref }}
   cancel-in-progress: true
@@ -46,7 +49,7 @@ jobs:
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=ref,event=branch
-            type=sha,prefix=sha-
+            type=sha,prefix=sha-,enable=${{ github.ref_type != 'tag' }}
 
       - uses: docker/build-push-action@v7
         with:

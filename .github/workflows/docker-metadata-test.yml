@@ -1,0 +1,89 @@
+name: Docker Metadata Test
+
+# Asserts that docker/metadata-action produces the tag set required by
+# adr/2026-05-12-decouple-staging-image-from-semver-releases.md for each
+# publication channel:
+#   - `main` branch push -> `:main` + `:sha-<7>`, NEVER `:latest`
+#   - `v*` tag push      -> `:vX.Y.Z` + `:X.Y`, NEVER `:latest`, NEVER `:sha-`
+#
+# Implementation note: metadata-action derives event context from the
+# `GITHUB_REF` / `GITHUB_EVENT_NAME` env vars at runtime, which a step-level
+# `env:` block can override. The live workflow gates `type=sha` with
+# `enable=${{ github.ref_type != 'tag' }}`; that GH-expression context is
+# evaluated by GitHub Actions (not metadata-action) and cannot be overridden
+# via env, so this test injects the equivalent boolean per matrix row.
+# End-to-end gate behaviour is verified by the next real `v*` tag publish.
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/docker-publish.yml"
+      - ".github/workflows/docker-metadata-test.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  metadata-contract:
+    name: ${{ matrix.scenario }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scenario: main-branch-push
+            github_ref: refs/heads/main
+            github_ref_type: branch
+            github_event_name: push
+            sha_enable: "true"
+            expect_present: ":main|:sha-"
+            expect_absent: ":latest"
+          - scenario: v-tag-push
+            github_ref: refs/tags/v1.2.3
+            github_ref_type: tag
+            github_event_name: push
+            sha_enable: "false"
+            expect_present: ":1.2.3|:1.2"
+            expect_absent: ":latest|:sha-"
+    steps:
+      - uses: actions/checkout@v6
+
+      - id: meta
+        uses: docker/metadata-action@v6
+        env:
+          GITHUB_REF: ${{ matrix.github_ref }}
+          GITHUB_REF_TYPE: ${{ matrix.github_ref_type }}
+          GITHUB_EVENT_NAME: ${{ matrix.github_event_name }}
+        with:
+          images: ghcr.io/unkos-dev/reverie
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=branch
+            type=sha,prefix=sha-,enable=${{ matrix.sha_enable }}
+
+      - name: Assert tag contract
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+          EXPECT_PRESENT: ${{ matrix.expect_present }}
+          EXPECT_ABSENT: ${{ matrix.expect_absent }}
+        run: |
+          set -euo pipefail
+          printf 'metadata-action tags:\n%s\n' "$TAGS"
+          fail=0
+          IFS='|' read -ra need <<<"$EXPECT_PRESENT"
+          for tok in "${need[@]}"; do
+            if ! grep -F -q -- "$tok" <<<"$TAGS"; then
+              printf '::error::missing required tag fragment: %s\n' "$tok"
+              fail=1
+            fi
+          done
+          IFS='|' read -ra forbidden <<<"$EXPECT_ABSENT"
+          for tok in "${forbidden[@]}"; do
+            if grep -F -q -- "$tok" <<<"$TAGS"; then
+              printf '::error::unexpected tag fragment present: %s\n' "$tok"
+              fail=1
+            fi
+          done
+          exit "$fail"
