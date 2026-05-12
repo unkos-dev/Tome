@@ -1,13 +1,29 @@
 name: Docker Publish
 
+# Two publication channels per ADR
+# adr/2026-05-12-decouple-staging-image-from-semver-releases.md:
+#   - `main`-branch push -> `:main` (floating) + `:sha-<7>` (immutable pin)
+#   - `v*` tag push     -> `:vX.Y.Z` + `:X.Y` (semver, via release-please)
+# `:latest` is intentionally not auto-assigned; reserved for the first
+# semver release. See ADR for the alternatives considered and the
+# revisit conditions.
 on:
   push:
     tags:
       - "v*"
+    branches:
+      - main
 
 permissions:
   contents: read
   packages: write
+
+# cancel-in-progress trades intermediate `:sha-<7>` pins on fast-follow
+# `main` pushes for build-queue throughput. SHA pins are therefore
+# best-effort, not a guaranteed log of every commit that landed.
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
@@ -32,7 +48,8 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha
+            type=ref,event=branch
+            type=sha,prefix=sha-,enable=${{ github.ref_type != 'tag' }}
 
       - uses: docker/build-push-action@v7
         with:
