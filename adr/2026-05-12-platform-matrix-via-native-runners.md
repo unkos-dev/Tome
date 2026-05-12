@@ -49,7 +49,9 @@ record.
 Reverie's Docker publish workflow builds each architecture on a native
 GitHub-hosted runner and assembles the manifest list as a final step.
 
-1. **Two build jobs** (matrix `include`), differing on runner and target
+1. **One or two build jobs** (dynamic matrix) — the matrix `include`
+   list is emitted per trigger by the `prepare-matrix` job described
+   in item 3 below. Each instance differs on runner and target
    platform:
    - `build (amd64)` on `ubuntu-latest`, platform `linux/amd64`
    - `build (arm64)` on `ubuntu-24.04-arm`, platform `linux/arm64`
@@ -57,7 +59,12 @@ GitHub-hosted runner and assembles the manifest list as a final step.
    Each build uses `docker/build-push-action@v7` with
    `outputs: type=image,name=<registry>/<image>,push-by-digest=true,name-canonical=true,push=true`,
    sets `provenance: mode=max` and `sbom: true`, and uploads its
-   per-arch digest as a workflow artifact.
+   per-arch digest as a workflow artifact. Each build also runs
+   `docker/metadata-action@v6` to emit OCI labels
+   (`org.opencontainers.image.*`) and wires them into
+   `build-push-action`'s `labels:` input. `imagetools create` in the
+   `merge` job cannot back-fill labels into already-pushed image
+   configs, so labels must be set at per-arch build time.
 
 2. **One `merge` job** depending on `build`. It downloads the digest
    artifacts, runs `docker/metadata-action@v6` (tags are properties of
@@ -161,7 +168,7 @@ Open a superseding ADR if any of the following happen:
   the trigger split — main-push may need both arches again, or arm64
   may need to remain on tag-push only depending on demand. The
   build-shape decision in this ADR is stable across that change, but
-  the matrix `if:` filter would update.
+  the `prepare-matrix` job's emitted JSON would update.
 - **GitHub changes free-tier ARM runner pricing or availability.** If
   `ubuntu-24.04-arm` becomes paid for public repos, or capacity caps
   appear, the trade-off vs self-hosted runners flips. Today the
@@ -211,6 +218,11 @@ Open a superseding ADR if any of the following happen:
         succeed without `--platform`.
   - [ ] Attestation/provenance present on the final manifest list
         (verify via `docker buildx imagetools inspect --raw`).
+  - [ ] OCI labels (`org.opencontainers.image.revision`,
+        `org.opencontainers.image.created`,
+        `org.opencontainers.image.version`) present on per-arch
+        image configs; verify via `docker buildx imagetools inspect
+--raw <ref>` and inspect each entry under `manifests[]`.
   - [ ] `concurrency` cancel-in-progress + `sha-` prefix gating
         behaviour preserved.
   - [ ] No `docker/setup-qemu-action` reference remains in the
