@@ -7,7 +7,7 @@ adopted-because: PR #179 review (CodeRabbit) flagged absence of automated covera
 lift-when-class: internal-refactor
 lift-when: UNK-185 (CI smoke test for staging compose) merged to main
 lifted: 2026-05-11
-superseded-by: ~
+superseded-by: PR #209
 ---
 
 # Staging compose has no automated CI smoke test
@@ -55,7 +55,7 @@ Two real failure modes are uncovered:
 1. **Silent role-misconfiguration on staging deploys.** If
    `init-roles.sql` is edited and a role's `LOGIN PASSWORD` clause
    changes shape, the next staging deploy boots, postgres starts
-   healthy, and the application fails with a `28P01` at runtime — *after*
+   healthy, and the application fails with a `28P01` at runtime — _after_
    traffic has been flipped. CI catching this on PR is much cheaper.
 2. **Required-env-var regression.** The `${VAR:?required}` interpolation
    only fires when a deploy actually runs. A typo in a key name in
