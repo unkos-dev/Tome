@@ -46,6 +46,21 @@ cd frontend && npm install && npm run dev
 
 See [backend/CLAUDE.md](backend/CLAUDE.md) and [frontend/CLAUDE.md](frontend/CLAUDE.md) for subsystem-specific conventions (database roles, testing helpers, linting rules).
 
+### Pre-commit prerequisites
+
+The lint-staged pre-commit hook runs [`actionlint`](https://github.com/rhysd/actionlint) on changed GitHub Actions workflow files. Install it once before your first commit (version pinned to **v1.7.12** in [`lint-staged.config.js`](lint-staged.config.js) and [`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
+
+```bash
+# macOS
+brew install actionlint
+
+# Linux — pinned binary
+curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_$(uname -s | tr 'A-Z' 'a-z')_$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/').tar.gz" \
+  | tar -xz -C "$HOME/.local/bin" actionlint
+```
+
+If `actionlint` is not on `PATH`, the pre-commit hook fails with a clear `command not found`. CI re-runs the same check, so a bypass (`--no-verify` or missing-binary skip) is still caught before merge.
+
 ## Testing requirements
 
 **Tests are mandatory.** No feature or bug fix is complete without tests. Follow the test-first pattern:

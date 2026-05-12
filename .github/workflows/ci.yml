@@ -24,6 +24,7 @@ jobs:
       audit: ${{ steps.filter.outputs.audit }}
       frontend: ${{ steps.filter.outputs.frontend }}
       staging: ${{ steps.filter.outputs.staging }}
+      workflows: ${{ steps.filter.outputs.workflows }}
     steps:
       - uses: actions/checkout@v6
       - uses: dorny/paths-filter@v4
@@ -57,6 +58,8 @@ jobs:
               - 'docker/staging.env.bootstrap.example'
               - 'docker/staging.env.runtime.example'
               - '.github/workflows/ci.yml'
+            workflows:
+              - '.github/workflows/**'
 
   backend:
     name: Backend
@@ -176,6 +179,27 @@ jobs:
         #   yet released sqlx 0.9 / rand-0.9-compatible versions. Revisit when
         #   sqlx 0.9 goes stable.
         run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0097
+
+  # UNK-245: catch syntax / context-availability violations in workflow
+  # files before merge. Mirrors the `actionlint` invocation wired into
+  # the local pre-commit chain (lint-staged.config.js); both pin the same
+  # version so local + CI behaviour cannot drift. PR #224 shipped a
+  # `matrix.*` reference in a job-level `if:` that this check would have
+  # caught locally.
+  workflow-lint:
+    name: Workflow lint
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: actionlint@1.7.12
+
+      - name: Lint workflow files
+        run: actionlint -color
 
   frontend:
     name: Frontend
