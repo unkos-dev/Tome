@@ -15,11 +15,12 @@ name: Docker Publish
 #   - `v*` tag push      -> linux/amd64,linux/arm64 manifest list.
 #     Public-release boundary; self-hosters run mixed architectures.
 #
-# Build shape: each architecture builds on a native GitHub-hosted runner
-# (amd64 on ubuntu-latest, arm64 on ubuntu-24.04-arm), pushed by digest.
-# A final `merge` job assembles the manifest list with
-# `docker buildx imagetools create`. No QEMU; release boundary fully
-# native on both legs.
+# Build shape: a small `prepare-matrix` job emits the include list for
+# the current trigger, then `build` instantiates one job per arch on a
+# native GitHub-hosted runner (amd64 on ubuntu-latest, arm64 on
+# ubuntu-24.04-arm), pushed by digest. A final `merge` job assembles
+# the manifest list with `docker buildx imagetools create`. No QEMU;
+# release boundary fully native on both legs.
 on:
   push:
     tags:
@@ -43,22 +44,30 @@ env:
   IMAGE_NAME: unkos-dev/reverie
 
 jobs:
+  # Emit the matrix include list dynamically per trigger. Job-level
+  # `if:` cannot reference the `matrix` context, so the per-trigger
+  # filter lives here in the matrix shape rather than as a job gate.
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            echo 'matrix={"include":[{"arch":"amd64","platform":"linux/amd64","runner":"ubuntu-latest"},{"arch":"arm64","platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"include":[{"arch":"arm64","platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]}' >> "$GITHUB_OUTPUT"
+          fi
+
   build:
-    # Per-instance gate: tag-push runs both legs; main-push runs only
-    # arm64 (sole consumer is oci-compute-1). Skipped matrix instances
-    # complete as success for the downstream `merge` job's needs:.
-    if: github.ref_type == 'tag' || matrix.arch == 'arm64'
+    needs: prepare-matrix
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            platform: linux/amd64
-            runner: ubuntu-latest
-          - arch: arm64
-            platform: linux/arm64
-            runner: ubuntu-24.04-arm
+      matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
 
@@ -70,6 +79,17 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      # metadata-action emits OCI labels (org.opencontainers.image.*)
+      # consumed by the per-arch build below. Tag emission also runs
+      # here but is unused per-arch — tags are assigned in the `merge`
+      # job against the final manifest list. `imagetools create` can't
+      # back-fill labels into already-pushed image configs, so labels
+      # must be set at per-arch build time.
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
       # Per-arch builds push by digest only; tag assignment happens in
       # the `merge` job against the final manifest list.
       - name: Build and push by digest
@@ -78,6 +98,7 @@ jobs:
         with:
           context: .
           platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           provenance: mode=max
           sbom: true
@@ -128,7 +149,9 @@ jobs:
 
       # imagetools create assembles a manifest list from the per-arch
       # digests and tags it. Provenance/SBOM attestations on the per-arch
-      # images are preserved on the resulting manifest list.
+      # images are preserved on the resulting manifest list. OCI labels
+      # are set on the per-arch images at build time (above) — they
+      # cannot be added retroactively here.
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
         env:
@@ -136,6 +159,7 @@ jobs:
         run: |
           tag_args=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
           digest_args=$(printf "${IMAGE_REF}@sha256:%s " *)
+          # shellcheck disable=SC2086  # word-splitting intended on both
           docker buildx imagetools create $tag_args $digest_args
 
       - name: Inspect image

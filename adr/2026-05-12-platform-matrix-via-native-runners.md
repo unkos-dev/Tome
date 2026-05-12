@@ -65,11 +65,16 @@ GitHub-hosted runner and assembles the manifest list as a final step.
    manifest with `docker buildx imagetools create -t <tag> ... <digest> ...`.
    `imagetools inspect` verifies the resulting list.
 
-3. **Trigger-driven matrix filter** via job-level `if:`:
-   `github.ref_type == 'tag' || matrix.arch == 'arm64'`. Tag-push runs
-   both legs; main-push runs only arm64 (sole consumer is
-   `oci-compute-1`, an Ampere A1 arm64 instance). Skipped matrix
-   instances complete as success for the `merge` job's `needs:`.
+3. **Trigger-driven matrix filter** via a small `prepare-matrix` job
+   that emits the build matrix `include` list as JSON based on
+   `github.ref_type`. The `build` job's strategy reads
+   `matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}`.
+   Tag-push emits both legs; main-push emits only arm64 (sole consumer
+   is `oci-compute-1`, an Ampere A1 arm64 instance). Job-level `if:`
+   cannot reference the `matrix` context per [GitHub Actions context
+   availability](https://docs.github.com/en/actions/learn-github-actions/contexts#context-availability),
+   so the per-trigger filter lives in the matrix shape rather than as
+   a job gate.
 
 4. **No QEMU.** `docker/setup-qemu-action` is removed. The release
    boundary (`v*` tag) is fully native on both legs.
@@ -94,8 +99,9 @@ shape changes.
   `25731891335`. Staging image cadence becomes acceptable.
 - Good — **no QEMU dependency**. `docker/setup-qemu-action` and its
   `binfmt_misc` fragility are gone from the workflow. The "Compute
-  build platforms" shell step is also dropped: matrix `include:`
-  handles the trigger split natively.
+  build platforms" shell step is replaced by a `prepare-matrix` job
+  emitting the include list as JSON; per-trigger filtering moves from
+  a workflow-step expression to a matrix-shape expression.
 - Good — **release boundary fully native on both architectures**.
   Self-hosters pulling a `v*` tag receive images built without
   emulation on either leg.
@@ -104,11 +110,13 @@ shape changes.
   per-platform attestations onto the resulting manifest list. This is
   the standard pattern and keeps the path to future image signing
   (Sigstore / cosign) unblocked.
-- Neutral — **three jobs per publish run instead of one**. Two
-  build jobs + one merge job. Each is short on its own; total runner
-  minutes consumed on tag pushes are similar to the QEMU baseline (the
-  amd64 leg was always fast; the arm64 leg dominates either way), and
-  total wall-clock drops because the two legs are concurrent.
+- Neutral — **four jobs per publish run instead of one**. One
+  `prepare-matrix` setup job (seconds), two `build` jobs (one or two
+  matrix instances depending on trigger), one `merge` job. Each is
+  short on its own; total runner minutes consumed on tag pushes are
+  similar to the QEMU baseline (the amd64 leg was always fast; the
+  arm64 leg dominates either way), and total wall-clock drops because
+  the two build legs are concurrent.
 - Bad — **digest plumbing via `actions/upload-artifact` +
   `download-artifact`**. Per-arch builds and the merge job don't share
   a workspace, so digests cross job boundaries as artifacts. This is
