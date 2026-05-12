@@ -27,3 +27,4 @@ An Architecture Decision Record (ADR) captures an important architecture decisio
 - [CodeRabbit AI code review: parallel trial alongside Greptile](2026-05-07-coderabbit-parallel-trial.md) (proposed, 2026-05-07)
 - [Tiered comment policy for an OSS-released codebase](2026-05-08-tiered-comment-policy.md) (accepted, 2026-05-08)
 - [Adopt tower-sessions-sqlx-store for Postgres-backed sessions](2026-05-08-tower-sessions-sqlx-store.md) (proposed, 2026-05-08)
+- [Decouple staging Docker image publication from semver release tags](2026-05-12-decouple-staging-image-from-semver-releases.md) (proposed, 2026-05-12)
