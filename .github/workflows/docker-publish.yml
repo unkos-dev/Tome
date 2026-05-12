@@ -7,6 +7,17 @@ name: Docker Publish
 # `:latest` is intentionally not auto-assigned; reserved for the first
 # semver release. See ADR for the alternatives considered and the
 # revisit conditions.
+#
+# Platform matrix split by trigger — see ADR
+# adr/2026-05-12-decouple-staging-image-from-semver-releases.md
+# (Revisit Conditions: multi-arch trigger):
+#   - `main`-branch push -> linux/arm64 only. Sole consumer is
+#     oci-compute-1 (Ampere A1, arm64). Single-arch keeps main-push CI
+#     fast.
+#   - `v*` tag push     -> linux/amd64,linux/arm64 manifest list.
+#     Public-release boundary; self-hosters run mixed architectures.
+# QEMU (binfmt_misc) handles arm64 builds on amd64 GitHub-hosted
+# runners. Revisit when a second consumer / dev-arch emerges.
 on:
   push:
     tags:
@@ -41,6 +52,28 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # Compute target platforms from trigger context. Step output (vs
+      # inline conditional on the build step) keeps the decision
+      # auditable in the workflow run log.
+      - name: Compute build platforms
+        id: platforms
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
+            echo "value=linux/arm64" >> "$GITHUB_OUTPUT"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "value=linux/amd64,linux/arm64" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Unsupported ref for docker publish: ${GITHUB_REF}"
+            exit 1
+          fi
+
+      # QEMU registers binfmt_misc handlers so the amd64 runner can
+      # build arm64 layers. Must precede setup-buildx-action.
+      - uses: docker/setup-qemu-action@v3
+
+      - uses: docker/setup-buildx-action@v3
+
       - uses: docker/metadata-action@v6
         id: meta
         with:
@@ -55,5 +88,6 @@ jobs:
         with:
           context: .
           push: true
+          platforms: ${{ steps.platforms.outputs.value }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
