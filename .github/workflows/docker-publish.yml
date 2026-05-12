@@ -61,8 +61,11 @@ jobs:
         run: |
           if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
             echo "value=linux/arm64" >> "$GITHUB_OUTPUT"
-          else
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             echo "value=linux/amd64,linux/arm64" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Unsupported ref for docker publish: ${GITHUB_REF}"
+            exit 1
           fi
 
       # QEMU registers binfmt_misc handlers so the amd64 runner can
