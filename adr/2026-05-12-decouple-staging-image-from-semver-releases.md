@@ -1,7 +1,9 @@
 ---
-status: accepted
+status: superseded
 date: 2026-05-12
 decision-makers: john
+superseded-by:
+  - "2026-05-12-platform-matrix-via-native-runners.md"
 ---
 
 # Decouple staging Docker image publication from semver release tags

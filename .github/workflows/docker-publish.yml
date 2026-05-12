@@ -1,23 +1,26 @@
 name: Docker Publish
 
 # Two publication channels per ADR
-# adr/2026-05-12-decouple-staging-image-from-semver-releases.md:
+# adr/2026-05-12-platform-matrix-via-native-runners.md
+# (supersedes adr/2026-05-12-decouple-staging-image-from-semver-releases.md):
 #   - `main`-branch push -> `:main` (floating) + `:sha-<7>` (immutable pin)
-#   - `v*` tag push     -> `:vX.Y.Z` + `:X.Y` (semver, via release-please)
+#   - `v*` tag push      -> `:vX.Y.Z` + `:X.Y` (semver, via release-please)
 # `:latest` is intentionally not auto-assigned; reserved for the first
-# semver release. See ADR for the alternatives considered and the
-# revisit conditions.
+# semver release.
 #
-# Platform matrix split by trigger — see ADR
-# adr/2026-05-12-decouple-staging-image-from-semver-releases.md
-# (Revisit Conditions: multi-arch trigger):
+# Platform matrix split by trigger — see ADR:
 #   - `main`-branch push -> linux/arm64 only. Sole consumer is
 #     oci-compute-1 (Ampere A1, arm64). Single-arch keeps main-push CI
 #     fast.
-#   - `v*` tag push     -> linux/amd64,linux/arm64 manifest list.
+#   - `v*` tag push      -> linux/amd64,linux/arm64 manifest list.
 #     Public-release boundary; self-hosters run mixed architectures.
-# QEMU (binfmt_misc) handles arm64 builds on amd64 GitHub-hosted
-# runners. Revisit when a second consumer / dev-arch emerges.
+#
+# Build shape: a small `prepare-matrix` job emits the include list for
+# the current trigger, then `build` instantiates one job per arch on a
+# native GitHub-hosted runner (amd64 on ubuntu-latest, arm64 on
+# ubuntu-24.04-arm), pushed by digest. A final `merge` job assembles
+# the manifest list with `docker buildx imagetools create`. No QEMU;
+# release boundary fully native on both legs.
 on:
   push:
     tags:
@@ -41,8 +44,30 @@ env:
   IMAGE_NAME: unkos-dev/reverie
 
 jobs:
-  build-and-push:
+  # Emit the matrix include list dynamically per trigger. Job-level
+  # `if:` cannot reference the `matrix` context, so the per-trigger
+  # filter lives here in the matrix shape rather than as a job gate.
+  prepare-matrix:
     runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set.outputs.matrix }}
+    steps:
+      - id: set
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            echo 'matrix={"include":[{"arch":"amd64","platform":"linux/amd64","runner":"ubuntu-latest"},{"arch":"arm64","platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]}' >> "$GITHUB_OUTPUT"
+          else
+            echo 'matrix={"include":[{"arch":"arm64","platform":"linux/arm64","runner":"ubuntu-24.04-arm"}]}' >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: prepare-matrix
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v6
 
@@ -52,25 +77,63 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Compute target platforms from trigger context. Step output (vs
-      # inline conditional on the build step) keeps the decision
-      # auditable in the workflow run log.
-      - name: Compute build platforms
-        id: platforms
-        shell: bash
-        run: |
-          if [[ "${GITHUB_REF}" == "refs/heads/main" ]]; then
-            echo "value=linux/arm64" >> "$GITHUB_OUTPUT"
-          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            echo "value=linux/amd64,linux/arm64" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Unsupported ref for docker publish: ${GITHUB_REF}"
-            exit 1
-          fi
+      - uses: docker/setup-buildx-action@v3
 
-      # QEMU registers binfmt_misc handlers so the amd64 runner can
-      # build arm64 layers. Must precede setup-buildx-action.
-      - uses: docker/setup-qemu-action@v3
+      # metadata-action emits OCI labels (org.opencontainers.image.*)
+      # consumed by the per-arch build below. Tag emission also runs
+      # here but is unused per-arch — tags are assigned in the `merge`
+      # job against the final manifest list. `imagetools create` can't
+      # back-fill labels into already-pushed image configs, so labels
+      # must be set at per-arch build time.
+      - uses: docker/metadata-action@v6
+        id: meta
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+
+      # Per-arch builds push by digest only; tag assignment happens in
+      # the `merge` job against the final manifest list.
+      - name: Build and push by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
+          provenance: mode=max
+          sbom: true
+
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    runs-on: ubuntu-latest
+    needs:
+      - build
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -84,10 +147,23 @@ jobs:
             type=ref,event=branch
             type=sha,prefix=sha-,enable=${{ github.ref_type != 'tag' }}
 
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          platforms: ${{ steps.platforms.outputs.value }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+      # imagetools create assembles a manifest list from the per-arch
+      # digests and tags it. Provenance/SBOM attestations on the per-arch
+      # images are preserved on the resulting manifest list. OCI labels
+      # are set on the per-arch images at build time (above) — they
+      # cannot be added retroactively here.
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          tag_args=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          digest_args=$(printf "${IMAGE_REF}@sha256:%s " *)
+          # shellcheck disable=SC2086  # word-splitting intended on both
+          docker buildx imagetools create $tag_args $digest_args
+
+      - name: Inspect image
+        env:
+          IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        run: |
+          docker buildx imagetools inspect "${IMAGE_REF}:${{ steps.meta.outputs.version }}"
