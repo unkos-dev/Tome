@@ -105,6 +105,27 @@ jobs:
           cache-from: type=gha,scope=buildcache-${{ matrix.arch }}
           cache-to: type=gha,scope=buildcache-${{ matrix.arch }},mode=max
 
+      # Tier 1 observability — surfaces cache utilisation per run without
+      # external infra. `if: always()` so failures don't suppress diagnostic
+      # output. Adopt Tier 2 (weekly cache-inventory cron) only on revisit
+      # conditions per ADR.
+      - name: Cache disk usage
+        if: always()
+        run: docker buildx du
+
+      - name: Step summary
+        if: always()
+        env:
+          ARCH: ${{ matrix.arch }}
+        run: |
+          {
+            echo "## Build cache report (arch=${ARCH})"
+            echo
+            echo "Cache disk usage above. Inspect 'Build and push by digest'"
+            echo "step log for per-stage \`CACHED\` lines to confirm cooker"
+            echo "layer reuse."
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Export digest
         run: |
           mkdir -p "${{ runner.temp }}/digests"
