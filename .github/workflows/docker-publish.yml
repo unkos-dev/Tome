@@ -102,6 +102,8 @@ jobs:
           outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
           provenance: mode=max
           sbom: true
+          cache-from: type=gha,scope=buildcache-${{ matrix.arch }}
+          cache-to: type=gha,scope=buildcache-${{ matrix.arch }},mode=max
 
       - name: Export digest
         run: |
