@@ -51,10 +51,9 @@ See [backend/CLAUDE.md](backend/CLAUDE.md) and [frontend/CLAUDE.md](frontend/CLA
 The lint-staged pre-commit hook runs [`actionlint`](https://github.com/rhysd/actionlint) on changed GitHub Actions workflow files. Install it once before your first commit (version pinned to **v1.7.12** in [`lint-staged.config.js`](lint-staged.config.js) and [`.github/workflows/ci.yml`](.github/workflows/ci.yml)):
 
 ```bash
-# macOS
-brew install actionlint
-
-# Linux — pinned binary
+# Linux + macOS — pinned binary (Homebrew's formula is not version-pinned,
+# so it can drift from the v1.7.12 lint chain enforced in CI; download the
+# release tarball directly to guarantee parity).
 curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_$(uname -s | tr 'A-Z' 'a-z')_$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/').tar.gz" \
   | tar -xz -C "$HOME/.local/bin" actionlint
 ```
