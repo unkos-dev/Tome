@@ -4,5 +4,5 @@
 module.exports = {
   "*.md": "markdownlint-cli2",
   "*.{ts,tsx,js,jsx,json,yaml,yml,css,md}": "prettier --check",
-  ".github/workflows/*.{yml,yaml}": "actionlint -color",
+  ".github/workflows/**/*.{yml,yaml}": "actionlint -color",
 };
