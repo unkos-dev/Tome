@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Wire GHA build cache + cargo-chef 3-stage Dockerfile onto `docker-publish.yml` so backend deps survive across runs, per-arch.
+**Goal:** Wire GHA build cache + cargo-chef 4-stage Dockerfile onto `docker-publish.yml` so backend deps survive across runs, per-arch.
 
 **Architecture:** Refactor `Dockerfile` backend stage into cargo-chef chef/planner/cooker/backend-builder split so dep compilation lands in a cacheable layer. Wire `docker/build-push-action@v7` with `type=gha` cache scoped per matrix arch. Add Tier 1 observability (`buildx du` + step summary) post-build for visibility.
 
@@ -29,7 +29,7 @@
 
 ---
 
-## Task 1: Refactor Dockerfile to cargo-chef 3-stage backend
+## Task 1: Refactor Dockerfile to cargo-chef 4-stage backend
 
 **Files:**
 
@@ -364,7 +364,7 @@ Expected: another warm-cache run. cooker still CACHED. Branch state now matches 
 gh pr create --title "feat(ci): GHA build cache + cargo-chef Dockerfile (UNK-246)" --body "$(cat <<'EOF'
 ## Summary
 
-- Refactors Dockerfile backend stage into cargo-chef 3-stage split (chef/planner/cooker/backend-builder) so dep compilation lands in a cacheable layer.
+- Refactors Dockerfile backend stage into cargo-chef 4-stage split (chef/planner/cooker/backend-builder) so dep compilation lands in a cacheable layer.
 - Wires `type=gha` cache on `docker/build-push-action@v7` with per-arch scope (`buildcache-amd64`, `buildcache-arm64`).
 - Adds Tier 1 observability post-build: `docker buildx du` + `$GITHUB_STEP_SUMMARY` pointer.
 - Frontend stage gains buildkit npm cache mount on `/root/.npm`.

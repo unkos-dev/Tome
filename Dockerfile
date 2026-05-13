@@ -29,8 +29,10 @@ ENV SQLX_OFFLINE=true
 RUN cargo build --release
 
 # Stage 2: Build frontend with buildkit npm cache mount.
-# /root/.npm survives across runs scoped to the builder, independent of layer
-# cache; mount is buildkit-scoped not layer-scoped so it survives base-image swaps.
+# The mount avoids re-fetching tarballs when the npm-ci layer cache is invalidated
+# but package-lock.json is unchanged — buildkit reuses the mount within a single
+# build. GHA runners are ephemeral so the mount does not persist across runs;
+# cross-run npm reuse is provided by the gha layer cache instead.
 FROM node:24.15.0-slim AS frontend-builder
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./

@@ -108,11 +108,15 @@ jobs:
           cache-from: type=gha,scope=buildcache-${{ matrix.arch }}
           cache-to: type=gha,scope=buildcache-${{ matrix.arch }},mode=max
 
-      # Tier 1 observability — surfaces cache utilisation per run without
-      # external infra. `if: always()` so failures don't suppress diagnostic
-      # output. Adopt Tier 2 (weekly cache-inventory cron) only on revisit
-      # conditions per ADR.
-      - name: Cache disk usage
+      # Tier 1 observability — surfaces per-run buildkit content-store state
+      # without external infra. `if: always()` so failures don't suppress
+      # diagnostic output. Note: `buildx du` reports the *ephemeral* buildkit
+      # daemon's local content store on this runner, not the persistent gha
+      # cache pool — useful for spotting whether the build hydrated the local
+      # store correctly, but not a substitute for `gh api ...actions/caches`
+      # to inspect the persistent pool. Adopt Tier 2 (weekly cache-inventory
+      # cron against the persistent pool) only on revisit conditions per ADR.
+      - name: Local buildkit content store
         if: always()
         run: docker buildx du
 
@@ -124,9 +128,11 @@ jobs:
           {
             echo "## Build cache report (arch=${ARCH})"
             echo
-            echo "Cache disk usage above. Inspect 'Build and push by digest'"
-            echo "step log for per-stage \`CACHED\` lines to confirm cooker"
-            echo "layer reuse."
+            echo "\`docker buildx du\` above shows this runner's local buildkit"
+            echo "content store (ephemeral). Persistent gha cache state lives in"
+            echo "the repo-level Actions cache pool. To confirm cooker layer"
+            echo "reuse, inspect 'Build and push by digest' step log for"
+            echo "per-stage \`CACHED\` lines."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Export digest
