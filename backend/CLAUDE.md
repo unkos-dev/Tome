@@ -7,12 +7,12 @@ Port 5433 (5432 is taken by the host's shared-postgres).
 
 **Roles** (created by `docker/init-roles.sql` on first start):
 
-| Role | Connection | Purpose |
-|------|-----------|---------|
-| `reverie` | `postgres://reverie:reverie@localhost:5433/reverie_dev` | Schema owner. Runs migrations. Never used at runtime. |
-| `reverie_app` | `postgres://reverie_app:reverie_app@localhost:5433/reverie_dev` | Web application. RLS enforced. |
-| `reverie_ingestion` | `postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev` | Background pipeline. Scoped RLS. |
-| `reverie_readonly` | `postgres://reverie_readonly:reverie_readonly@localhost:5433/reverie_dev` | Debug/reporting. SELECT only. |
+| Role                | Connection                                                                  | Purpose                                               |
+| ------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `reverie`           | `postgres://reverie:reverie@localhost:5433/reverie_dev`                     | Schema owner. Runs migrations. Never used at runtime. |
+| `reverie_app`       | `postgres://reverie_app:reverie_app@localhost:5433/reverie_dev`             | Web application. RLS enforced.                        |
+| `reverie_ingestion` | `postgres://reverie_ingestion:reverie_ingestion@localhost:5433/reverie_dev` | Background pipeline. Scoped RLS.                      |
+| `reverie_readonly`  | `postgres://reverie_readonly:reverie_readonly@localhost:5433/reverie_dev`   | Debug/reporting. SELECT only.                         |
 
 The `tower_sessions` schema (created by migration
 `20260507000001_tower_sessions_postgres_store`) is RLS-exempt — sessions
@@ -88,7 +88,6 @@ workaround.
 
   Established type-binding tactics (see
   `backend/src/models/work.rs` and `backend/src/models/user.rs`):
-
   - Custom Postgres ENUMs from string params: bind as text, cast in
     SQL — `($N::text)::enum_type`. Avoids needing a Rust→PG-enum
     mapping for `&str`.
@@ -107,6 +106,7 @@ workaround.
   from `backend/`. CI guards against stale cache via
   `cargo sqlx prepare --check -- --tests`. Migrations in
   `backend/migrations/`.
+
 - **Testing:** Use `axum-test` for integration tests. Unit tests live alongside the
   code in `#[cfg(test)]` modules.
 - **DB-backed tests use `#[sqlx::test(migrations = "./migrations")]`.** The macro
@@ -127,6 +127,17 @@ workaround.
   with a shared `tower_sessions::MemoryStore` so the test can read it
   back before driving `/auth/callback`.
 - **Logging:** Use `tracing` with structured fields. Never `println!` or `eprintln!`.
+- **Operator env-var namespacing:** when introducing an operator-facing
+  knob that overlaps with a Rust ecosystem default (e.g. `RUST_LOG`),
+  prefer a `REVERIE_*` name and cascade with `REVERIE_*` taking
+  precedence over the ecosystem name. Resolve the cascade once in
+  `config.rs` so the precedence is a single source of truth.
+  Rationale: operators read the `REVERIE_*` namespace from staging
+  docs; devs reach for the ecosystem default. Cascading honours both
+  without forcing either audience to learn the other's convention.
+  Exception: ecosystem names that _are_ the canonical operator
+  surface (e.g. `DATABASE_URL` — the URL-spec name, no namespace
+  alternative) are honoured directly without cascade.
 - **Formatting:** `cargo fmt` is enforced by CI. Do not fight the formatter.
 - **Linting:** `cargo clippy -- -D warnings` is enforced by CI. Fix warnings, don't
   suppress them with `#[allow(...)]` unless there's a documented reason.

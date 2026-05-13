@@ -49,12 +49,14 @@ pub struct Config {
     /// Failed-ingestion quarantine directory
     /// (`REVERIE_QUARANTINE_PATH`, default `./quarantine`).
     pub quarantine_path: String,
-    /// Fallback log-filter directive, used when `RUST_LOG` is unset
-    /// or unparseable; mirrors `RUST_LOG` when it is set
-    /// (`RUST_LOG`, default `info`). The actual subscriber filter
-    /// is resolved by [`tracing_subscriber::EnvFilter::try_from_default_env`]
-    /// inside [`crate::run`], which re-reads `RUST_LOG` and falls
-    /// back to this field on miss.
+    /// Log-filter directive resolved from the environment with cascading
+    /// precedence: `REVERIE_LOG_LEVEL` > `RUST_LOG` > `"info"`. The
+    /// `REVERIE_*` operator namespace wins on conflict so staging docs
+    /// stay coherent; `RUST_LOG` is honoured as the ecosystem default for
+    /// developer convenience. The subscriber filter in [`crate::run`]
+    /// parses this string directly — no further env re-read — so the
+    /// precedence resolved here is the single source of truth for the
+    /// process lifetime.
     pub log_level: String,
     /// Per-pool connection cap (`REVERIE_DB_MAX_CONNECTIONS`, default
     /// `10`); applied identically to the primary, ingestion, and
@@ -429,7 +431,14 @@ impl Config {
             ingestion_path: get("REVERIE_INGESTION_PATH").unwrap_or_else(|| "./ingestion".into()),
             quarantine_path: get("REVERIE_QUARANTINE_PATH")
                 .unwrap_or_else(|| "./quarantine".into()),
-            log_level: get("RUST_LOG").unwrap_or_else(|| "info".into()),
+            // Operator namespace (REVERIE_LOG_LEVEL) wins over Rust ecosystem
+            // default (RUST_LOG) so staging docs that advertise the REVERIE_*
+            // prefix are honoured, while dev workflows keyed on RUST_LOG keep
+            // working via fallback. See backend/CLAUDE.md "Operator env-var
+            // namespacing" for the wider pattern.
+            log_level: get("REVERIE_LOG_LEVEL")
+                .or_else(|| get("RUST_LOG"))
+                .unwrap_or_else(|| "info".into()),
             db_max_connections: get("REVERIE_DB_MAX_CONNECTIONS")
                 .unwrap_or_else(|| "10".into())
                 .parse::<u32>()
@@ -872,6 +881,29 @@ mod tests {
         );
         assert_eq!(config.library_path, "/data/library");
         assert_eq!(config.log_level, "debug");
+    }
+
+    #[test]
+    fn from_env_prefers_reverie_log_level_over_rust_log() {
+        let vars = with_overrides(&[("REVERIE_LOG_LEVEL", "debug"), ("RUST_LOG", "trace")]);
+        let config = Config::from_source(&env_for_owned(&vars)).unwrap();
+        assert_eq!(
+            config.log_level, "debug",
+            "REVERIE_LOG_LEVEL should win when both env vars are set"
+        );
+    }
+
+    #[test]
+    fn from_env_uses_reverie_log_level_when_rust_log_unset() {
+        let vars = with_overrides(&[("REVERIE_LOG_LEVEL", "warn")]);
+        let config = Config::from_source(&env_for_owned(&vars)).unwrap();
+        assert_eq!(config.log_level, "warn");
+    }
+
+    #[test]
+    fn from_env_defaults_log_level_to_info_when_neither_var_set() {
+        let config = Config::from_source(&env_for(BASE_VARS)).unwrap();
+        assert_eq!(config.log_level, "info");
     }
 
     #[test]
