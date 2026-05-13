@@ -237,11 +237,18 @@ Open a superseding or amending ADR if any of the following happen:
   - [x] Step summary renders with cache report markdown on every
         build job
   - [x] actionlint clean on `docker-publish.yml`
-  - [ ] **First main-push after merge** — record actual wall-clock;
-        expect cold (cache-from miss under `refs/heads/main`
-        namespace).
-  - [ ] **Second main-push after merge** — expect warm with
-        `CACHED [cooker]` line.
+  - [x] **First main-push after merge** — cold as predicted.
+        [run 25774336055](https://github.com/unkos-dev/reverie/actions/runs/25774336055),
+        commit `2f62f65`, **6m34s** wall-clock. `cache-from` missed
+        under fresh `refs/heads/main` namespace; `cache-to` populated
+        ~943 MB across 24 entries (index + buildkit blobs).
+  - [x] **Second main-push after merge** — warm.
+        [run 25774704425](https://github.com/unkos-dev/reverie/actions/runs/25774704425),
+        commit `267eb8f` (UNK-245 merge — `Cargo.lock` + `Dockerfile`
+        unchanged), **1m02s** wall-clock (84 % reduction vs cold).
+        Build log shows `importing cache manifest from gha:...`
+        (cache-from hit) and 14+ `CACHED` lines across cooker + dep +
+        runtime layers.
   - [ ] **First tag-push after merge** — record actual wall-clock on
         both arches. Note in `debt/` if consistently cold.
 
