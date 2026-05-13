@@ -8,10 +8,6 @@
   "scripts": {
     "prepare": "husky"
   },
-  "lint-staged": {
-    "*.md": "markdownlint-cli2",
-    "*.{ts,tsx,js,jsx,json,yaml,yml,css,md}": "prettier --check"
-  },
   "devDependencies": {
     "@commitlint/cli": "^21.0.0",
     "@commitlint/config-conventional": "^21.0.0",
