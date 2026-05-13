@@ -69,10 +69,17 @@ server {
 
 ### Traefik (docker-compose labels)
 
+> **Image tag.** Reverie has not cut its first semver release, so the
+> conventional `latest` tag on `ghcr.io/unkos-dev/reverie` is
+> intentionally unset. The examples below pin `:main` (the floating
+> staging tag, **`linux/arm64` only** until the first amd64 multi-arch
+> release ships). Once `v0.1.0` is tagged, swap `:main` for `:vX.Y.Z`
+> from [Releases](https://github.com/unkos-dev/reverie/releases).
+
 ```yaml
 services:
   reverie:
-    image: ghcr.io/unkos-dev/reverie:latest
+    image: ghcr.io/unkos-dev/reverie:main
     environment:
       REVERIE_BEHIND_HTTPS: "true"
       # ... other Reverie config
@@ -89,8 +96,11 @@ services:
 For local dev or trusted-LAN-only deployments:
 
 ```bash
-docker run -p 3000:3000 ghcr.io/unkos-dev/reverie:latest
+docker run -p 3000:3000 ghcr.io/unkos-dev/reverie:main
 ```
+
+(Same `:main` caveat as the Traefik example above: floating staging tag,
+`linux/arm64` only, until the first `vX.Y.Z` release ships.)
 
 Leave `REVERIE_BEHIND_HTTPS=false`. Browsers connecting to `http://host:3000`
 will see uniform headers (XCTO, Referrer-Policy, Permissions-Policy,
