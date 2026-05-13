@@ -27,6 +27,9 @@ on:
       - "v*"
     branches:
       - main
+  # Manual trigger for ad-hoc rebuilds and feature-branch verification of
+  # workflow changes that wouldn't otherwise fire on a non-main push.
+  workflow_dispatch:
 
 permissions:
   contents: read
