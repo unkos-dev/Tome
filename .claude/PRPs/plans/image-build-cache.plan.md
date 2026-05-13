@@ -434,6 +434,56 @@ Wait for all checks to pass. Once green, stop. User reviews and merges. Do not m
 
 ## Downstream (post-merge)
 
-- Write ADR via `adr` skill: `adr/YYYY-MM-DD-image-build-cache.md`. Status `accepted` once PR merges. References spec + this plan.
+- Write ADR via `adr` skill: `adr/YYYY-MM-DD-image-build-cache.md`. Status `accepted` once PR merges. References spec + this plan. **Carry-over points enumerated below.**
 - Close Linear ticket UNK-246 with PR link.
 - Monitor next ~5 main-push runs for cache hit consistency. If cooker repeatedly cold-rebuilds without Cargo.lock churn: hit revisit conditions.
+
+---
+
+## ADR carry-over
+
+Points surfaced during planning + review that need to land in the ADR so they're not lost. Sourced from spec, brainstorming session, bot review triage on PR #233, and adversarial review post-implementation.
+
+### Decision rationale to record
+
+1. **cargo-chef over plain buildkit cache mounts** — alternative considered: `RUN --mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/build/target cargo build --release`. Rejected: cache mounts give cross-run cargo registry + target reuse but no dedicated layer for deps vs app code, so app-only edits still re-link. cargo-chef's planner/cooker split puts dep compilation in its own gha-exported layer. Cost: one pinned third-party crate + ~30-60s `cargo install` on cold chef-layer rebuilds.
+
+2. **Per-arch cache scope (`buildcache-${{ matrix.arch }}`)** — amd64 and arm64 builds keep independent cache namespaces. mode=max exports intermediate layers so partial-hit scenarios still benefit.
+
+3. **Scope key is branch-agnostic on purpose** — GHA Actions cache partitions entries by `GITHUB_REF` with read-fallback from base ref. Embedding `${{ github.ref_name }}` in the scope would _defeat_ that fallback. Same scope name across branches IS the correct shape; GHA-level partitioning handles cross-branch isolation. (Source: CodeRabbit review thread on PR #233, dismissed with this rationale.)
+
+4. **Tier 1 observability boundary** — `docker buildx du` + `$GITHUB_STEP_SUMMARY` pointer. No log-scraping, no external telemetry, no cron. Tier 2/3 (cache-inventory cron, OTLP, sccache stats) explicitly deferred to revisit conditions; cost not yet earned.
+
+5. **`workflow_dispatch` trigger added during implementation** — discovered Task 4 verification path was wrong (workflow only fired on `main` + `v*`); manual trigger enables ad-hoc rebuilds + feature-branch CI verification of workflow changes that wouldn't otherwise fire. Permanent addition.
+
+### Threats / failure modes to record
+
+1. **Cache miss is never a correctness risk** — `cache-from` miss = cold build; `cache-to` unreachable = silent fallthrough. No data corruption surface.
+
+2. **Floating base-image tags (`rust:1-slim`, `node:24.15.0-slim`, `debian:bookworm-slim`)** — patch/minor updates cascade-invalidate the `chef` layer (~30-60s `cargo install cargo-chef` re-run + cooker/backend-builder re-compile). Pre-existing pattern in this repo. Note in revisit conditions; digest-pinning is a project-wide call deferred to a follow-up.
+
+3. **Tag-push perf is unverified** — verification ran on feature-branch → feature-branch round-trip (cold 6m32s → warm 2m38s). First tag-push after merge reads from GHA cache with `base = main` fallback; behavior for tag refs is documented-ambiguous and empirical. Likely scenarios:
+   - Tag base-ref fallback hits main's cache → warm tag-push.
+   - Base-ref fallback misses for tag refs → cold tag-push on both arches (~5-7min × 2 native runners).
+   - Either is functionally correct; perf-only.
+   - Action: record actual tag-push wall-clock on first `v*` after merge. Add a `debt/` entry if tag-push consistently runs cold.
+
+4. **Plan deviations during implementation** — three items not in original plan:
+   - Local Docker sanity checks dropped (recorded as deviation in plan Task 1).
+   - `workflow_dispatch` trigger added (this carry-over section is the record).
+   - Frontend cache-mount comment + Tier 1 obs language rewritten after Greptile/CR review (commit `a46878f`).
+
+### Rollback path
+
+1. **Single-commit revert.** No infra to unwind, no data migration, no external state. Acceptance is "build still green"; no perf threshold the rollback needs to clear.
+
+### Revisit conditions (re-stated from spec for ADR convenience)
+
+Flip cache shape when:
+
+- Cooker not `CACHED` across consecutive src-only pushes → investigate 10GB cap eviction → consider `type=registry,ref=ghcr.io/unkos-dev/reverie:buildcache` for unbounded retention.
+- Backend dep count crosses ~150 OR cooker cold-rebuild crosses ~8min → consider sccache layer atop cargo-chef.
+- Per-PR builds added → re-evaluate (cache pollution risk).
+- buildkit/GHA cache backend deprecated or pricing changes → forced revisit; registry cache is obvious fallback.
+- External contributors arrive → CI cost visibility matters more; Tier 2 cache-inventory cron worth the effort.
+- Tag-push runs consistently cold (see #8) → consider explicit cross-ref cache hydration step on tag-push.
