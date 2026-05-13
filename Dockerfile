@@ -1,18 +1,40 @@
-# Stage 1: Build backend
-FROM rust:1-slim AS backend-builder
+# syntax=docker/dockerfile:1.7
+
+# Stage 1a: chef base — pinned cargo-chef install shared across planner + cooker.
+# Version pin prevents recipe.json schema drift between planner emit and cooker
+# consume. Bump in lockstep across both stages (they inherit from this base).
+FROM rust:1-slim AS chef
+RUN cargo install cargo-chef@0.1.77 --locked
 WORKDIR /build
+
+# Stage 1b: planner — emits recipe.json describing the dependency tree.
+# Cheap stage (no compilation); recipe.json hash drives cooker cache key.
+FROM chef AS planner
 COPY backend/ .
+RUN cargo chef prepare --recipe-path recipe.json
+
+# Stage 1c: cooker — compiles deps only, from recipe.json.
+# This layer is the cache target — warm hits skip ~3min of dep compilation.
+FROM chef AS cooker
+COPY --from=planner /build/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
+
+# Stage 1d: backend-builder — real build atop warm dep layer.
 # SQLX_OFFLINE forces sqlx::query! macros to validate against the committed
 # .sqlx/ cache instead of opening a database connection at compile time.
 # Cache regeneration: `cargo sqlx prepare -- --tests` against a populated dev DB.
+FROM cooker AS backend-builder
+COPY backend/ .
 ENV SQLX_OFFLINE=true
 RUN cargo build --release
 
-# Stage 2: Build frontend
+# Stage 2: Build frontend with buildkit npm cache mount.
+# /root/.npm survives across runs scoped to the builder, independent of layer
+# cache; mount is buildkit-scoped not layer-scoped so it survives base-image swaps.
 FROM node:24.15.0-slim AS frontend-builder
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json ./
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm npm ci
 COPY frontend/ .
 RUN npm run build
 
