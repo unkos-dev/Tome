@@ -152,20 +152,18 @@ where
         .with_state(state)
 }
 
-#[allow(
-    clippy::option_if_let_else,
-    reason = "nested match is more readable than chained Result::map_or_else for two-level fallback"
-)]
 fn resolve_log_filter(configured_level: &str) -> (EnvFilter, Option<String>) {
-    match EnvFilter::try_from_default_env() {
+    // Single source of truth: `configured_level` already encodes the
+    // REVERIE_LOG_LEVEL > RUST_LOG > "info" cascade resolved by
+    // Config::from_source. Re-reading RUST_LOG here would invert the
+    // precedence (ecosystem default beats operator namespace) and
+    // contradict the documented behaviour on the Config::log_level field.
+    match configured_level.parse::<EnvFilter>() {
         Ok(f) => (f, None),
-        Err(_) => match configured_level.parse::<EnvFilter>() {
-            Ok(f) => (f, None),
-            Err(e) => (
-                EnvFilter::new("info"),
-                Some(format!("{configured_level:?}: {e}")),
-            ),
-        },
+        Err(e) => (
+            EnvFilter::new("info"),
+            Some(format!("{configured_level:?}: {e}")),
+        ),
     }
 }
 
@@ -248,7 +246,8 @@ pub async fn run() -> anyhow::Result<()> {
     if let Some(err) = log_level_parse_err {
         tracing::warn!(
             error = %err,
-            "RUST_LOG is unparseable; falling back to info. Fix RUST_LOG to silence this warning."
+            "configured log level is unparseable; falling back to info. \
+             Fix REVERIE_LOG_LEVEL (or RUST_LOG fallback) to silence this warning."
         );
     }
 
@@ -367,13 +366,10 @@ mod tests {
         response.assert_text("ok");
     }
 
-    // resolve_log_filter consults RUST_LOG via try_from_default_env first and
-    // only falls back to the configured_level argument when RUST_LOG is unset
-    // or unparseable. Setting RUST_LOG inside a test would leak across the
-    // process; instead the tests below assume RUST_LOG is unset in `cargo
-    // test`, which is the project default. If a future contributor adds
-    // RUST_LOG to the test runner env, these will start exercising the
-    // env-takes-precedence path instead and may need adjusting.
+    // resolve_log_filter parses `configured_level` directly — env precedence
+    // (REVERIE_LOG_LEVEL > RUST_LOG > "info") is resolved upstream by
+    // Config::from_source, so these tests are insensitive to whatever env
+    // vars happen to be set in the test runner.
 
     #[test]
     fn resolve_log_filter_returns_no_error_for_valid_configured_level() {
