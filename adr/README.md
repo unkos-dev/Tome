@@ -29,3 +29,4 @@ An Architecture Decision Record (ADR) captures an important architecture decisio
 - [Adopt tower-sessions-sqlx-store for Postgres-backed sessions](2026-05-08-tower-sessions-sqlx-store.md) (proposed, 2026-05-08)
 - [Decouple staging Docker image publication from semver release tags](2026-05-12-decouple-staging-image-from-semver-releases.md) (superseded by [Per-architecture native runners with manifest-list merge](2026-05-12-platform-matrix-via-native-runners.md), 2026-05-12)
 - [Per-architecture native runners with manifest-list merge for Docker publish](2026-05-12-platform-matrix-via-native-runners.md) (accepted, 2026-05-12)
+- [GHA build cache + cargo-chef Dockerfile layering for Docker publish](2026-05-13-image-build-cache.md) (accepted, 2026-05-13)
