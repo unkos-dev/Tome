@@ -3,7 +3,14 @@
 # Stage 1a: chef base — pinned cargo-chef install shared across planner + cooker.
 # Version pin prevents recipe.json schema drift between planner emit and cooker
 # consume. Bump in lockstep across both stages (they inherit from this base).
-FROM rust:1-slim AS chef
+#
+# UNK-253: Debian codename pinned explicitly (-trixie) and MUST match the
+# runtime stage codename below. Unpinned `rust:1-slim` follows upstream's
+# default codename, which silently flipped bookworm → trixie and broke ARM64
+# `:main` images with `GLIBC_2.38 not found` against a bookworm runner. Both
+# stages share the same codename so the dynamic linker can resolve every
+# symbol the release binary requests.
+FROM rust:1-slim-trixie AS chef
 RUN cargo install cargo-chef@0.1.77 --locked
 WORKDIR /build
 
@@ -41,7 +48,8 @@ COPY frontend/ .
 RUN npm run build
 
 # Stage 3: Runtime
-FROM debian:bookworm-slim AS runtime
+# UNK-253: codename MUST match the builder stage above. See note on `chef`.
+FROM debian:trixie-slim AS runtime
 # UNK-165: curl is the HTTP client used by the HEALTHCHECK below; readiness
 # probe needs a working HTTP client baked in so docker / compose / Incus can
 # detect a successful migration window before flipping traffic.
