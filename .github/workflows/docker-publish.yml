@@ -290,20 +290,28 @@ jobs:
 
       - name: Emit rollback breadcrumb on failure
         if: failure()
+        env:
+          PRE_DIGEST: ${{ steps.pre.outputs.digest }}
         run: |
-          echo "::error::Deploy failed. To roll back, set REVERIE_VERSION in"
-          echo "::error::/opt/reverie-dev/.env.version to the pre-deploy digest"
-          echo "::error::and re-run docker compose up -d inside the LXC."
-          echo "::error::"
-          echo "::error::ROLLBACK: REVERIE_VERSION=${{ steps.pre.outputs.digest }}"
-          echo "::error::"
-          echo "::error::One-line rollback command (operator-side, in workspace shell):"
-          echo "::error::"
-          echo "::error::printf 'REVERIE_VERSION=%s\\n' '${{ steps.pre.outputs.digest }}' > /tmp/rb.env && \\"
-          echo "::error::  scp /tmp/rb.env oci-compute-1:/tmp/rb.env && \\"
-          echo "::error::  ssh oci-compute-1 'sudo incus file push /tmp/rb.env reverie-dev/opt/reverie-dev/.env.version && \\"
-          echo "::error::    sudo incus exec reverie-dev -- bash -lc \"cd /opt/reverie-dev && docker compose -f compose.yml -f compose.hawser.yml --env-file .env --env-file .env.version up -d\"' && \\"
-          echo "::error::  rm /tmp/rb.env"
+          # The error stream below contains a literal copy-paste rollback
+          # command. The `\n` and trailing `\` characters are intended to
+          # appear verbatim in the operator's terminal — they are not
+          # being expanded by this script. printf is used to emit them
+          # without ambiguity (echo's escape handling is shell-dependent).
+          printf '::error::%s\n' \
+            "Deploy failed. To roll back, set REVERIE_VERSION in" \
+            "/opt/reverie-dev/.env.version to the pre-deploy digest" \
+            "and re-run docker compose up -d inside the LXC." \
+            "" \
+            "ROLLBACK: REVERIE_VERSION=${PRE_DIGEST}" \
+            "" \
+            "One-line rollback command (operator-side, in workspace shell):" \
+            "" \
+            "printf 'REVERIE_VERSION=%s\\n' '${PRE_DIGEST}' > /tmp/rb.env && \\" \
+            "  scp /tmp/rb.env oci-compute-1:/tmp/rb.env && \\" \
+            "  ssh oci-compute-1 'sudo incus file push /tmp/rb.env reverie-dev/opt/reverie-dev/.env.version && \\" \
+            "    sudo incus exec reverie-dev -- bash -lc \"cd /opt/reverie-dev && docker compose -f compose.yml -f compose.hawser.yml --env-file .env --env-file .env.version up -d\"' && \\" \
+            "  rm /tmp/rb.env"
 
       - name: In-LXC /health/ready probe
         run: |
