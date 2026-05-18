@@ -251,14 +251,26 @@ jobs:
           # runner) and produce a confusing error downstream.
           incus exec reverie-dev:reverie-dev -- true
 
-      - name: Snapshot pre-deploy digest (rollback breadcrumb)
+      - name: Snapshot pre-deploy REVERIE_VERSION (rollback breadcrumb)
         id: pre
         run: |
           set -euo pipefail
-          digest=$(incus exec reverie-dev:reverie-dev -- \
-            docker inspect --format='{{.Image}}' reverie 2>/dev/null || echo "unknown")
-          echo "Pre-deploy digest: $digest"
-          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          # Capture the REVERIE_VERSION line from the LXC's .env.version.
+          # That file is what `docker compose --env-file .env.version` reads
+          # to resolve the floating tag (`:main`, `sha-<7>`, etc.). Storing
+          # its current contents — not the local docker image ID — gives
+          # the operator a value they can drop straight back into the same
+          # file to recover the previous deploy. Fallback to "unknown" if
+          # the file is missing or malformed.
+          content=$(incus exec reverie-dev:reverie-dev -- \
+            cat /opt/reverie-dev/.env.version 2>/dev/null || true)
+          version=$(printf '%s\n' "$content" \
+            | grep -E '^REVERIE_VERSION=' \
+            | head -1 \
+            | cut -d= -f2- || true)
+          version="${version:-unknown}"
+          echo "Pre-deploy REVERIE_VERSION: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Pull and reconcile reverie compose inside LXC
         run: |
@@ -291,7 +303,7 @@ jobs:
       - name: Emit rollback breadcrumb on failure
         if: failure()
         env:
-          PRE_DIGEST: ${{ steps.pre.outputs.digest }}
+          PRE_VERSION: ${{ steps.pre.outputs.version }}
         run: |
           # The error stream below contains a literal copy-paste rollback
           # command. The `\n` and trailing `\` characters are intended to
@@ -299,15 +311,15 @@ jobs:
           # being expanded by this script. printf is used to emit them
           # without ambiguity (echo's escape handling is shell-dependent).
           printf '::error::%s\n' \
-            "Deploy failed. To roll back, set REVERIE_VERSION in" \
-            "/opt/reverie-dev/.env.version to the pre-deploy digest" \
-            "and re-run docker compose up -d inside the LXC." \
+            "Deploy failed. To roll back, restore the pre-deploy" \
+            "REVERIE_VERSION in /opt/reverie-dev/.env.version and re-run" \
+            "docker compose up -d inside the LXC." \
             "" \
-            "ROLLBACK: REVERIE_VERSION=${PRE_DIGEST}" \
+            "ROLLBACK: REVERIE_VERSION=${PRE_VERSION}" \
             "" \
             "One-line rollback command (operator-side, in workspace shell):" \
             "" \
-            "printf 'REVERIE_VERSION=%s\\n' '${PRE_DIGEST}' > /tmp/rb.env && \\" \
+            "printf 'REVERIE_VERSION=%s\\n' '${PRE_VERSION}' > /tmp/rb.env && \\" \
             "  scp /tmp/rb.env oci-compute-1:/tmp/rb.env && \\" \
             "  ssh oci-compute-1 'sudo incus file push /tmp/rb.env reverie-dev/opt/reverie-dev/.env.version && \\" \
             "    sudo incus exec reverie-dev -- bash -lc \"cd /opt/reverie-dev && docker compose -f compose.yml -f compose.hawser.yml --env-file .env --env-file .env.version up -d\"' && \\" \
