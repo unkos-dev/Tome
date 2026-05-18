@@ -35,12 +35,15 @@ permissions:
   contents: read
   packages: write
 
-# cancel-in-progress trades intermediate `:sha-<7>` pins on fast-follow
-# `main` pushes for build-queue throughput. SHA pins are therefore
-# best-effort, not a guaranteed log of every commit that landed.
+# Serialize per-ref runs but do not cancel in-flight builds. The
+# `deploy-staging` job runs in this same workflow on `main` push; a
+# workflow-level `cancel-in-progress: true` would propagate to all jobs
+# in the cancelled run, including a near-complete deploy. Job-level
+# concurrency cannot shield a job from workflow-level cancellation.
+# Build is idempotent — sequential runs with no cancellation is the
+# correct trade for main deploys (UNK-231 plan rev 3, D2 fix).
 concurrency:
   group: docker-publish-${{ github.ref }}
-  cancel-in-progress: true
 
 env:
   REGISTRY: ghcr.io
@@ -199,3 +202,115 @@ jobs:
           IMAGE_REF: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
         run: |
           docker buildx imagetools inspect "${IMAGE_REF}:${{ steps.meta.outputs.version }}"
+
+  # Deploy staging: pull the freshly-published :main image inside the
+  # reverie-dev LXC on oci-compute-1 and reconcile compose. Runs on a
+  # self-hosted runner scoped to this repo (oci-arm64-reverie-deployer).
+  # Gate: main-branch push by junkovich only (NOT tags, NOT pull_request,
+  # NOT workflow_dispatch, NOT bot-merged PRs). Under the solo-maintainer
+  # threat model the actor check is the load-bearing authorization
+  # control; it pairs with .github/CODEOWNERS scoping workflows/** to
+  # @junkovich. See homelab UNK-231 plan rev 3.
+  #
+  # No job-level concurrency block: revision-3 fix dropped the
+  # workflow-level `cancel-in-progress: true` upstream. Job-level
+  # concurrency would not shield this job from workflow-level
+  # cancellation regardless. Build is idempotent; sequential runs are
+  # the correct shape for main deploys.
+  deploy-staging:
+    needs: merge
+    runs-on: [self-hosted, linux, arm64, reverie-dev-deployer]
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main' &&
+      github.actor == 'junkovich'
+    timeout-minutes: 10
+    steps:
+      # Configure the Incus TLS remote per-job. The runner image
+      # (myoung34/github-runner) lacks an /etc/runner.d hook convention
+      # that the plan originally assumed, so we install the bind-mounted
+      # cert/key into the runner's incus client dir on every run. The
+      # cert and key are mounted read-only at /run/secrets/incus-{cert,key}
+      # by the runner compose unit on oci-compute-1; the remote endpoint
+      # 10.123.0.1:8443 is the Incus daemon on the host with a
+      # --restricted --projects reverie-dev trust scope. Idempotent: skip
+      # `remote add` if it already exists.
+      - name: Configure Incus TLS remote
+        run: |
+          set -euo pipefail
+          install -d -m 0700 "${HOME}/.config/incus"
+          install -m 0600 /run/secrets/incus-cert "${HOME}/.config/incus/client.crt"
+          install -m 0600 /run/secrets/incus-key  "${HOME}/.config/incus/client.key"
+          if ! incus remote list --format csv | cut -d, -f1 | grep -qx 'reverie-dev'; then
+            incus remote add reverie-dev https://10.123.0.1:8443 \
+              --accept-certificate --auth-type=tls
+          fi
+          # Probe: fail loud if the remote is not reachable. A silent
+          # failure here would let subsequent `incus exec` calls fall
+          # back to the local daemon (which does not exist on this
+          # runner) and produce a confusing error downstream.
+          incus exec reverie-dev:reverie-dev -- true
+
+      - name: Snapshot pre-deploy digest (rollback breadcrumb)
+        id: pre
+        run: |
+          set -euo pipefail
+          digest=$(incus exec reverie-dev:reverie-dev -- \
+            docker inspect --format='{{.Image}}' reverie 2>/dev/null || echo "unknown")
+          echo "Pre-deploy digest: $digest"
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Pull and reconcile reverie compose inside LXC
+        run: |
+          incus exec reverie-dev:reverie-dev -- bash -lc '
+            set -euo pipefail
+            cd /opt/reverie-dev
+            docker compose -f compose.yml -f compose.hawser.yml \
+              --env-file .env --env-file .env.version pull reverie
+            docker compose -f compose.yml -f compose.hawser.yml \
+              --env-file .env --env-file .env.version up -d
+          '
+
+      - name: Wait for reverie healthy
+        id: health
+        run: |
+          for i in $(seq 1 30); do
+            status=$(incus exec reverie-dev:reverie-dev -- \
+              docker inspect --format='{{.State.Health.Status}}' reverie 2>/dev/null || echo "missing")
+            if [[ "$status" == "healthy" ]]; then
+              echo "reverie healthy after ${i}0s"
+              exit 0
+            fi
+            echo "[$i/30] reverie status=$status — waiting"
+            sleep 10
+          done
+          echo "::error::reverie did not reach healthy within 300s"
+          incus exec reverie-dev:reverie-dev -- docker logs --tail 100 reverie || true
+          exit 1
+
+      - name: Emit rollback breadcrumb on failure
+        if: failure()
+        run: |
+          echo "::error::Deploy failed. To roll back, set REVERIE_VERSION in"
+          echo "::error::/opt/reverie-dev/.env.version to the pre-deploy digest"
+          echo "::error::and re-run docker compose up -d inside the LXC."
+          echo "::error::"
+          echo "::error::ROLLBACK: REVERIE_VERSION=${{ steps.pre.outputs.digest }}"
+          echo "::error::"
+          echo "::error::One-line rollback command (operator-side, in workspace shell):"
+          echo "::error::"
+          echo "::error::printf 'REVERIE_VERSION=%s\\n' '${{ steps.pre.outputs.digest }}' > /tmp/rb.env && \\"
+          echo "::error::  scp /tmp/rb.env oci-compute-1:/tmp/rb.env && \\"
+          echo "::error::  ssh oci-compute-1 'sudo incus file push /tmp/rb.env reverie-dev/opt/reverie-dev/.env.version && \\"
+          echo "::error::    sudo incus exec reverie-dev -- bash -lc \"cd /opt/reverie-dev && docker compose -f compose.yml -f compose.hawser.yml --env-file .env --env-file .env.version up -d\"' && \\"
+          echo "::error::  rm /tmp/rb.env"
+
+      - name: In-LXC /health/ready probe
+        run: |
+          response=$(incus exec reverie-dev:reverie-dev -- \
+            curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:3000/health/ready --max-time 5)
+          if [[ "$response" != "200" ]]; then
+            echo "::error::/health/ready returned $response, expected 200"
+            exit 1
+          fi
+          echo "/health/ready returned 200"
