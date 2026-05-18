@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.24
 
 # Stage 1a: chef base — pinned cargo-chef install shared across planner + cooker.
 # Version pin prevents recipe.json schema drift between planner emit and cooker
