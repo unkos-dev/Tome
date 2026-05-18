@@ -18,6 +18,19 @@
 //! provider can induce Reverie to trust attacker-controlled JWKS, enabling
 //! ID-token forgery. This is an operator-level threat, not a user-level one;
 //! the mitigation is operator key management and issuer selection.
+//!
+//! # Threat model — WAF reachability
+//!
+//! The HTTP client used for discovery and token exchange sends an explicit
+//! `User-Agent: reverie/<version>` header. `reqwest` does **not** set a
+//! default `User-Agent` when one is not configured on the builder, and
+//! common WAFs (e.g. Cloudflare's default scanner blocklist) drop
+//! requests with an empty `User-Agent`. An empty header produces a
+//! startup-time `403 Forbidden` on OIDC discovery and crashes the boot
+//! loop, presenting as an availability failure rather than a security
+//! one. The fixed UA also identifies the client to upstream IdP
+//! operators so misbehaviour traces to a known agent. See
+//! [`adr/2026-05-18-outbound-http-user-agent.md`](../../../../adr/2026-05-18-outbound-http-user-agent.md).
 
 use anyhow::{Context, Result};
 use openidconnect::core::{CoreClient, CoreProviderMetadata};
@@ -70,8 +83,17 @@ pub type OidcClient = openidconnect::Client<
 >;
 
 /// Build an HTTP client for OIDC discovery and token exchange.
+///
+/// The explicit `User-Agent` header is load-bearing: see the
+/// "WAF reachability" section in the module-level docs. Removing it
+/// reopens [UNK-255](https://linear.app/unkos/issue/UNK-255).
 fn http_client() -> Result<openidconnect::reqwest::Client> {
+    // THREAT: an empty User-Agent is matched by common WAF scanner blocklists
+    // (Cloudflare, AWS WAF). Set a stable, identifiable UA so OIDC discovery
+    // succeeds behind a WAF and upstream IdP operators can trace requests
+    // back to a Reverie deployment.
     openidconnect::reqwest::ClientBuilder::new()
+        .user_agent(concat!("reverie/", env!("CARGO_PKG_VERSION")))
         .build()
         .context("failed to build OIDC HTTP client")
 }
@@ -173,6 +195,41 @@ mod tests {
     /// port) so a regression of the validation ordering would surface as
     /// `OIDC discovery failed: ...` (connection refused) rather than the
     /// `invalid OIDC_REDIRECT_URI` we expect.
+    /// Regression test: the OIDC HTTP client must send a non-empty
+    /// `User-Agent` header. Empty UA is matched by common WAF rules
+    /// (Cloudflare's default scanner-block list includes `http.user_agent
+    /// eq ""`), causing OIDC discovery to 403 at startup behind such a
+    /// WAF. The wiremock matcher returns 200 only on `reverie/<semver>`;
+    /// any other UA — including the empty string `reqwest` sends by
+    /// default when `.user_agent(...)` is not called on the builder —
+    /// falls through to wiremock's default 404 and trips the assert.
+    #[tokio::test]
+    async fn http_client_sends_reverie_user_agent() {
+        use wiremock::matchers::{header_regex, method};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(header_regex("user-agent", r"^reverie/\d+\.\d+\.\d+"))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+
+        let client = http_client().expect("build OIDC HTTP client");
+        let response = client
+            .get(format!("{}/probe", server.uri()))
+            .send()
+            .await
+            .expect("issue probe request");
+
+        assert_eq!(
+            response.status().as_u16(),
+            200,
+            "expected wiremock to match `reverie/<version>` User-Agent; \
+             a missing or different UA would 404"
+        );
+    }
+
     #[tokio::test]
     async fn init_oidc_client_fails_fast_on_invalid_redirect_uri() {
         let config = config_with_overrides(&[
