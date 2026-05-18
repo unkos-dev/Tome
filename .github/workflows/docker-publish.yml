@@ -206,24 +206,36 @@ jobs:
   # Deploy staging: pull the freshly-published :main image inside the
   # reverie-dev LXC on oci-compute-1 and reconcile compose. Runs on a
   # self-hosted runner scoped to this repo (oci-arm64-reverie-deployer).
-  # Gate: main-branch push by junkovich only (NOT tags, NOT pull_request,
-  # NOT workflow_dispatch, NOT bot-merged PRs). Under the solo-maintainer
-  # threat model the actor check is the load-bearing authorization
-  # control; it pairs with .github/CODEOWNERS scoping workflows/** to
-  # @junkovich. See homelab UNK-231 plan rev 3.
   #
-  # No job-level concurrency block: revision-3 fix dropped the
-  # workflow-level `cancel-in-progress: true` upstream. Job-level
-  # concurrency would not shield this job from workflow-level
-  # cancellation regardless. Build is idempotent; sequential runs are
-  # the correct shape for main deploys.
+  # Gate: main-branch push events only (NOT tags, NOT pull_request,
+  # NOT workflow_dispatch). The actor allowlist below admits:
+  #   - junkovich    : manual merges (feature PRs, ad-hoc deploys via
+  #                    empty-commit push).
+  #   - renovate[bot]: Renovate auto-merges. Per .github/renovate.json
+  #                    these are gated to patch updates only — patch
+  #                    on github-actions/dockerfile/docker-compose at
+  #                    any version, and patch on cargo/npm at v1.0+
+  #                    (zerover 0.x.y deps stay manual). reverie-dev
+  #                    is a dev/staging target, not production, so
+  #                    auto-deploy after the existing PR-level CI
+  #                    gates (audit + tests + smoke + CodeQL +
+  #                    Renovate's `minimumReleaseAge: 3 days`) is the
+  #                    right trade. See homelab UNK-231 plan rev 3 D3
+  #                    for the original strict-gate rationale (prod
+  #                    threat model) — relaxed here because the LXC
+  #                    is not prod.
+  #
+  # No job-level concurrency block: dropping the workflow-level
+  # `cancel-in-progress: true` upstream makes a job-level override
+  # unnecessary. Build is idempotent; sequential runs are the correct
+  # shape for main deploys.
   deploy-staging:
     needs: merge
     runs-on: [self-hosted, linux, arm64, reverie-dev-deployer]
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/main' &&
-      github.actor == 'junkovich'
+      (github.actor == 'junkovich' || github.actor == 'renovate[bot]')
     timeout-minutes: 10
     steps:
       # Configure the Incus TLS remote per-job. The runner image
