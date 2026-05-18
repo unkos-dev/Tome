@@ -189,12 +189,6 @@ mod tests {
         Config::from_source(&|k| vars.get(k).cloned()).expect("test Config must build")
     }
 
-    /// Regression test for the fail-fast validation order: a malformed
-    /// `OIDC_REDIRECT_URI` must surface before any discovery network call is
-    /// attempted. The issuer URL is set to `http://127.0.0.1:1` (a closed
-    /// port) so a regression of the validation ordering would surface as
-    /// `OIDC discovery failed: ...` (connection refused) rather than the
-    /// `invalid OIDC_REDIRECT_URI` we expect.
     /// Regression test: the OIDC HTTP client must send a non-empty
     /// `User-Agent` header. Empty UA is matched by common WAF rules
     /// (Cloudflare's default scanner-block list includes `http.user_agent
@@ -230,6 +224,12 @@ mod tests {
         );
     }
 
+    /// Regression test for the fail-fast validation order: a malformed
+    /// `OIDC_REDIRECT_URI` must surface before any discovery network call is
+    /// attempted. The issuer URL is set to `http://127.0.0.1:1` (a closed
+    /// port) so a regression of the validation ordering would surface as
+    /// `OIDC discovery failed: ...` (connection refused) rather than the
+    /// `invalid OIDC_REDIRECT_URI` we expect.
     #[tokio::test]
     async fn init_oidc_client_fails_fast_on_invalid_redirect_uri() {
         let config = config_with_overrides(&[
