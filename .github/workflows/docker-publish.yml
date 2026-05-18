@@ -301,7 +301,7 @@ jobs:
           exit 1
 
       - name: Emit rollback breadcrumb on failure
-        if: failure()
+        if: failure() && steps.pre.outputs.version != '' && steps.pre.outputs.version != 'unknown'
         env:
           PRE_VERSION: ${{ steps.pre.outputs.version }}
         run: |
@@ -324,6 +324,20 @@ jobs:
             "  ssh oci-compute-1 'sudo incus file push /tmp/rb.env reverie-dev/opt/reverie-dev/.env.version && \\" \
             "    sudo incus exec reverie-dev -- bash -lc \"cd /opt/reverie-dev && docker compose -f compose.yml -f compose.hawser.yml --env-file .env --env-file .env.version up -d\"' && \\" \
             "  rm /tmp/rb.env"
+
+      # Companion to the breadcrumb step above: fire when the deploy
+      # failed *and* the snapshot step could not capture a usable
+      # REVERIE_VERSION (file missing, malformed, or LXC inaccessible
+      # at snapshot time). Emitting the full rollback command in that
+      # case would print `REVERIE_VERSION=unknown`, which would push
+      # the LXC into an unpullable state if the operator pasted it
+      # blindly. A plain warning is safer.
+      - name: Note rollback target unavailable
+        if: failure() && (steps.pre.outputs.version == '' || steps.pre.outputs.version == 'unknown')
+        run: |
+          echo "::warning::Deploy failed before a usable pre-deploy REVERIE_VERSION was captured."
+          echo "::warning::Skipping the copy-paste rollback command — the snapshot value would resolve to 'unknown'."
+          echo "::warning::Recover manually: inspect /opt/reverie-dev/.env.version inside the LXC and pick a known-good tag from GHCR."
 
       - name: In-LXC /health/ready probe
         run: |
