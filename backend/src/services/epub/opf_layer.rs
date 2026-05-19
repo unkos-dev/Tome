@@ -172,6 +172,7 @@ pub fn validate(
                         let text = reader
                             .read_text(e.name())
                             .ok()
+                            .and_then(|t| t.decode().ok())
                             .map(|t| t.trim().to_string())
                             .filter(|s| !s.is_empty());
                         if let Some(name) = text {
@@ -190,6 +191,7 @@ pub fn validate(
                                 reader
                                     .read_text(e.name())
                                     .ok()
+                                    .and_then(|t| t.decode().ok())
                                     .map(|t| t.trim().to_string())
                                     .filter(|s| !s.is_empty())
                             });
@@ -202,6 +204,7 @@ pub fn validate(
                             reader
                                 .read_text(e.name())
                                 .ok()
+                                .and_then(|t| t.decode().ok())
                                 .map(|t| t.trim().to_string())
                                 .filter(|s| !s.is_empty())
                         });
@@ -294,6 +297,7 @@ pub fn validate(
                 let text = reader
                     .read_text(e.name())
                     .ok()
+                    .and_then(|t| t.decode().ok())
                     .map(|t| t.trim().to_string())
                     .filter(|s| !s.is_empty());
 
