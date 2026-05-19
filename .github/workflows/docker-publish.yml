@@ -312,6 +312,24 @@ jobs:
           incus exec reverie-dev:reverie-dev -- docker logs --tail 100 reverie || true
           exit 1
 
+      - name: Verify deployed image revision label
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          actual=$(incus exec reverie-dev:reverie-dev -- \
+            docker inspect --format='{{ index .Config.Labels "org.opencontainers.image.revision" }}' reverie 2>/dev/null || echo "")
+          if [[ -z "$actual" ]]; then
+            echo "::error::reverie image has no org.opencontainers.image.revision label"
+            exit 1
+          fi
+          if [[ "$actual" != "$EXPECTED_SHA" ]]; then
+            echo "::error::deployed image revision ($actual) does not match merged commit ($EXPECTED_SHA)"
+            echo "::error::stale tag, failed pull, or cache poisoning suspected — investigate before declaring deploy green"
+            exit 1
+          fi
+          echo "image revision label matches merged commit ($EXPECTED_SHA)"
+
       - name: Emit rollback breadcrumb on failure
         if: failure() && steps.pre.outputs.version != '' && steps.pre.outputs.version != 'unknown'
         env:
